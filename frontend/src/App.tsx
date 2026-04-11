@@ -481,6 +481,7 @@ export default function App() {
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
   const [activePage, setActivePage] = useState<"dashboard" | "expenses">("dashboard");
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -620,6 +621,7 @@ export default function App() {
       setAuthLoading(false);
       setAuthMessage("");
       setIsProfileMenuOpen(false);
+      setIsDeleteAccountModalOpen(false);
 
       if (!user) {
         setExpenses([]);
@@ -779,12 +781,6 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm("Delete your account and all stored expense data? This cannot be undone.");
-
-    if (!confirmed) {
-      return;
-    }
-
     setIsDeletingAccount(true);
     setErrorMessage("");
     setStatusMessage("");
@@ -794,6 +790,7 @@ export default function App() {
       clearCustomCategories(currentUser.uid);
       writePendingSubmission(null);
       setIsProfileMenuOpen(false);
+      setIsDeleteAccountModalOpen(false);
       await deleteUser(currentUser);
       setStatusMessage("Your account and stored data were deleted.");
     } catch (error) {
@@ -806,6 +803,19 @@ export default function App() {
     } finally {
       setIsDeletingAccount(false);
     }
+  }
+
+  function openDeleteAccountModal() {
+    setIsProfileMenuOpen(false);
+    setIsDeleteAccountModalOpen(true);
+  }
+
+  function closeDeleteAccountModal() {
+    if (isDeletingAccount) {
+      return;
+    }
+
+    setIsDeleteAccountModalOpen(false);
   }
 
   function handleCategorySelect(category: CategoryOption) {
@@ -1151,8 +1161,8 @@ export default function App() {
                   <button type="button" className="secondary-button shell-action-button signout-button" onClick={() => void handleSignOut()}>
                     Sign out
                   </button>
-                  <button type="button" className="secondary-button shell-action-button destructive-shell-button" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>
-                    {isDeletingAccount ? "Deleting account..." : "Delete account"}
+                  <button type="button" className="secondary-button shell-action-button destructive-shell-button" disabled={isDeletingAccount} onClick={openDeleteAccountModal}>
+                    Delete account
                   </button>
                 </div>
               </div>
@@ -1160,6 +1170,34 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      {isDeleteAccountModalOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={closeDeleteAccountModal}>
+          <section
+            className="card confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-account-modal-title"
+            aria-describedby="delete-account-modal-copy"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="eyebrow">Confirm deletion</p>
+            <h2 id="delete-account-modal-title">Delete your account?</h2>
+            <p id="delete-account-modal-copy" className="confirm-modal-copy">
+              This will permanently remove your account and all stored expenses. This action cannot be undone.
+            </p>
+
+            <div className="confirm-modal-actions">
+              <button type="button" className="ghost-button confirm-modal-button" onClick={closeDeleteAccountModal} disabled={isDeletingAccount}>
+                Keep account
+              </button>
+              <button type="button" className="secondary-button confirm-modal-button destructive-shell-button" onClick={() => void handleDeleteAccount()} disabled={isDeletingAccount}>
+                {isDeletingAccount ? "Deleting account..." : "Yes, delete it"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {activePage === "dashboard" ? (
         <>

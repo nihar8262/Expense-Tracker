@@ -490,6 +490,50 @@ textarea {
   gap: 0.6rem;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(20, 28, 23, 0.38);
+  backdrop-filter: blur(10px);
+}
+
+.confirm-modal {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top right, rgba(237, 197, 122, 0.18), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 243, 232, 0.9));
+}
+
+.confirm-modal h2 {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  line-height: 0.98;
+}
+
+.confirm-modal-copy {
+  margin: 0;
+  color: var(--muted);
+}
+
+.confirm-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.confirm-modal-button {
+  min-width: 140px;
+}
+
 .shell-meta h2 {
   font-size: 1rem;
 }
@@ -1223,6 +1267,10 @@ th {
 
   .profile-dropdown::before {
     display: none;
+  }
+
+  .confirm-modal-actions {
+    display: grid;
   }
 
   .shell-action-button {
