@@ -1,11 +1,9 @@
-import { resolve } from "node:path";
-import { initializeDatabase } from "./db.js";
 import { createApp } from "./app.js";
+import { createPostgresExpenseStore } from "./store/postgres.js";
 
 const port = Number(process.env.PORT ?? 4101);
-const databasePath = resolve(process.cwd(), "data", "expenses.db");
-const database = initializeDatabase(databasePath);
-const app = createApp(database);
+const store = createPostgresExpenseStore();
+const app = createApp(store);
 
 const server = app.listen(port, () => {
   console.log(`Expense API listening on http://localhost:${port}`);
@@ -13,7 +11,6 @@ const server = app.listen(port, () => {
 
 function shutdown() {
   server.close(() => {
-    database.close();
     process.exit(0);
   });
 }

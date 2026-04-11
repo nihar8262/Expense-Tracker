@@ -21,7 +21,7 @@ type PendingSubmission = {
   payload: ExpenseForm;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4101";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const PENDING_SUBMISSION_STORAGE_KEY = "expense-tracker.pending-submission";
 
 const initialFormState: ExpenseForm = {
@@ -32,7 +32,9 @@ const initialFormState: ExpenseForm = {
 };
 
 function buildExpensesUrl(category: string, sortNewestFirst: boolean): string {
-  const url = new URL(`${API_BASE_URL}/expenses`);
+  const url = API_BASE_URL
+    ? new URL("/api/expenses", API_BASE_URL)
+    : new URL("/api/expenses", window.location.origin);
 
   if (category) {
     url.searchParams.set("category", category);
@@ -91,7 +93,8 @@ class ApiError extends Error {
 }
 
 async function createExpense(payload: ExpenseForm, idempotencyKey: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/expenses`, {
+  const endpoint = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL).toString() : "/api/expenses";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

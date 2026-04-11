@@ -1,29 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import { initializeDatabase } from "../src/db.js";
-
-const tempDirectories: string[] = [];
-
-afterEach(() => {
-  while (tempDirectories.length > 0) {
-    const directory = tempDirectories.pop();
-
-    if (directory) {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  }
-});
+import { createMemoryExpenseStore } from "../src/store/memory.js";
 
 function buildApp() {
-  const directory = mkdtempSync(join(tmpdir(), "expense-tracker-"));
-  tempDirectories.push(directory);
-
-  const database = initializeDatabase(join(directory, "expenses.db"));
-  return createApp(database);
+  return createApp(createMemoryExpenseStore());
 }
 
 describe("expenses API", () => {
@@ -37,12 +18,12 @@ describe("expenses API", () => {
     };
 
     const firstResponse = await request(app)
-      .post("/expenses")
+      .post("/api/expenses")
       .set("Idempotency-Key", "same-key")
       .send(payload);
 
     const secondResponse = await request(app)
-      .post("/expenses")
+      .post("/api/expenses")
       .set("Idempotency-Key", "same-key")
       .send(payload);
 
@@ -50,7 +31,7 @@ describe("expenses API", () => {
     expect(secondResponse.status).toBe(200);
     expect(secondResponse.body.expense.id).toBe(firstResponse.body.expense.id);
 
-    const listResponse = await request(app).get("/expenses");
+    const listResponse = await request(app).get("/api/expenses");
     expect(listResponse.body.expenses).toHaveLength(1);
   });
 
@@ -58,7 +39,7 @@ describe("expenses API", () => {
     const app = buildApp();
 
     await request(app)
-      .post("/expenses")
+      .post("/api/expenses")
       .set("Idempotency-Key", "one")
       .send({
         amount: "400.00",
@@ -68,7 +49,7 @@ describe("expenses API", () => {
       });
 
     await request(app)
-      .post("/expenses")
+      .post("/api/expenses")
       .set("Idempotency-Key", "two")
       .send({
         amount: "120.00",
@@ -78,7 +59,7 @@ describe("expenses API", () => {
       });
 
     await request(app)
-      .post("/expenses")
+      .post("/api/expenses")
       .set("Idempotency-Key", "three")
       .send({
         amount: "80.00",
@@ -87,11 +68,37 @@ describe("expenses API", () => {
         date: "2026-04-11"
       });
 
-    const response = await request(app).get("/expenses").query({ category: "Food", sort: "date_desc" });
+    const response = await request(app).get("/api/expenses").query({ category: "Food", sort: "date_desc" });
 
     expect(response.status).toBe(200);
     expect(response.body.expenses).toHaveLength(2);
     expect(response.body.expenses[0].date).toBe("2026-04-11");
     expect(response.body.expenses[1].date).toBe("2026-04-09");
+  });
+
+  it("rejects a reused idempotency key for a different payload", async () => {
+    const app = buildApp();
+
+    await request(app)
+      .post("/api/expenses")
+      .set("Idempotency-Key", "conflict-key")
+      .send({
+        amount: "50.00",
+        category: "Food",
+        description: "Tea",
+        date: "2026-04-11"
+      });
+
+    const response = await request(app)
+      .post("/api/expenses")
+      .set("Idempotency-Key", "conflict-key")
+      .send({
+        amount: "60.00",
+        category: "Food",
+        description: "Coffee",
+        date: "2026-04-11"
+      });
+
+    expect(response.status).toBe(409);
   });
 });
