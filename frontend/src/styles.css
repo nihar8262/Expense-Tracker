@@ -138,7 +138,6 @@ textarea {
   font-size: 0.82rem;
   font-weight: 700;
 }
-
 .preview-total {
   display: grid;
   gap: 0.2rem;
@@ -374,6 +373,7 @@ textarea {
   background: transparent;
   color: var(--muted);
   font-weight: 700;
+  text-decoration: none;
   border-radius: 999px;
   padding: 0.8rem 1.1rem;
   cursor: pointer;
@@ -700,6 +700,7 @@ textarea {
 .insight-card {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .spotlight-card {
@@ -708,6 +709,16 @@ textarea {
   background:
     radial-gradient(circle at top right, rgba(31, 111, 80, 0.14), transparent 42%),
     rgba(255, 255, 255, 0.8);
+}
+
+.activity-highlight {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(29, 42, 34, 0.08);
+  min-width: 0;
 }
 
 .spotlight-card h2,
@@ -725,7 +736,6 @@ textarea {
 }
 
 .metric-card p,
-.spotlight-card .lede,
 .activity-highlight p {
   margin: 0;
   color: var(--muted);
@@ -737,6 +747,21 @@ textarea {
   letter-spacing: 0.08em;
   font-size: 0.78rem;
   color: var(--accent-strong);
+}
+
+.activity-highlight strong {
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.activity-amount {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(31, 111, 80, 0.1);
+  color: var(--accent-strong);
+  font-weight: 700;
 }
 
 .trend-card {
@@ -827,6 +852,7 @@ textarea {
 }
 
 .trend-summary-item {
+  position: relative;
   display: grid;
   gap: 0.2rem;
   padding: 0.9rem;
@@ -835,12 +861,92 @@ textarea {
   border: 1px solid rgba(29, 42, 34, 0.08);
 }
 
+.trend-summary-item.is-interactive {
+  cursor: pointer;
+}
+
+.trend-summary-item.is-interactive:hover,
+.trend-summary-item.is-interactive:focus-visible {
+  border-color: rgba(23, 76, 56, 0.16);
+  box-shadow: 0 16px 28px rgba(63, 72, 65, 0.1);
+  outline: none;
+}
+
 .trend-summary-item strong {
   font-size: 1rem;
 }
 
 .trend-summary-item span {
   font-weight: 600;
+}
+
+.trend-detail-modal {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.65rem);
+  z-index: 12;
+  width: min(360px, calc(100vw - 3rem));
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 243, 232, 0.9)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: 0 22px 40px rgba(63, 72, 65, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.trend-detail-modal::before {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: 22px;
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  border-right: 1px solid rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  transform: rotate(45deg);
+}
+
+.trend-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.trend-detail-header span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.trend-detail-table-shell {
+  max-height: 260px;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.trend-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.trend-detail-table th,
+.trend-detail-table td {
+  padding: 0.55rem 0.35rem;
+  border-bottom: 1px solid rgba(29, 42, 34, 0.08);
+}
+
+.trend-detail-table th:last-child,
+.trend-detail-table td:last-child {
+  text-align: right;
+}
+
+.trend-detail-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .breakdown-list {
@@ -1204,13 +1310,14 @@ td input[type="checkbox"] {
   .landing-hero,
   .landing-grid,
   .dashboard-grid,
+  .dashboard-insight-grid,
   .dashboard-detail-grid,
   .content-grid {
     grid-template-columns: 1fr;
   }
 
   .shell-topbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: 2fr;
     justify-items: start;
   }
 
@@ -1357,6 +1464,34 @@ td input[type="checkbox"] {
     justify-self: stretch;
     padding: 0.72rem 0.8rem;
     font-size: 0.78rem;
+  }
+
+  .trend-detail-modal {
+    position: absolute;
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: calc(100% + 0.55rem);
+    transform: translateX(-50%);
+    width: min(320px, calc(100vw - 2rem));
+    max-height: min(60vh, 420px);
+    z-index: 45;
+  }
+
+  .trend-detail-modal::before {
+    display: block;
+    left: 50%;
+    right: auto;
+    bottom: -7px;
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  .trend-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-detail-header {
+    align-items: start;
   }
 
   .filter-grid,
