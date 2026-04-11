@@ -3,3 +3,4 @@ dist
 coverage
 backend/data
 *.log
+.env
