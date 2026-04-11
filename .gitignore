@@ -4,3 +4,5 @@ coverage
 backend/data
 *.log
 .env
+.DS_Store
+frontend/.vite

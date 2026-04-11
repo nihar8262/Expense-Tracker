@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { formatMinorUnits } from "../lib/money.js";
 import { createExpenseRequestHash } from "../lib/request-hash.js";
 import type { CreateExpenseInput, ExpensesQueryInput } from "../lib/validation.js";
-import { IdempotencyConflictError, type CreateExpenseResult, type ExpenseRecord, type ExpenseStore } from "./types.js";
+import { ExpenseNotFoundError, IdempotencyConflictError, type CreateExpenseResult, type ExpenseRecord, type ExpenseStore } from "./types.js";
 
 type StoredExpense = {
   id: string;
+  userId: string;
   amountMinor: number;
   category: string;
   description: string;
@@ -33,9 +34,10 @@ export function createMemoryExpenseStore(): ExpenseStore {
   const expenses = new Map<string, StoredExpense>();
   const idempotencyRequests = new Map<string, StoredIdempotency>();
 
-  async function createExpense(input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult> {
+  async function createExpense(userId: string, input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult> {
+    const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
     const requestHash = createExpenseRequestHash(input);
-    const existingRequest = idempotencyRequests.get(idempotencyKey);
+    const existingRequest = idempotencyRequests.get(scopedIdempotencyKey);
 
     if (existingRequest) {
       if (existingRequest.requestHash !== requestHash) {
@@ -56,6 +58,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
 
     const nextExpense: StoredExpense = {
       id: randomUUID(),
+      userId,
       amountMinor: input.amount,
       category: input.category.trim(),
       description: input.description.trim(),
@@ -64,7 +67,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
 
     expenses.set(nextExpense.id, nextExpense);
-    idempotencyRequests.set(idempotencyKey, {
+    idempotencyRequests.set(scopedIdempotencyKey, {
       requestHash,
       expenseId: nextExpense.id
     });
@@ -75,8 +78,9 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
   }
 
-  async function listExpenses(query: ExpensesQueryInput): Promise<ExpenseRecord[]> {
+  async function listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]> {
     const filteredExpenses = [...expenses.values()]
+      .filter((expense) => expense.userId === userId)
       .filter((expense) => !query.category || expense.category === query.category)
       .sort((left, right) => {
         if (query.sort === "date_desc") {
@@ -90,8 +94,60 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return filteredExpenses.map(mapExpense);
   }
 
+  async function updateExpense(userId: string, expenseId: string, input: CreateExpenseInput): Promise<ExpenseRecord> {
+    const existingExpense = expenses.get(expenseId);
+
+    if (!existingExpense || existingExpense.userId !== userId) {
+      throw new ExpenseNotFoundError();
+    }
+
+    const updatedExpense: StoredExpense = {
+      ...existingExpense,
+      amountMinor: input.amount,
+      category: input.category.trim(),
+      description: input.description.trim(),
+      date: input.date
+    };
+
+    expenses.set(expenseId, updatedExpense);
+    return mapExpense(updatedExpense);
+  }
+
+  async function deleteExpense(userId: string, expenseId: string): Promise<void> {
+    const existingExpense = expenses.get(expenseId);
+
+    if (!existingExpense || existingExpense.userId !== userId) {
+      throw new ExpenseNotFoundError();
+    }
+
+    expenses.delete(expenseId);
+
+    for (const [key, value] of idempotencyRequests.entries()) {
+      if (value.expenseId === expenseId) {
+        idempotencyRequests.delete(key);
+      }
+    }
+  }
+
+  async function deleteUserData(userId: string): Promise<void> {
+    for (const [expenseId, expense] of expenses.entries()) {
+      if (expense.userId === userId) {
+        expenses.delete(expenseId);
+      }
+    }
+
+    for (const [key] of idempotencyRequests.entries()) {
+      if (key.startsWith(`${userId}:`)) {
+        idempotencyRequests.delete(key);
+      }
+    }
+  }
+
   return {
     createExpense,
-    listExpenses
+    listExpenses,
+    updateExpense,
+    deleteExpense,
+    deleteUserData
   };
 }

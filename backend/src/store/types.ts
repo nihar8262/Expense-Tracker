@@ -15,13 +15,23 @@ export type CreateExpenseResult = {
 };
 
 export interface ExpenseStore {
-  createExpense(input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult>;
-  listExpenses(query: ExpensesQueryInput): Promise<ExpenseRecord[]>;
+  createExpense(userId: string, input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult>;
+  listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]>;
+  updateExpense(userId: string, expenseId: string, input: CreateExpenseInput): Promise<ExpenseRecord>;
+  deleteExpense(userId: string, expenseId: string): Promise<void>;
+  deleteUserData(userId: string): Promise<void>;
 }
 
 export class IdempotencyConflictError extends Error {
   constructor(message = "An expense with this idempotency key already exists for a different payload.") {
     super(message);
     this.name = "IdempotencyConflictError";
+  }
+}
+
+export class ExpenseNotFoundError extends Error {
+  constructor(message = "Expense not found.") {
+    super(message);
+    this.name = "ExpenseNotFoundError";
   }
 }

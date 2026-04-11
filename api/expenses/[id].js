@@ -1,4 +1,3 @@
-const { createHash, randomUUID } = require("node:crypto");
 const { cert, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const postgres = require("postgres");
@@ -61,24 +60,6 @@ const createExpenseSchema = z.object({
   description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
   date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value.")
 });
-
-const expensesQuerySchema = z.object({
-  category: z.string().trim().min(1).optional(),
-  sort: z.enum(["date_desc"]).optional()
-});
-
-function createExpenseRequestHash(input) {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        amount: input.amount,
-        category: input.category.trim(),
-        description: input.description.trim(),
-        date: input.date
-      })
-    )
-    .digest("hex");
-}
 
 function asIsoDate(value) {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value;
@@ -212,93 +193,7 @@ async function ensureSchema(sql) {
   await schemaReady;
 }
 
-async function getExistingExpense(tx, idempotencyKey, requestHash) {
-  await tx`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
-
-  const existingRequests = await tx`
-    SELECT request_hash, expense_id
-    FROM idempotency_requests
-    WHERE idempotency_key = ${idempotencyKey}
-  `;
-
-  const existingRequest = existingRequests[0];
-
-  if (!existingRequest) {
-    return null;
-  }
-
-  if (existingRequest.request_hash !== requestHash) {
-    const error = new Error("An expense with this idempotency key already exists for a different payload.");
-    error.name = "IdempotencyConflictError";
-    throw error;
-  }
-
-  const expenses = await tx`
-    SELECT id, amount_minor, category, description, expense_date, created_at
-    FROM expenses
-    WHERE id = ${existingRequest.expense_id}
-  `;
-
-  if (!expenses[0]) {
-    throw new Error("Stored idempotency record is missing its expense.");
-  }
-
-  return {
-    expense: mapExpense(expenses[0]),
-    created: false
-  };
-}
-
-async function listExpenses(rawQuery, userId) {
-  const result = expensesQuerySchema.safeParse(rawQuery);
-
-  if (!result.success) {
-    return {
-      status: 400,
-      body: {
-        error: "Invalid query parameters.",
-        details: result.error.flatten()
-      }
-    };
-  }
-
-  const sql = getSqlClient();
-  await ensureSchema(sql);
-
-  const whereClause = result.data.category
-    ? sql`WHERE user_id = ${userId} AND category = ${result.data.category}`
-    : sql`WHERE user_id = ${userId}`;
-  const orderClause = result.data.sort === "date_desc"
-    ? sql`ORDER BY expense_date DESC, created_at DESC`
-    : sql`ORDER BY created_at DESC`;
-
-  const rows = await sql`
-    SELECT id, amount_minor, category, description, expense_date, created_at
-    FROM expenses
-    ${whereClause}
-    ${orderClause}
-  `;
-
-  return {
-    status: 200,
-    body: {
-      expenses: rows.map(mapExpense)
-    }
-  };
-}
-
-async function createExpense(rawBody, rawIdempotencyKey, userId) {
-  const idempotencyKey = rawIdempotencyKey && String(rawIdempotencyKey).trim();
-
-  if (!idempotencyKey) {
-    return {
-      status: 400,
-      body: {
-        error: "Idempotency-Key header is required."
-      }
-    };
-  }
-
+async function updateExpense(rawBody, expenseId, userId) {
   const result = createExpenseSchema.safeParse(rawBody);
 
   if (!result.success) {
@@ -314,53 +209,68 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
 
-  try {
-    const created = await sql.begin(async (tx) => {
-      const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
-      const requestHash = createExpenseRequestHash(result.data);
-      const existing = await getExistingExpense(tx, scopedIdempotencyKey, requestHash);
+  const rows = await sql`
+    UPDATE expenses
+    SET amount_minor = ${result.data.amount},
+        category = ${result.data.category.trim()},
+        description = ${result.data.description.trim()},
+        expense_date = ${result.data.date}
+    WHERE id = ${expenseId} AND user_id = ${userId}
+    RETURNING id, amount_minor, category, description, expense_date, created_at
+  `;
 
-      if (existing) {
-        return existing;
-      }
-
-      const expenseId = randomUUID();
-      const createdAt = new Date().toISOString();
-
-      const insertedExpenses = await tx`
-        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at)
-        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt})
-        RETURNING id, amount_minor, category, description, expense_date, created_at
-      `;
-
-      await tx`
-        INSERT INTO idempotency_requests (idempotency_key, request_hash, expense_id, created_at)
-        VALUES (${scopedIdempotencyKey}, ${requestHash}, ${expenseId}, ${createdAt})
-      `;
-
-      return {
-        expense: mapExpense(insertedExpenses[0]),
-        created: true
-      };
-    });
-
+  if (!rows[0]) {
     return {
-      status: created.created ? 201 : 200,
-      body: created
-    };
-  } catch (error) {
-    if (error instanceof Error && error.name === "IdempotencyConflictError") {
-      return {
-        status: 409,
-        body: { error: error.message }
-      };
-    }
-
-    return {
-      status: 500,
-      body: { error: "Failed to create expense." }
+      status: 404,
+      body: { error: "Expense not found." }
     };
   }
+
+  return {
+    status: 200,
+    body: { expense: mapExpense(rows[0]) }
+  };
+}
+
+async function deleteExpense(expenseId, userId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const deleted = await sql.begin(async (tx) => {
+    const rows = await tx`
+      SELECT id
+      FROM expenses
+      WHERE id = ${expenseId} AND user_id = ${userId}
+    `;
+
+    if (!rows[0]) {
+      return false;
+    }
+
+    await tx`
+      DELETE FROM idempotency_requests
+      WHERE expense_id = ${expenseId}
+    `;
+
+    await tx`
+      DELETE FROM expenses
+      WHERE id = ${expenseId} AND user_id = ${userId}
+    `;
+
+    return true;
+  });
+
+  if (!deleted) {
+    return {
+      status: 404,
+      body: { error: "Expense not found." }
+    };
+  }
+
+  return {
+    status: 204,
+    body: null
+  };
 }
 
 module.exports = async function handler(request, response) {
@@ -380,18 +290,27 @@ module.exports = async function handler(request, response) {
     return response.status(500).json({ error: "Failed to authenticate request." });
   }
 
-  if (request.method === "GET") {
-    const result = await listExpenses(request.query || {}, user.id);
+  const expenseId = Array.isArray(request.query.id) ? request.query.id[0] : request.query.id;
+
+  if (!expenseId) {
+    return response.status(400).json({ error: "Expense id is required." });
+  }
+
+  if (request.method === "PUT") {
+    const result = await updateExpense(request.body, expenseId, user.id);
     return response.status(result.status).json(result.body);
   }
 
-  if (request.method === "POST") {
-    const headerValue = request.headers["idempotency-key"];
-    const idempotencyKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
-    const result = await createExpense(request.body, idempotencyKey, user.id);
+  if (request.method === "DELETE") {
+    const result = await deleteExpense(expenseId, user.id);
+
+    if (result.body === null) {
+      return response.status(result.status).end();
+    }
+
     return response.status(result.status).json(result.body);
   }
 
-  response.setHeader("Allow", "GET, POST");
+  response.setHeader("Allow", "PUT, DELETE");
   return response.status(405).end("Method Not Allowed");
 };
