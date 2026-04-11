@@ -1,11 +1,12 @@
 import express from "express";
-import { authenticateBearerToken, AuthenticationConfigurationError, AuthenticationError } from "./auth.js";
+import { authenticateBearerToken, AuthenticationConfigurationError, AuthenticationError, deleteAuthenticatedUser } from "./auth.js";
 import { handleCreateExpense, handleDeleteAccount, handleDeleteExpense, handleHealthcheck, handleListExpenses, handleUpdateExpense } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
 
 type RequestAuthenticator = (authorizationHeader: string | undefined) => Promise<{ id: string }>;
+type AccountDeleter = (userId: string) => Promise<void>;
 
-export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthenticator = authenticateBearerToken) {
+export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthenticator = authenticateBearerToken, deleteUserAccount: AccountDeleter = deleteAuthenticatedUser) {
   const app = express();
 
   app.use(express.json());
@@ -104,6 +105,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         const result = await handleDeleteAccount(user.id, store);
 
         if (result.body === null) {
+          await deleteUserAccount(user.id);
           return response.sendStatus(result.status);
         }
 

@@ -4,15 +4,19 @@ import { createApp } from "../src/app.js";
 import { createMemoryExpenseStore } from "../src/store/memory.js";
 
 function buildApp() {
-  return createApp(createMemoryExpenseStore(), async (authorizationHeader) => {
-    const userId = authorizationHeader?.replace(/^Bearer\s+/i, "").trim();
+  return createApp(
+    createMemoryExpenseStore(),
+    async (authorizationHeader) => {
+      const userId = authorizationHeader?.replace(/^Bearer\s+/i, "").trim();
 
-    if (!userId) {
-      throw new Error("Missing test user.");
-    }
+      if (!userId) {
+        throw new Error("Missing test user.");
+      }
 
-    return { id: userId };
-  });
+      return { id: userId };
+    },
+    async () => {}
+  );
 }
 
 describe("expenses API", () => {

@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { FacebookAuthProvider, getAuth, GithubAuthProvider, GoogleAuthProvider } from "firebase/auth";
+import { browserLocalPersistence, FacebookAuthProvider, getAuth, GithubAuthProvider, GoogleAuthProvider, setPersistence } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -22,6 +22,11 @@ export const isFirebaseConfigured = requiredConfigValues.every((value) => Boolea
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 
 export const auth = app ? getAuth(app) : null;
+export const authPersistenceReady = auth
+  ? setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.error("Failed to configure Firebase auth persistence.", error);
+    })
+  : Promise.resolve();
 export const googleProvider = new GoogleAuthProvider();
 export const githubProvider = new GithubAuthProvider();
 export const facebookProvider = new FacebookAuthProvider();

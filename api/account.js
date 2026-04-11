@@ -41,6 +41,18 @@ function getFirebaseAuth() {
   return getAuth();
 }
 
+async function deleteAuthenticatedUser(userId) {
+  try {
+    await getFirebaseAuth().deleteUser(userId);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "auth/user-not-found") {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function authenticateRequest(request) {
   const headerValue = request.headers.authorization;
   const token = headerValue && headerValue.startsWith("Bearer ") ? headerValue.slice(7).trim() : "";
@@ -155,9 +167,10 @@ module.exports = async function handler(request, response) {
   if (request.method === "DELETE") {
     try {
       await deleteAccountData(user.id);
+      await deleteAuthenticatedUser(user.id);
       return response.status(204).end();
     } catch {
-      return response.status(500).json({ error: "Failed to delete account data." });
+      return response.status(500).json({ error: "Failed to delete account." });
     }
   }
 

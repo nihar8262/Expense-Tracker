@@ -30,6 +30,7 @@ The app now uses a hosted Postgres-compatible database so the same persistence m
 - Users authenticate with Google, GitHub, or Facebook through Firebase Auth on the frontend.
 - Every expense is stored with the authenticated user's Firebase UID.
 - `GET /api/expenses` and `POST /api/expenses` now require a Firebase ID token in the `Authorization: Bearer ...` header.
+- `DELETE /api/account` removes both the user's stored expense data and the Firebase Auth account itself.
 - Existing rows created before authentication was introduced are marked as `legacy-anonymous` so they are no longer visible to signed-in users.
 
 ## Deployment status

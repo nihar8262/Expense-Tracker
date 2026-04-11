@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthProvider, User } from "firebase/auth";
-import { deleteUser, getRedirectResult, onAuthStateChanged, signInWithRedirect, signOut } from "firebase/auth";
-import { auth, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
 
 type Expense = {
   id: string;
@@ -182,6 +182,40 @@ function writePendingSubmission(submission: PendingSubmission | null) {
   }
 
   window.localStorage.setItem(PENDING_SUBMISSION_STORAGE_KEY, JSON.stringify(submission));
+}
+
+function formatAuthError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Failed to sign in.";
+  }
+
+  const message = error.message.toLowerCase();
+
+  if (message.includes("popup_closed_by_user") || message.includes("cancelled-popup-request")) {
+    return "The sign-in window was closed before authentication completed.";
+  }
+
+  if (message.includes("popup-blocked")) {
+    return "The browser blocked the sign-in popup. Allow popups for localhost and try again.";
+  }
+
+  if (message.includes("unauthorized-domain")) {
+    return "This domain is not authorized in Firebase Authentication. Add your current localhost or deployed URL to Firebase authorized domains.";
+  }
+
+  if (message.includes("operation-not-allowed")) {
+    return "This sign-in provider is not enabled in Firebase Authentication.";
+  }
+
+  if (message.includes("redirect_uri_mismatch") || message.includes("redirect uri")) {
+    return "The OAuth redirect URL is misconfigured for this provider. Check the provider callback URL in Firebase and the provider console.";
+  }
+
+  if (message.includes("access blocked") || message.includes("cookie") || message.includes("storage")) {
+    return "Browser storage or cookies blocked the sign-in flow. Try again with cookie blocking disabled for localhost.";
+  }
+
+  return error.message;
 }
 
 function formatCurrency(amount: string): string {
@@ -465,7 +499,7 @@ async function deleteAccountData(user: User): Promise<void> {
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to delete account data.", response.status);
+    throw new ApiError(body?.error ?? "Failed to delete account.", response.status);
   }
 }
 
@@ -482,8 +516,9 @@ export default function App() {
   const [activePage, setActivePage] = useState<"dashboard" | "expenses">("dashboard");
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
+  const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -546,6 +581,12 @@ export default function App() {
   const visibleExpenses = useMemo(() => {
     return expenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange));
   }, [expenses, selectedTimeRange]);
+
+  const allVisibleExpenseIds = useMemo(() => visibleExpenses.map((expense) => expense.id), [visibleExpenses]);
+
+  const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
+
+  const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
 
   const spendTrend = useMemo(() => {
     return buildTrendPoints(visibleExpenses, chartGranularity);
@@ -612,14 +653,9 @@ export default function App() {
       return;
     }
 
-    void getRedirectResult(auth).catch((error) => {
-      setAuthMessage(error instanceof Error ? error.message : "Failed to sign in.");
-    });
-
     return onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthLoading(false);
-      setAuthMessage("");
       setIsProfileMenuOpen(false);
       setIsDeleteAccountModalOpen(false);
 
@@ -630,12 +666,14 @@ export default function App() {
         setCustomCategoryIcon("other");
         setForm(initialFormState);
         setSelectedCategory("");
+        setSelectedExpenseIds([]);
         setActivePage("dashboard");
         setEditingExpenseId(null);
-        setPublicView("landing");
+        setPublicView((currentView) => (currentView === "auth" ? "auth" : "landing"));
         return;
       }
 
+      setAuthMessage("");
       setCustomCategories(readCustomCategories(user.uid));
     });
   }, []);
@@ -653,6 +691,10 @@ export default function App() {
 
     void loadExpenses(currentUser, selectedCategory, sortNewestFirst);
   }, [authLoading, currentUser, selectedCategory, sortNewestFirst]);
+
+  useEffect(() => {
+    setSelectedExpenseIds((current) => current.filter((expenseId) => allVisibleExpenseIds.includes(expenseId)));
+  }, [allVisibleExpenseIds]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -705,9 +747,12 @@ export default function App() {
     setAuthMessage("");
 
     try {
-      await signInWithRedirect(auth, provider);
+      await authPersistenceReady;
+      await signInWithPopup(auth, provider);
+      setPublicView("landing");
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : "Failed to sign in.");
+      console.error("Firebase popup sign-in failed.", error);
+      setAuthMessage(formatAuthError(error));
     }
   }
 
@@ -722,6 +767,7 @@ export default function App() {
     setErrorMessage("");
     setActivePage("dashboard");
     setIsProfileMenuOpen(false);
+    setSelectedExpenseIds([]);
     setEditingExpenseId(null);
     setPublicView("landing");
   }
@@ -746,6 +792,40 @@ export default function App() {
     setErrorMessage("");
   }
 
+  async function removeExpenses(expenseIds: string[]) {
+    if (!currentUser) {
+      return { deletedCount: 0, failedCount: expenseIds.length };
+    }
+
+    const uniqueExpenseIds = [...new Set(expenseIds)];
+    setDeletingExpenseIds((current) => [...new Set([...current, ...uniqueExpenseIds])]);
+    setStatusMessage("");
+    setErrorMessage("");
+
+    try {
+      const deletionResults = await Promise.allSettled(uniqueExpenseIds.map((expenseId) => deleteExpense(expenseId, currentUser)));
+      const deletedExpenseIds = uniqueExpenseIds.filter((_, index) => deletionResults[index]?.status === "fulfilled");
+      const failedCount = uniqueExpenseIds.length - deletedExpenseIds.length;
+
+      if (deletedExpenseIds.includes(editingExpenseId ?? "")) {
+        setEditingExpenseId(null);
+        setForm(initialFormState);
+      }
+
+      if (deletedExpenseIds.length > 0) {
+        setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
+        await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+      }
+
+      return {
+        deletedCount: deletedExpenseIds.length,
+        failedCount
+      };
+    } finally {
+      setDeletingExpenseIds((current) => current.filter((expenseId) => !uniqueExpenseIds.includes(expenseId)));
+    }
+  }
+
   async function handleDeleteExpense(expenseId: string) {
     if (!currentUser) {
       return;
@@ -757,23 +837,56 @@ export default function App() {
       return;
     }
 
-    setDeletingExpenseId(expenseId);
-    setStatusMessage("");
-    setErrorMessage("");
+    const result = await removeExpenses([expenseId]);
 
-    try {
-      await deleteExpense(expenseId, currentUser);
-      if (editingExpenseId === expenseId) {
-        setEditingExpenseId(null);
-        setForm(initialFormState);
-      }
+    if (result.deletedCount === 1 && result.failedCount === 0) {
       setStatusMessage("Expense deleted.");
-      await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to delete expense.");
-    } finally {
-      setDeletingExpenseId(null);
+      return;
     }
+
+    if (result.deletedCount > 0) {
+      setStatusMessage(`${result.deletedCount} expenses deleted.`);
+    }
+
+    if (result.failedCount > 0) {
+      setErrorMessage(result.deletedCount > 0 ? `${result.failedCount} selected expenses could not be deleted.` : "Failed to delete expense.");
+    }
+  }
+
+  async function handleDeleteSelectedExpenses() {
+    if (selectedVisibleExpenseIds.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ${selectedVisibleExpenseIds.length} selected expenses permanently?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await removeExpenses(selectedVisibleExpenseIds);
+
+    if (result.deletedCount > 0) {
+      setStatusMessage(`${result.deletedCount} ${result.deletedCount === 1 ? "expense" : "expenses"} deleted.`);
+    }
+
+    if (result.failedCount > 0) {
+      setErrorMessage(result.deletedCount > 0 ? `${result.failedCount} selected expenses could not be deleted.` : "Failed to delete selected expenses.");
+    }
+  }
+
+  function handleToggleExpenseSelection(expenseId: string) {
+    setSelectedExpenseIds((current) => (current.includes(expenseId) ? current.filter((id) => id !== expenseId) : [...current, expenseId]));
+  }
+
+  function handleToggleSelectAllVisibleExpenses() {
+    setSelectedExpenseIds((current) => {
+      if (areAllVisibleExpensesSelected) {
+        return current.filter((expenseId) => !allVisibleExpenseIds.includes(expenseId));
+      }
+
+      return [...new Set([...current, ...allVisibleExpenseIds])];
+    });
   }
 
   async function handleDeleteAccount() {
@@ -791,8 +904,18 @@ export default function App() {
       writePendingSubmission(null);
       setIsProfileMenuOpen(false);
       setIsDeleteAccountModalOpen(false);
-      await deleteUser(currentUser);
-      setStatusMessage("Your account and stored data were deleted.");
+      setExpenses([]);
+      setCustomCategories([]);
+      setForm(initialFormState);
+      setSelectedCategory("");
+      setSelectedExpenseIds([]);
+      setEditingExpenseId(null);
+      setActivePage("dashboard");
+      if (auth) {
+        await signOut(auth);
+      }
+      setCurrentUser(null);
+      setPublicView("landing");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete your account.";
       if (message.includes("requires-recent-login")) {
@@ -1550,9 +1673,25 @@ export default function App() {
             </section>
 
             <section className="card list-card">
-              <div className="section-heading">
-                <h2>Your expenses</h2>
-                <p>Only the expenses tied to your authenticated account are returned by the API.</p>
+              <div className="list-card-heading">
+                <div className="section-heading">
+                  <h2>Your expenses</h2>
+                  <p>Only the expenses tied to your authenticated account are returned by the API.</p>
+                </div>
+
+                <div className="list-card-tools">
+                  <span className="list-selection-copy">
+                    {selectedVisibleExpenseIds.length > 0 ? `${selectedVisibleExpenseIds.length} selected` : "Select expenses to delete together"}
+                  </span>
+                  <button
+                    type="button"
+                    className="table-action-button bulk-delete-button danger-button"
+                    disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
+                    onClick={() => void handleDeleteSelectedExpenses()}
+                  >
+                    Delete selected
+                  </button>
+                </div>
               </div>
 
               {!currentUser && !authLoading ? <p className="empty-state">Sign in to view your private expense history.</p> : null}
@@ -1564,6 +1703,14 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
+                        <th>
+                          <input
+                            type="checkbox"
+                            aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"}
+                            checked={areAllVisibleExpensesSelected}
+                            onChange={handleToggleSelectAllVisibleExpenses}
+                          />
+                        </th>
                         <th>Date</th>
                         <th>Category</th>
                         <th>Description</th>
@@ -1574,6 +1721,15 @@ export default function App() {
                     <tbody>
                       {visibleExpenses.map((expense) => (
                         <tr key={expense.id}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${expense.description}`}
+                              checked={selectedExpenseIds.includes(expense.id)}
+                              disabled={deletingExpenseIds.includes(expense.id)}
+                              onChange={() => handleToggleExpenseSelection(expense.id)}
+                            />
+                          </td>
                           <td>{expense.date}</td>
                           <td>
                             <div className="expense-category-cell">
@@ -1593,10 +1749,10 @@ export default function App() {
                               <button
                                 type="button"
                                 className="table-action-button danger-button"
-                                disabled={deletingExpenseId === expense.id}
+                                disabled={deletingExpenseIds.includes(expense.id)}
                                 onClick={() => void handleDeleteExpense(expense.id)}
                               >
-                                {deletingExpenseId === expense.id ? "Deleting..." : "Delete"}
+                                {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
                               </button>
                             </div>
                           </td>

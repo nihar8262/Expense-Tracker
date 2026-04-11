@@ -1082,6 +1082,29 @@ textarea {
   overflow-x: auto;
 }
 
+.list-card-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.list-card-tools {
+  display: grid;
+  gap: 0.55rem;
+  justify-items: end;
+}
+
+.list-selection-copy {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.bulk-delete-button {
+  min-width: 150px;
+}
+
 .table-actions {
   display: flex;
   gap: 0.5rem;
@@ -1149,6 +1172,13 @@ th {
   letter-spacing: 0.08em;
 }
 
+th input[type="checkbox"],
+td input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .empty-state,
 .status-message {
   margin: 0;
@@ -1212,6 +1242,10 @@ th {
   .controls {
     display: grid;
   }
+
+  .list-card-heading {
+    align-items: start;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1225,7 +1259,9 @@ th {
   .shell-user,
   .page-nav,
   .profile-dropdown-actions,
-  .form-actions {
+  .form-actions,
+  .list-card-heading,
+  .list-card-tools {
     display: grid;
   }
 
@@ -1241,36 +1277,79 @@ th {
   }
 
   .shell-topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 0.85rem;
     padding: 1rem;
   }
 
+  .shell-brand {
+    min-width: 0;
+  }
+
   .shell-user {
-    gap: 0.8rem;
+    width: auto;
+    justify-self: end;
+    align-self: start;
+  }
+
+  .page-nav {
+    grid-column: 1 / -1;
+    order: 3;
   }
 
   .profile-menu,
-  .profile-trigger,
   .profile-dropdown {
-    width: 100%;
+    width: auto;
   }
 
   .profile-trigger {
-    justify-content: space-between;
-    border-radius: 22px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .profile-trigger:hover,
+  .profile-trigger.is-open {
+    transform: none;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .profile-trigger .shell-meta,
+  .profile-trigger-caret {
+    display: none;
+  }
+
+  .profile-trigger .avatar-large {
+    width: 44px;
+    height: 44px;
   }
 
   .profile-dropdown {
-    position: static;
+    position: absolute;
+    top: calc(100% + 0.55rem);
+    right: -0.35rem;
+    width: min(340px, calc(100vw - 1.5rem));
     margin-top: 0.75rem;
   }
 
   .profile-dropdown::before {
-    display: none;
+    display: block;
   }
 
   .confirm-modal-actions {
     display: grid;
+  }
+
+  .list-card-tools {
+    justify-items: stretch;
+  }
+
+  .bulk-delete-button {
+    width: 100%;
   }
 
   .shell-action-button {
