@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthProvider, User } from "firebase/auth";
-import { deleteUser, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { deleteUser, getRedirectResult, onAuthStateChanged, signInWithRedirect, signOut } from "firebase/auth";
 import { auth, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
 
 type Expense = {
@@ -480,6 +480,7 @@ export default function App() {
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
   const [activePage, setActivePage] = useState<"dashboard" | "expenses">("dashboard");
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -492,6 +493,7 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   const categories = useMemo(() => {
     return [...new Set(expenses.map((expense) => expense.category))].sort((left, right) => left.localeCompare(right));
@@ -609,10 +611,15 @@ export default function App() {
       return;
     }
 
+    void getRedirectResult(auth).catch((error) => {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to sign in.");
+    });
+
     return onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthLoading(false);
       setAuthMessage("");
+      setIsProfileMenuOpen(false);
 
       if (!user) {
         setExpenses([]);
@@ -677,6 +684,17 @@ export default function App() {
       });
   }, [currentUser]);
 
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!profileMenuRef.current?.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
   async function handleSignIn(provider: AuthProvider) {
     if (!auth) {
       return;
@@ -685,7 +703,7 @@ export default function App() {
     setAuthMessage("");
 
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to sign in.");
     }
@@ -701,6 +719,7 @@ export default function App() {
     setStatusMessage("");
     setErrorMessage("");
     setActivePage("dashboard");
+    setIsProfileMenuOpen(false);
     setEditingExpenseId(null);
     setPublicView("landing");
   }
@@ -774,6 +793,7 @@ export default function App() {
       await deleteAccountData(currentUser);
       clearCustomCategories(currentUser.uid);
       writePendingSubmission(null);
+      setIsProfileMenuOpen(false);
       await deleteUser(currentUser);
       setStatusMessage("Your account and stored data were deleted.");
     } catch (error) {
@@ -1080,37 +1100,63 @@ export default function App() {
           <button
             type="button"
             className={activePage === "dashboard" ? "page-nav-button is-active" : "page-nav-button"}
-            onClick={() => setActivePage("dashboard")}
+            onClick={() => {
+              setActivePage("dashboard");
+              setIsProfileMenuOpen(false);
+            }}
           >
             Dashboard
           </button>
           <button
             type="button"
             className={activePage === "expenses" ? "page-nav-button is-active" : "page-nav-button"}
-            onClick={() => setActivePage("expenses")}
+            onClick={() => {
+              setActivePage("expenses");
+              setIsProfileMenuOpen(false);
+            }}
           >
             Expenses
           </button>
         </nav>
 
         <div className="shell-user">
-          <div className="profile-banner-main shell-user-summary">
-            {currentUser.photoURL ? <img className="avatar avatar-large" src={currentUser.photoURL} alt={currentUser.displayName ?? currentUser.email ?? "User avatar"} /> : <div className="avatar avatar-large avatar-fallback">{(currentUser.displayName ?? currentUser.email ?? "U").slice(0, 1).toUpperCase()}</div>}
+          <div className="profile-menu" ref={profileMenuRef}>
+            <button
+              type="button"
+              className={isProfileMenuOpen ? "profile-trigger is-open" : "profile-trigger"}
+              onClick={() => setIsProfileMenuOpen((current) => !current)}
+              aria-haspopup="menu"
+              aria-expanded={isProfileMenuOpen}
+            >
+              {currentUser.photoURL ? <img className="avatar avatar-large" src={currentUser.photoURL} alt={currentUser.displayName ?? currentUser.email ?? "User avatar"} /> : <div className="avatar avatar-large avatar-fallback">{(currentUser.displayName ?? currentUser.email ?? "U").slice(0, 1).toUpperCase()}</div>}
 
-            <div className="profile-copy shell-meta">
-              <p className="eyebrow">Signed in</p>
-              <h2>{currentUser.displayName ?? "Your profile"}</h2>
-              <p>{currentUser.email ?? currentUser.uid}</p>
-            </div>
-          </div>
+              <div className="profile-copy shell-meta">
+                <p className="eyebrow">Signed in</p>
+                <h2>{currentUser.displayName ?? "Your profile"}</h2>
+              </div>
 
-          <div className="shell-actions">
-            <button type="button" className="secondary-button shell-action-button signout-button" onClick={() => void handleSignOut()}>
-              Sign out
+              <span className="profile-trigger-caret" aria-hidden="true">
+                ▾
+              </span>
             </button>
-            <button type="button" className="secondary-button shell-action-button destructive-shell-button" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>
-              {isDeletingAccount ? "Deleting account..." : "Delete account"}
-            </button>
+
+            {isProfileMenuOpen ? (
+              <div className="profile-dropdown" role="menu">
+                <div className="profile-dropdown-header">
+                  <strong>{currentUser.displayName ?? "Your profile"}</strong>
+                  <span>{currentUser.email ?? currentUser.uid}</span>
+                </div>
+
+                <div className="profile-dropdown-actions">
+                  <button type="button" className="secondary-button shell-action-button signout-button" onClick={() => void handleSignOut()}>
+                    Sign out
+                  </button>
+                  <button type="button" className="secondary-button shell-action-button destructive-shell-button" disabled={isDeletingAccount} onClick={() => void handleDeleteAccount()}>
+                    {isDeletingAccount ? "Deleting account..." : "Delete account"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
