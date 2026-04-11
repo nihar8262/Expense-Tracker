@@ -1,0 +1,226 @@
+:root {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: #1d2a22;
+  background:
+    radial-gradient(circle at top left, rgba(237, 197, 122, 0.7), transparent 28%),
+    linear-gradient(180deg, #f5efe1 0%, #f8f6f0 55%, #e8efe9 100%);
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+  --panel: rgba(255, 255, 255, 0.74);
+  --panel-border: rgba(29, 42, 34, 0.08);
+  --accent: #1f6f50;
+  --accent-strong: #174c38;
+  --danger: #962f2f;
+  --muted: #526056;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  width: min(1120px, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.hero-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.8rem;
+  color: var(--accent-strong);
+}
+
+.hero-panel h1,
+.section-heading h2 {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+}
+
+.hero-panel h1 {
+  font-size: clamp(2.4rem, 5vw, 4.5rem);
+  line-height: 0.96;
+}
+
+.lede {
+  margin: 0;
+  max-width: 58ch;
+  color: var(--muted);
+}
+
+.total-card,
+.card {
+  backdrop-filter: blur(18px);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(63, 72, 65, 0.08);
+}
+
+.total-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  width: fit-content;
+}
+
+.total-card span {
+  color: var(--muted);
+}
+
+.total-card strong {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+}
+
+.content-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+}
+
+.card {
+  padding: 1.4rem;
+}
+
+.form-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.section-heading {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.section-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.form-card label,
+.controls label {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.form-card input,
+.form-card textarea,
+.controls select {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(29, 42, 34, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.form-card button {
+  border: 0;
+  border-radius: 16px;
+  padding: 0.95rem 1.2rem;
+  background: linear-gradient(135deg, var(--accent) 0%, #2b9270 100%);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.form-card button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.controls-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+}
+
+.controls {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.table-shell {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.85rem 0.55rem;
+  border-bottom: 1px solid rgba(29, 42, 34, 0.08);
+}
+
+th {
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.empty-state,
+.status-message {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+}
+
+.empty-state {
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.status-message.success {
+  background: rgba(31, 111, 80, 0.12);
+  color: var(--accent-strong);
+}
+
+.status-message.error {
+  background: rgba(150, 47, 47, 0.12);
+  color: var(--danger);
+}
+
+@media (max-width: 900px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .controls-row,
+  .controls {
+    display: grid;
+  }
+}
