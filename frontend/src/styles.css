@@ -1012,6 +1012,17 @@ textarea {
   align-items: stretch;
 }
 
+.trend-visual-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.2rem;
+}
+
+.trend-visual-frame {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .trend-scale {
   display: flex;
   flex-direction: column;
@@ -2083,6 +2094,10 @@ td input[type="checkbox"] {
     gap: 0.5rem;
   }
 
+  .trend-visual-frame {
+    gap: 0.35rem;
+  }
+
   .trend-scale {
     display: flex;
     font-size: 0.58rem;
@@ -2092,7 +2107,12 @@ td input[type="checkbox"] {
   }
 
   .trend-chart {
-    min-height: 250px;
+    min-height: 210px;
+  }
+
+  .trend-labels {
+    font-size: 0.68rem;
+    gap: 0.25rem;
   }
 
   .trend-bar-label {

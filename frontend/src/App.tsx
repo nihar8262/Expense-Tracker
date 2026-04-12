@@ -293,6 +293,19 @@ function isExpenseInTimeRange(expenseDate: string, timeRange: TimeRangeFilter): 
   return parsedDate.getFullYear() === today.getFullYear();
 }
 
+function getStartOfWeek(date: Date): Date {
+  const startOfWeek = new Date(date);
+  const day = startOfWeek.getDay();
+  const offset = day === 0 ? 6 : day - 1;
+  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setDate(startOfWeek.getDate() - offset);
+  return startOfWeek;
+}
+
+function getIsoDateString(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function buildTrendPoints(expenseItems: Expense[], granularity: ChartGranularity): TrendPoint[] {
   const buckets = new Map<string, TrendPoint>();
 
@@ -312,6 +325,14 @@ function buildTrendPoints(expenseItems: Expense[], granularity: ChartGranularity
       key = expense.date;
       label = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(parsedDate);
       shortLabel = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(parsedDate);
+    } else if (granularity === "weekly") {
+      const startOfWeek = getStartOfWeek(parsedDate);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      key = getIsoDateString(startOfWeek);
+      label = `${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(startOfWeek)} - ${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(endOfWeek)}`;
+      shortLabel = `Wk ${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(startOfWeek)}`;
+      order = startOfWeek.getTime();
     } else if (granularity === "monthly") {
       key = `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
       label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(parsedDate);
@@ -353,7 +374,7 @@ function buildTrendPoints(expenseItems: Expense[], granularity: ChartGranularity
 }
 
 function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranularity): Record<string, TrendDetailItem[]> {
-  if (granularity !== "daily" && granularity !== "monthly") {
+  if (granularity !== "daily" && granularity !== "weekly" && granularity !== "monthly") {
     return {};
   }
 
@@ -374,6 +395,8 @@ function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranu
     const key =
       granularity === "daily"
         ? expense.date
+        : granularity === "weekly"
+          ? getIsoDateString(getStartOfWeek(parsedDate))
         : `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
 
     const existingItems = buckets.get(key) ?? [];

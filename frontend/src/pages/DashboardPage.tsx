@@ -89,9 +89,10 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
   const [activeChartPointKey, setActiveChartPointKey] = useState<string | null>(null);
-  const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "monthly";
+  const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const chartBarWidth = chartSummary.points.length > 0 ? 100 / chartSummary.points.length : 0;
   const activeChartPoint = chartSummary.points.find((point) => point.key === activeChartPointKey) ?? null;
+  const chartMinWidth = Math.max(chartSummary.points.length * (chartGranularity === "daily" ? 42 : 34), 280);
 
   function getBudgetTitle(budget: BudgetSummary): string {
     return budget.scope === "monthly" ? "Monthly budget" : budget.category ?? "Category budget";
@@ -381,6 +382,7 @@ export function DashboardPage({
                 <span>Graph by</span>
                 <select value={chartGranularity} onChange={(event) => onChartGranularityChange(event.target.value as ChartGranularity)}>
                   <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="yearly">Yearly</option>
@@ -409,92 +411,96 @@ export function DashboardPage({
                   <span>{formatCurrency("0")}</span>
                 </div>
 
-                <div className="trend-chart" onMouseLeave={() => setActiveChartPointKey(null)}>
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Expense trend graph">
-                    <defs>
-                      <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor="rgba(31, 111, 80, 0.22)" />
-                        <stop offset="100%" stopColor="rgba(31, 111, 80, 0.01)" />
-                      </linearGradient>
-                      <linearGradient id="trendBarFill" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor="#1f6f50" />
-                        <stop offset="100%" stopColor="#e0a84e" />
-                      </linearGradient>
-                    </defs>
-                    <line x1="0" y1="100" x2="100" y2="100" className="trend-axis" />
-                    <line x1="0" y1="50" x2="100" y2="50" className="trend-grid-line" />
-                    <line x1="0" y1="0" x2="100" y2="0" className="trend-grid-line" />
-                    {chartDisplayType === "area" ? (
-                      <>
-                        <path d={chartSummary.areaPath} fill="url(#trendFill)" className="trend-area" />
-                        <path d={chartSummary.linePath} fill="none" className="trend-line" />
-                        {chartSummary.points.map((point) => (
-                          <g key={point.key}>
-                            <circle
-                              cx={point.x}
-                              cy={point.y}
-                              r="3.8"
-                              className="trend-point-hitbox"
-                              onMouseEnter={() => setActiveChartPointKey(point.key)}
-                              onFocus={() => setActiveChartPointKey(point.key)}
-                              onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
-                              onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
-                              tabIndex={0}
-                            />
-                            <circle cx={point.x} cy={point.y} r="1.35" className="trend-point" />
-                          </g>
-                        ))}
-                      </>
-                    ) : (
-                      chartSummary.points.map((point, index) => {
-                        const barWidth = Math.max(chartBarWidth * 0.62, 4);
-                        const x = chartSummary.points.length === 1 ? 50 - barWidth / 2 : index * chartBarWidth + (chartBarWidth - barWidth) / 2;
-                        const height = chartSummary.peakValue === 0 ? 0 : (point.total / chartSummary.peakValue) * 100;
-                        const y = 100 - height;
+                <div className="trend-visual-scroll">
+                  <div className="trend-visual-frame" style={{ minWidth: `${chartMinWidth}px` }}>
+                    <div className="trend-chart" onMouseLeave={() => setActiveChartPointKey(null)}>
+                      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Expense trend graph">
+                        <defs>
+                          <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor="rgba(31, 111, 80, 0.22)" />
+                            <stop offset="100%" stopColor="rgba(31, 111, 80, 0.01)" />
+                          </linearGradient>
+                          <linearGradient id="trendBarFill" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor="#1f6f50" />
+                            <stop offset="100%" stopColor="#e0a84e" />
+                          </linearGradient>
+                        </defs>
+                        <line x1="0" y1="100" x2="100" y2="100" className="trend-axis" />
+                        <line x1="0" y1="50" x2="100" y2="50" className="trend-grid-line" />
+                        <line x1="0" y1="0" x2="100" y2="0" className="trend-grid-line" />
+                        {chartDisplayType === "area" ? (
+                          <>
+                            <path d={chartSummary.areaPath} fill="url(#trendFill)" className="trend-area" />
+                            <path d={chartSummary.linePath} fill="none" className="trend-line" />
+                            {chartSummary.points.map((point) => (
+                              <g key={point.key}>
+                                <circle
+                                  cx={point.x}
+                                  cy={point.y}
+                                  r="3.8"
+                                  className="trend-point-hitbox"
+                                  onMouseEnter={() => setActiveChartPointKey(point.key)}
+                                  onFocus={() => setActiveChartPointKey(point.key)}
+                                  onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
+                                  onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
+                                  tabIndex={0}
+                                />
+                                <circle cx={point.x} cy={point.y} r="1.35" className="trend-point" />
+                              </g>
+                            ))}
+                          </>
+                        ) : (
+                          chartSummary.points.map((point, index) => {
+                            const barWidth = Math.max(chartBarWidth * 0.62, 4);
+                            const x = chartSummary.points.length === 1 ? 50 - barWidth / 2 : index * chartBarWidth + (chartBarWidth - barWidth) / 2;
+                            const height = chartSummary.peakValue === 0 ? 0 : (point.total / chartSummary.peakValue) * 100;
+                            const y = 100 - height;
 
-                        return (
-                          <g key={point.key}>
-                            <rect
-                              x={x}
-                              y={y}
-                              width={barWidth}
-                              height={height}
-                              rx="1.4"
-                              className="trend-bar"
-                              fill="url(#trendBarFill)"
-                              onMouseEnter={() => setActiveChartPointKey(point.key)}
-                              onFocus={() => setActiveChartPointKey(point.key)}
-                              onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
-                              onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
-                              tabIndex={0}
-                            />
-                            <text x={x + barWidth / 2} y={Math.max(y - 2.5, 6)} className="trend-bar-label" textAnchor="middle">
-                              {getChartLabel(point.total)}
-                            </text>
-                          </g>
-                        );
-                      })
-                    )}
-                  </svg>
+                            return (
+                              <g key={point.key}>
+                                <rect
+                                  x={x}
+                                  y={y}
+                                  width={barWidth}
+                                  height={height}
+                                  rx="1.4"
+                                  className="trend-bar"
+                                  fill="url(#trendBarFill)"
+                                  onMouseEnter={() => setActiveChartPointKey(point.key)}
+                                  onFocus={() => setActiveChartPointKey(point.key)}
+                                  onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
+                                  onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
+                                  tabIndex={0}
+                                />
+                                <text x={x + barWidth / 2} y={Math.max(y - 2.5, 6)} className="trend-bar-label" textAnchor="middle">
+                                  {getChartLabel(point.total)}
+                                </text>
+                              </g>
+                            );
+                          })
+                        )}
+                      </svg>
 
-                  {activeChartPoint ? (
-                    <div
-                      className={`trend-chart-tooltip${getTooltipAlignment(activeChartPoint.x)}`}
-                      role="status"
-                      style={{ left: `${activeChartPoint.x}%`, top: `${Math.max(activeChartPoint.y - 8, 8)}%` }}
-                    >
-                      <strong>{activeChartPoint.label}</strong>
-                      <span>{formatCurrency(activeChartPoint.total.toFixed(2))}</span>
-                      <small>{activeChartPoint.count === 1 ? "1 expense" : `${activeChartPoint.count} expenses`}</small>
+                      {activeChartPoint ? (
+                        <div
+                          className={`trend-chart-tooltip${getTooltipAlignment(activeChartPoint.x)}`}
+                          role="status"
+                          style={{ left: `${activeChartPoint.x}%`, top: `${Math.max(activeChartPoint.y - 8, 8)}%` }}
+                        >
+                          <strong>{activeChartPoint.label}</strong>
+                          <span>{formatCurrency(activeChartPoint.total.toFixed(2))}</span>
+                          <small>{activeChartPoint.count === 1 ? "1 expense" : `${activeChartPoint.count} expenses`}</small>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </div>
 
-              <div className="trend-labels" aria-hidden="true">
-                {chartSummary.points.map((point) => (
-                  <span key={point.key}>{point.shortLabel}</span>
-                ))}
+                    <div className="trend-labels" aria-hidden="true">
+                      {chartSummary.points.map((point) => (
+                        <span key={point.key}>{point.shortLabel}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="trend-summary-grid">

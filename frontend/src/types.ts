@@ -66,7 +66,7 @@ export type ProviderOption = {
 };
 
 export type TimeRangeFilter = "all" | "week" | "month" | "year";
-export type ChartGranularity = "daily" | "monthly" | "quarterly" | "yearly";
+export type ChartGranularity = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 export type ChartDisplayType = "area" | "bar";
 export type CategoryIconId = "groceries" | "food" | "travel" | "shopping" | "bills" | "health" | "entertainment" | "work" | "other";
 
