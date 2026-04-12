@@ -281,4 +281,106 @@ describe("expenses API", () => {
     expect(otherUserList.body.expenses).toHaveLength(1);
     expect(otherUserList.body.expenses[0].description).toBe("Flight");
   });
+
+  it("creates, updates, lists, and deletes user budgets", async () => {
+    const app = buildApp();
+
+    const createResponse = await request(app)
+      .post("/api/budgets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "5000.00",
+        scope: "monthly",
+        month: "2026-04"
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.budget.scope).toBe("monthly");
+    expect(createResponse.body.budget.amount).toBe("5000.00");
+
+    const budgetId = createResponse.body.budget.id;
+
+    const updateResponse = await request(app)
+      .put(`/api/budgets/${budgetId}`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "1500.00",
+        scope: "category",
+        category: "Food",
+        month: "2026-04"
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.budget.scope).toBe("category");
+    expect(updateResponse.body.budget.category).toBe("Food");
+
+    const listResponse = await request(app)
+      .get("/api/budgets")
+      .set("Authorization", "Bearer user-one");
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.budgets).toHaveLength(1);
+    expect(listResponse.body.budgets[0].category).toBe("Food");
+
+    const deleteResponse = await request(app)
+      .delete(`/api/budgets/${budgetId}`)
+      .set("Authorization", "Bearer user-one");
+
+    expect(deleteResponse.status).toBe(204);
+
+    const afterDeleteResponse = await request(app)
+      .get("/api/budgets")
+      .set("Authorization", "Bearer user-one");
+
+    expect(afterDeleteResponse.body.budgets).toHaveLength(0);
+  });
+
+  it("keeps budgets private to the signed-in user and clears them on account deletion", async () => {
+    const app = buildApp();
+
+    await request(app)
+      .post("/api/budgets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "3000.00",
+        scope: "monthly",
+        month: "2026-04"
+      });
+
+    await request(app)
+      .post("/api/budgets")
+      .set("Authorization", "Bearer user-two")
+      .send({
+        amount: "900.00",
+        scope: "category",
+        category: "Travel",
+        month: "2026-04"
+      });
+
+    const userTwoBudgets = await request(app)
+      .get("/api/budgets")
+      .set("Authorization", "Bearer user-two");
+
+    expect(userTwoBudgets.status).toBe(200);
+    expect(userTwoBudgets.body.budgets).toHaveLength(1);
+    expect(userTwoBudgets.body.budgets[0].category).toBe("Travel");
+
+    const deleteResponse = await request(app)
+      .delete("/api/account")
+      .set("Authorization", "Bearer user-one");
+
+    expect(deleteResponse.status).toBe(204);
+
+    const deletedUserBudgets = await request(app)
+      .get("/api/budgets")
+      .set("Authorization", "Bearer user-one");
+
+    const remainingUserBudgets = await request(app)
+      .get("/api/budgets")
+      .set("Authorization", "Bearer user-two");
+
+    expect(deletedUserBudgets.body.budgets).toHaveLength(0);
+    expect(remainingUserBudgets.body.budgets).toHaveLength(1);
+    expect(remainingUserBudgets.body.budgets[0].category).toBe("Travel");
+  });
 });

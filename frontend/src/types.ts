@@ -17,6 +17,41 @@ export type ExpenseForm = {
 	date: string;
 };
 
+export type BudgetScope = "monthly" | "category";
+
+export type Budget = {
+	id: string;
+	amount: string;
+	scope: BudgetScope;
+	category: string | null;
+	month: string;
+	created_at: string;
+};
+
+export type BudgetForm = {
+	amount: string;
+	scope: BudgetScope;
+	category: string;
+	month: string;
+};
+
+export type BudgetHistoryRange = "quarter" | "half-year" | "year" | "all";
+
+export type BudgetSummary = Budget & {
+	spent: number;
+	remaining: number;
+	formattedAmount: string;
+	formattedSpent: string;
+	formattedRemaining: string;
+	isOverspent: boolean;
+};
+
+export type BudgetHistoryGroup = {
+	month: string;
+	label: string;
+	items: BudgetSummary[];
+};
+
 export type PendingSubmission = {
 	idempotencyKey: string;
 	payload: ExpenseForm;
@@ -32,6 +67,7 @@ export type ProviderOption = {
 
 export type TimeRangeFilter = "all" | "week" | "month" | "year";
 export type ChartGranularity = "daily" | "monthly" | "quarterly" | "yearly";
+export type ChartDisplayType = "area" | "bar";
 export type CategoryIconId = "groceries" | "food" | "travel" | "shopping" | "bills" | "health" | "entertainment" | "work" | "other";
 
 export type TrendPoint = {
@@ -69,6 +105,13 @@ export type DashboardStats = {
 	topCategory: CategoryBreakdownItem | null;
 	latestExpense: Expense | null;
 	categoryBreakdown: CategoryBreakdownItem[];
+};
+
+export type DashboardInsight = {
+	id: string;
+	title: string;
+	body: string;
+	tone: "positive" | "warning" | "neutral";
 };
 
 export type ChartSummaryPoint = TrendPoint & {

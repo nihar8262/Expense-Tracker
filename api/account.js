@@ -119,6 +119,22 @@ async function ensureSchema(sql) {
           created_at TIMESTAMPTZ NOT NULL
         )
       `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS budgets (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+          budget_scope VARCHAR(16) NOT NULL CHECK (budget_scope IN ('monthly', 'category')),
+          category VARCHAR(64),
+          budget_month CHAR(7) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          CHECK (
+            (budget_scope = 'monthly' AND category IS NULL)
+            OR (budget_scope = 'category' AND category IS NOT NULL)
+          )
+        )
+      `;
     })();
   }
 
@@ -142,6 +158,11 @@ async function deleteAccountData(userId) {
 
     await tx`
       DELETE FROM expenses
+      WHERE user_id = ${userId}
+    `;
+
+    await tx`
+      DELETE FROM budgets
       WHERE user_id = ${userId}
     `;
   });

@@ -8,7 +8,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
 import { LandingPage } from "./pages/LandingPage";
-import type { CategoryIconId, CategoryOption, ChartGranularity, DashboardStats, Expense, ExpenseForm, PendingSubmission, ProviderOption, TimeRangeFilter, TrendDetailItem, TrendPoint } from "./types";
+import type { Budget, BudgetForm, BudgetHistoryGroup, BudgetHistoryRange, BudgetSummary, CategoryIconId, CategoryOption, ChartDisplayType, ChartGranularity, DashboardInsight, DashboardStats, Expense, ExpenseForm, PendingSubmission, ProviderOption, TimeRangeFilter, TrendDetailItem, TrendPoint } from "./types";
 import { ApiError } from "./types";
 
 const providerOptions: ProviderOption[] = [
@@ -35,6 +35,7 @@ const providerOptions: ProviderOption[] = [
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const PENDING_SUBMISSION_STORAGE_KEY = "expense-tracker.pending-submission";
 const CUSTOM_CATEGORY_STORAGE_KEY_PREFIX = "expense-tracker.custom-categories";
+const EXPENSES_PAGE_SIZE = 50;
 
 const iconOptions: Array<{ id: CategoryIconId; label: string }> = [
   { id: "groceries", label: "Groceries" },
@@ -60,11 +61,26 @@ const defaultCategoryOptions: CategoryOption[] = [
   { id: "others", label: "Others", icon: "other" }
 ];
 
-const initialFormState: ExpenseForm = {
+function getTodayIsoDate(baseDate = new Date()): string {
+  return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}-${String(baseDate.getDate()).padStart(2, "0")}`;
+}
+
+function createInitialFormState(baseDate = new Date()): ExpenseForm {
+  return {
+    amount: "",
+    category: "",
+    description: "",
+    date: getTodayIsoDate(baseDate)
+  };
+}
+
+const initialFormState: ExpenseForm = createInitialFormState();
+
+const initialBudgetFormState: BudgetForm = {
   amount: "",
+  scope: "monthly",
   category: "",
-  description: "",
-  date: ""
+  month: getCurrentMonthValue()
 };
 
 function getCustomCategoryStorageKey(userId: string): string {
@@ -115,6 +131,65 @@ function buildExpensesUrl(category: string, sortNewestFirst: boolean): string {
   }
 
   return url.toString();
+}
+
+function buildBudgetsUrl(): string {
+  return API_BASE_URL ? new URL("/api/budgets", API_BASE_URL).toString() : "/api/budgets";
+}
+
+function getCurrentMonthValue(baseDate = new Date()): string {
+  return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatBudgetMonth(month: string): string {
+  const [year, monthNumber] = month.split("-").map(Number);
+
+  if (!year || !monthNumber) {
+    return month;
+  }
+
+  return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(new Date(year, monthNumber - 1, 1));
+}
+
+function getExpenseMonth(expenseDate: string): string {
+  return expenseDate.slice(0, 7);
+}
+
+function getMonthValueWithOffset(baseMonth: string, offset: number): string {
+  const [year, month] = baseMonth.split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isBudgetMonthInRange(month: string, range: BudgetHistoryRange): boolean {
+  if (range === "all") {
+    return true;
+  }
+
+  const [year, monthNumber] = month.split("-").map(Number);
+
+  if (!year || !monthNumber) {
+    return false;
+  }
+
+  const budgetDate = new Date(year, monthNumber - 1, 1);
+  const currentDate = new Date();
+  const currentMonthDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+  const monthDiff = (currentMonthDate.getFullYear() - budgetDate.getFullYear()) * 12 + (currentMonthDate.getMonth() - budgetDate.getMonth());
+
+  if (monthDiff < 0) {
+    return true;
+  }
+
+  if (range === "quarter") {
+    return monthDiff <= 2;
+  }
+
+  if (range === "half-year") {
+    return monthDiff <= 5;
+  }
+
+  return monthDiff <= 11;
 }
 
 function readPendingSubmission(): PendingSubmission | null {
@@ -372,6 +447,60 @@ async function deleteExpense(expenseId: string, user: User): Promise<void> {
   }
 }
 
+async function createBudget(payload: BudgetForm, user: User): Promise<void> {
+  const response = await fetch(buildBudgetsUrl(), {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({
+      amount: payload.amount,
+      scope: payload.scope,
+      category: payload.scope === "category" ? payload.category : undefined,
+      month: payload.month
+    })
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(body?.error ?? "Failed to save budget.", response.status);
+  }
+}
+
+async function updateBudget(budgetId: string, payload: BudgetForm, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/budgets/${budgetId}`, API_BASE_URL).toString() : `/api/budgets/${budgetId}`;
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({
+      amount: payload.amount,
+      scope: payload.scope,
+      category: payload.scope === "category" ? payload.category : undefined,
+      month: payload.month
+    })
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(body?.error ?? "Failed to update budget.", response.status);
+  }
+}
+
+async function deleteBudget(budgetId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/budgets/${budgetId}`, API_BASE_URL).toString() : `/api/budgets/${budgetId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new ApiError(body?.error ?? "Failed to delete budget.", response.status);
+  }
+}
+
 async function deleteAccountData(user: User): Promise<void> {
   const endpoint = API_BASE_URL ? new URL("/api/account", API_BASE_URL).toString() : "/api/account";
   const response = await fetch(endpoint, {
@@ -388,24 +517,36 @@ async function deleteAccountData(user: User): Promise<void> {
 export default function App() {
   const navigate = useNavigate();
   const [form, setForm] = useState<ExpenseForm>(initialFormState);
+  const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [customCategoryIcon, setCustomCategoryIcon] = useState<CategoryIconId>("other");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("all");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
+  const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
+  const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
+  const [currentExpensesPage, setCurrentExpensesPage] = useState(1);
+  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
+  const [isBudgetHistoryOpen, setIsBudgetHistoryOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [deletingBudgetIds, setDeletingBudgetIds] = useState<string[]>([]);
   const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isBudgetLoading, setIsBudgetLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isBudgetSubmitting, setIsBudgetSubmitting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [budgetErrorMessage, setBudgetErrorMessage] = useState("");
+  const [budgetStatusMessage, setBudgetStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -450,11 +591,19 @@ export default function App() {
     return orderedCategories;
   }, [categories, customCategories]);
 
+  const budgetCategoryOptions = useMemo(() => availableCategoryOptions.filter((option) => option.id !== "others"), [availableCategoryOptions]);
+
   const selectedCategoryOption = useMemo(() => availableCategoryOptions.find((option) => option.label.toLowerCase() === form.category.trim().toLowerCase()) ?? null, [availableCategoryOptions, form.category]);
   const isOtherCategorySelected = selectedCategoryOption?.id === "others";
 
   const visibleExpenses = useMemo(() => expenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange)), [expenses, selectedTimeRange]);
-  const allVisibleExpenseIds = useMemo(() => visibleExpenses.map((expense) => expense.id), [visibleExpenses]);
+  const totalExpensePages = Math.max(1, Math.ceil(visibleExpenses.length / EXPENSES_PAGE_SIZE));
+  const paginatedExpenses = useMemo(() => {
+    const startIndex = (currentExpensesPage - 1) * EXPENSES_PAGE_SIZE;
+    return visibleExpenses.slice(startIndex, startIndex + EXPENSES_PAGE_SIZE);
+  }, [currentExpensesPage, visibleExpenses]);
+  const allFilteredExpenseIds = useMemo(() => visibleExpenses.map((expense) => expense.id), [visibleExpenses]);
+  const allVisibleExpenseIds = useMemo(() => paginatedExpenses.map((expense) => expense.id), [paginatedExpenses]);
   const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
   const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
 
@@ -524,6 +673,127 @@ export default function App() {
     };
   }, [visibleExpenses]);
 
+  const budgetSummaries = useMemo<BudgetSummary[]>(() => {
+    return budgets
+      .map((budget) => {
+        const spent = expenses
+          .filter((expense) => getExpenseMonth(expense.date) === budget.month)
+          .filter((expense) => (budget.scope === "category" ? expense.category === budget.category : true))
+          .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        const totalBudgetAmount = Number(budget.amount);
+        const remaining = totalBudgetAmount - spent;
+
+        return {
+          ...budget,
+          spent,
+          remaining,
+          formattedAmount: formatCurrency(budget.amount),
+          formattedSpent: formatCurrency(spent.toFixed(2)),
+          formattedRemaining: formatCurrency(remaining.toFixed(2)),
+          isOverspent: remaining < 0
+        };
+      })
+      .sort((left, right) => {
+        const byMonth = right.month.localeCompare(left.month);
+
+        if (byMonth !== 0) {
+          return byMonth;
+        }
+
+        if (left.scope !== right.scope) {
+          return left.scope === "monthly" ? -1 : 1;
+        }
+
+        return (left.category ?? "").localeCompare(right.category ?? "");
+      });
+  }, [budgets, expenses]);
+
+  const currentBudgetMonth = getCurrentMonthValue();
+  const currentMonthBudgetSummaries = useMemo(() => budgetSummaries.filter((budget) => budget.month === currentBudgetMonth), [budgetSummaries, currentBudgetMonth]);
+
+  const currentMonthBudgetOverview = useMemo(() => {
+    const totalBudgetAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
+    const totalSpentAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
+    const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
+
+    return {
+      totalBudget: formatCurrency(totalBudgetAmount.toFixed(2)),
+      totalSpent: formatCurrency(totalSpentAmount.toFixed(2)),
+      totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2)),
+      isOverspent: totalRemainingAmount < 0
+    };
+  }, [currentMonthBudgetSummaries]);
+
+  const dashboardInsights = useMemo<DashboardInsight[]>(() => {
+    const insights: DashboardInsight[] = [];
+    const previousMonth = getMonthValueWithOffset(currentBudgetMonth, -1);
+    const filteredExpenses = selectedCategory ? expenses.filter((expense) => expense.category === selectedCategory) : expenses;
+    const currentMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === currentBudgetMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
+    const previousMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === previousMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
+
+    if (currentMonthSpend > 0 && previousMonthSpend > 0) {
+      const percentageDelta = ((currentMonthSpend - previousMonthSpend) / previousMonthSpend) * 100;
+      insights.push({
+        id: "month-change",
+        title: percentageDelta >= 0 ? `Up ${Math.abs(percentageDelta).toFixed(0)}% from last month` : `Down ${Math.abs(percentageDelta).toFixed(0)}% from last month`,
+        body: `${formatCurrency(currentMonthSpend.toFixed(2))} this month versus ${formatCurrency(previousMonthSpend.toFixed(2))} last month.`,
+        tone: Math.abs(percentageDelta) >= 20 ? "warning" : "neutral"
+      });
+    }
+
+    if (currentMonthBudgetSummaries.length > 0) {
+      const totalBudgetAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
+      const remainingBudgetAmount = totalBudgetAmount - currentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
+      const remainingShare = totalBudgetAmount > 0 ? remainingBudgetAmount / totalBudgetAmount : 0;
+
+      insights.push({
+        id: "budget-status",
+        title: remainingShare <= 0.2 ? "You are close to your budget" : remainingBudgetAmount < 0 ? "You are over budget" : "Your budget still has room",
+        body: `${formatCurrency(Math.abs(remainingBudgetAmount).toFixed(2))} ${remainingBudgetAmount < 0 ? "over" : "remaining"} across this month's budgets.`,
+        tone: remainingBudgetAmount < 0 || remainingShare <= 0.2 ? "warning" : "positive"
+      });
+    }
+
+    if (dashboardStats.topCategory) {
+      insights.push({
+        id: "top-category",
+        title: `${dashboardStats.topCategory.category} dominates spending`,
+        body: `${dashboardStats.topCategory.formattedAmount} accounts for ${dashboardStats.topCategory.share.toFixed(0)}% of the current view.`,
+        tone: "neutral"
+      });
+    }
+
+    if (insights.length === 0) {
+      insights.push({
+        id: "starter",
+        title: "Add a few more expenses to unlock insights",
+        body: "Once you have at least two periods of activity, the dashboard will start comparing momentum and budget pressure.",
+        tone: "neutral"
+      });
+    }
+
+    return insights.slice(0, 3);
+  }, [currentBudgetMonth, currentMonthBudgetSummaries, dashboardStats, expenses, selectedCategory]);
+
+  const budgetHistoryGroups = useMemo<BudgetHistoryGroup[]>(() => {
+    const filteredBudgets = budgetSummaries.filter((budget) => isBudgetMonthInRange(budget.month, budgetHistoryRange));
+    const groupedBudgets = new Map<string, BudgetSummary[]>();
+
+    for (const budget of filteredBudgets) {
+      const existingItems = groupedBudgets.get(budget.month) ?? [];
+      existingItems.push(budget);
+      groupedBudgets.set(budget.month, existingItems);
+    }
+
+    return [...groupedBudgets.entries()]
+      .sort((left, right) => right[0].localeCompare(left[0]))
+      .map(([month, items]) => ({
+        month,
+        label: formatBudgetMonth(month),
+        items
+      }));
+  }, [budgetHistoryRange, budgetSummaries]);
+
   async function loadExpenses(user: User, activeCategory = selectedCategory, activeSort = sortNewestFirst) {
     setIsLoading(true);
     setErrorMessage("");
@@ -547,6 +817,29 @@ export default function App() {
     }
   }
 
+  async function loadBudgets(user: User) {
+    setIsBudgetLoading(true);
+    setBudgetErrorMessage("");
+
+    try {
+      const response = await fetch(buildBudgetsUrl(), {
+        headers: await buildAuthorizedHeaders(user)
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to load budgets.");
+      }
+
+      const body = (await response.json()) as { budgets: Budget[] };
+      setBudgets(body.budgets);
+    } catch (error) {
+      setBudgetErrorMessage(error instanceof Error ? error.message : "Failed to load budgets.");
+    } finally {
+      setIsBudgetLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
       setAuthLoading(false);
@@ -562,13 +855,18 @@ export default function App() {
 
       if (!user) {
         setExpenses([]);
+        setBudgets([]);
         setCustomCategories([]);
         setCustomCategoryName("");
         setCustomCategoryIcon("other");
         setForm(initialFormState);
+        setBudgetForm(initialBudgetFormState);
         setSelectedCategory("");
+        setCurrentExpensesPage(1);
         setSelectedExpenseIds([]);
         setEditingExpenseId(null);
+        setEditingBudgetId(null);
+        setIsBudgetHistoryOpen(false);
         return;
       }
 
@@ -592,8 +890,32 @@ export default function App() {
   }, [authLoading, currentUser, selectedCategory, sortNewestFirst]);
 
   useEffect(() => {
-    setSelectedExpenseIds((current) => current.filter((expenseId) => allVisibleExpenseIds.includes(expenseId)));
-  }, [allVisibleExpenseIds]);
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setIsBudgetLoading(false);
+      setBudgets([]);
+      return;
+    }
+
+    void loadBudgets(currentUser);
+  }, [authLoading, currentUser]);
+
+  useEffect(() => {
+    setCurrentExpensesPage(1);
+  }, [selectedCategory, selectedTimeRange, sortNewestFirst]);
+
+  useEffect(() => {
+    if (currentExpensesPage > totalExpensePages) {
+      setCurrentExpensesPage(totalExpensePages);
+    }
+  }, [currentExpensesPage, totalExpensePages]);
+
+  useEffect(() => {
+    setSelectedExpenseIds((current) => current.filter((expenseId) => allFilteredExpenseIds.includes(expenseId)));
+  }, [allFilteredExpenseIds]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -663,9 +985,13 @@ export default function App() {
     writePendingSubmission(null);
     setStatusMessage("");
     setErrorMessage("");
+    setBudgetStatusMessage("");
+    setBudgetErrorMessage("");
     setIsProfileMenuOpen(false);
+    setIsBudgetHistoryOpen(false);
     setSelectedExpenseIds([]);
     setEditingExpenseId(null);
+    setEditingBudgetId(null);
   }
 
   function handleEditStart(expense: Expense) {
@@ -801,11 +1127,15 @@ export default function App() {
       setIsProfileMenuOpen(false);
       setIsDeleteAccountModalOpen(false);
       setExpenses([]);
+      setBudgets([]);
       setCustomCategories([]);
       setForm(initialFormState);
+      setBudgetForm(initialBudgetFormState);
       setSelectedCategory("");
       setSelectedExpenseIds([]);
       setEditingExpenseId(null);
+      setEditingBudgetId(null);
+      setIsBudgetHistoryOpen(false);
       if (auth) {
         await signOut(auth);
       }
@@ -927,6 +1257,110 @@ export default function App() {
     }
   }
 
+  function handleBudgetFormChange(updater: (current: BudgetForm) => BudgetForm) {
+    setBudgetForm((current) => {
+      const nextBudgetForm = updater(current);
+
+      if (nextBudgetForm.scope === "monthly") {
+        return {
+          ...nextBudgetForm,
+          category: ""
+        };
+      }
+
+      return nextBudgetForm;
+    });
+  }
+
+  function handleBudgetEditStart(budget: Budget) {
+    setEditingBudgetId(budget.id);
+    setBudgetForm({
+      amount: budget.amount,
+      scope: budget.scope,
+      category: budget.category ?? "",
+      month: budget.month
+    });
+    setBudgetErrorMessage("");
+    setBudgetStatusMessage("");
+    setIsBudgetHistoryOpen(false);
+  }
+
+  function handleBudgetEditCancel() {
+    setEditingBudgetId(null);
+    setBudgetForm(initialBudgetFormState);
+    setBudgetErrorMessage("");
+    setBudgetStatusMessage("");
+  }
+
+  async function handleBudgetSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!currentUser) {
+      setBudgetErrorMessage("Sign in to save budgets to your private account.");
+      return;
+    }
+
+    setBudgetErrorMessage("");
+    setBudgetStatusMessage("");
+    setIsBudgetSubmitting(true);
+
+    try {
+      if (editingBudgetId) {
+        await updateBudget(editingBudgetId, budgetForm, currentUser);
+        setBudgetStatusMessage("Budget updated.");
+      } else {
+        await createBudget(budgetForm, currentUser);
+        setBudgetStatusMessage("Budget saved.");
+      }
+
+      setEditingBudgetId(null);
+      setBudgetForm(initialBudgetFormState);
+      await loadBudgets(currentUser);
+    } catch (error) {
+      setBudgetErrorMessage(error instanceof Error ? error.message : editingBudgetId ? "Failed to update budget." : "Failed to save budget.");
+    } finally {
+      setIsBudgetSubmitting(false);
+    }
+  }
+
+  async function handleBudgetDelete(budgetId: string) {
+    if (!currentUser) {
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this budget permanently?");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingBudgetIds((current) => [...new Set([...current, budgetId])]);
+    setBudgetErrorMessage("");
+    setBudgetStatusMessage("");
+
+    try {
+      await deleteBudget(budgetId, currentUser);
+
+      if (editingBudgetId === budgetId) {
+        setEditingBudgetId(null);
+        setBudgetForm(initialBudgetFormState);
+      }
+
+      setBudgetStatusMessage("Budget deleted.");
+      await loadBudgets(currentUser);
+    } catch (error) {
+      setBudgetErrorMessage(error instanceof Error ? error.message : "Failed to delete budget.");
+    } finally {
+      setDeletingBudgetIds((current) => current.filter((id) => id !== budgetId));
+    }
+  }
+
+  function handleClearExpenseFilters() {
+    setSelectedCategory("");
+    setSelectedTimeRange("all");
+    setSortNewestFirst(true);
+  }
+
   function renderSignedInPage(page: "dashboard" | "expenses") {
     if (!currentUser) {
       return null;
@@ -949,6 +1383,15 @@ export default function App() {
         {page === "dashboard" ? (
           <DashboardPage
             categories={categories}
+            dashboardInsights={dashboardInsights}
+            budgetForm={budgetForm}
+            budgetCategoryOptions={budgetCategoryOptions}
+            currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
+            currentMonthBudgetSummaries={currentMonthBudgetSummaries}
+            currentMonthBudgetOverview={currentMonthBudgetOverview}
+            budgetHistoryGroups={budgetHistoryGroups}
+            budgetHistoryRange={budgetHistoryRange}
+            chartDisplayType={chartDisplayType}
             selectedCategory={selectedCategory}
             selectedTimeRange={selectedTimeRange}
             chartGranularity={chartGranularity}
@@ -957,9 +1400,25 @@ export default function App() {
             spendTrend={spendTrend}
             trendDetailLookup={trendDetailLookup}
             chartSummary={chartSummary}
+            editingBudgetId={editingBudgetId}
+            deletingBudgetIds={deletingBudgetIds}
+            isBudgetLoading={isBudgetLoading}
+            isBudgetSubmitting={isBudgetSubmitting}
+            isBudgetHistoryOpen={isBudgetHistoryOpen}
+            budgetStatusMessage={budgetStatusMessage}
+            budgetErrorMessage={budgetErrorMessage}
             formatCurrency={formatCurrency}
+            onBudgetFormChange={handleBudgetFormChange}
+            onBudgetSubmit={handleBudgetSubmit}
+            onBudgetEditCancel={handleBudgetEditCancel}
+            onBudgetEditStart={handleBudgetEditStart}
+            onBudgetDelete={handleBudgetDelete}
+            onBudgetHistoryRangeChange={setBudgetHistoryRange}
+            onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
+            onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}
             onSelectedCategoryChange={setSelectedCategory}
             onSelectedTimeRangeChange={setSelectedTimeRange}
+            onChartDisplayTypeChange={setChartDisplayType}
             onChartGranularityChange={setChartGranularity}
           />
         ) : (
@@ -977,7 +1436,11 @@ export default function App() {
             selectedTimeRange={selectedTimeRange}
             sortNewestFirst={sortNewestFirst}
             categories={categories}
-            visibleExpenses={visibleExpenses}
+            visibleExpenses={paginatedExpenses}
+            totalVisibleExpenses={visibleExpenses.length}
+            currentExpensesPage={currentExpensesPage}
+            totalExpensePages={totalExpensePages}
+            expensesPageSize={EXPENSES_PAGE_SIZE}
             availableCategoryOptions={availableCategoryOptions}
             selectedCategoryOption={selectedCategoryOption}
             isOtherCategorySelected={isOtherCategorySelected}
@@ -999,11 +1462,13 @@ export default function App() {
             onSelectedCategoryChange={setSelectedCategory}
             onSortNewestFirstChange={setSortNewestFirst}
             onSelectedTimeRangeChange={setSelectedTimeRange}
+            onExpensesPageChange={setCurrentExpensesPage}
             onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
             onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
             onToggleExpenseSelection={handleToggleExpenseSelection}
             onEditStart={handleEditStart}
             onDeleteExpense={handleDeleteExpense}
+            onClearFilters={handleClearExpenseFilters}
           />
         )}
       </SignedInLayout>

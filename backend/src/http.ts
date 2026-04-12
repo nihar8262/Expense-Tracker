@@ -1,5 +1,5 @@
-import { createExpenseSchema, expensesQuerySchema } from "./lib/validation.js";
-import { ExpenseNotFoundError, IdempotencyConflictError, type ExpenseStore } from "./store/types.js";
+import { createBudgetSchema, createExpenseSchema, expensesQuerySchema } from "./lib/validation.js";
+import { BudgetNotFoundError, ExpenseNotFoundError, IdempotencyConflictError, type ExpenseStore } from "./store/types.js";
 
 export type HandlerResponse = {
   status: number;
@@ -72,6 +72,97 @@ export async function handleCreateExpense(rawBody: unknown, idempotencyKey: stri
     return {
       status: 500,
       body: { error: "Failed to create expense." }
+    };
+  }
+}
+
+export async function handleListBudgets(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const budgets = await store.listBudgets(userId);
+  return {
+    status: 200,
+    body: { budgets }
+  };
+}
+
+export async function handleCreateBudget(rawBody: unknown, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createBudgetSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid budget payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const budget = await store.createBudget(userId, result.data);
+    return {
+      status: 201,
+      body: { budget }
+    };
+  } catch {
+    return {
+      status: 500,
+      body: { error: "Failed to create budget." }
+    };
+  }
+}
+
+export async function handleUpdateBudget(rawBody: unknown, budgetId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createBudgetSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid budget payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const budget = await store.updateBudget(userId, budgetId, result.data);
+    return {
+      status: 200,
+      body: { budget }
+    };
+  } catch (error) {
+    if (error instanceof BudgetNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to update budget." }
+    };
+  }
+}
+
+export async function handleDeleteBudget(budgetId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    await store.deleteBudget(userId, budgetId);
+    return {
+      status: 204,
+      body: null
+    };
+  } catch (error) {
+    if (error instanceof BudgetNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to delete budget." }
     };
   }
 }

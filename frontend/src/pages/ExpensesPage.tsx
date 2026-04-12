@@ -1,4 +1,5 @@
-import type { FormEvent } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import { CategoryIcon } from "../components/CategoryIcon";
 import type { CategoryIconId, CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 
@@ -17,6 +18,10 @@ type ExpensesPageProps = {
   sortNewestFirst: boolean;
   categories: string[];
   visibleExpenses: Expense[];
+  totalVisibleExpenses: number;
+  currentExpensesPage: number;
+  totalExpensePages: number;
+  expensesPageSize: number;
   availableCategoryOptions: CategoryOption[];
   selectedCategoryOption: CategoryOption | null;
   isOtherCategorySelected: boolean;
@@ -38,11 +43,13 @@ type ExpensesPageProps = {
   onSelectedCategoryChange: (value: string) => void;
   onSortNewestFirstChange: (value: boolean) => void;
   onSelectedTimeRangeChange: (range: TimeRangeFilter) => void;
+  onExpensesPageChange: (page: number) => void;
   onDeleteSelectedExpenses: () => Promise<void>;
   onToggleSelectAllVisibleExpenses: () => void;
   onToggleExpenseSelection: (expenseId: string) => void;
   onEditStart: (expense: Expense) => void;
   onDeleteExpense: (expenseId: string) => Promise<void>;
+  onClearFilters: () => void;
 };
 
 export function ExpensesPage({
@@ -60,6 +67,10 @@ export function ExpensesPage({
   sortNewestFirst,
   categories,
   visibleExpenses,
+  totalVisibleExpenses,
+  currentExpensesPage,
+  totalExpensePages,
+  expensesPageSize,
   availableCategoryOptions,
   selectedCategoryOption,
   isOtherCategorySelected,
@@ -81,12 +92,51 @@ export function ExpensesPage({
   onSelectedCategoryChange,
   onSortNewestFirstChange,
   onSelectedTimeRangeChange,
+  onExpensesPageChange,
   onDeleteSelectedExpenses,
   onToggleSelectAllVisibleExpenses,
   onToggleExpenseSelection,
   onEditStart,
-  onDeleteExpense
+  onDeleteExpense,
+  onClearFilters
 }: ExpensesPageProps) {
+  const [showValidation, setShowValidation] = useState(false);
+  const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const pageStart = totalVisibleExpenses === 0 ? 0 : (currentExpensesPage - 1) * expensesPageSize + 1;
+  const pageEnd = totalVisibleExpenses === 0 ? 0 : Math.min(currentExpensesPage * expensesPageSize, totalVisibleExpenses);
+  const validationErrors = useMemo(
+    () => ({
+      amount: form.amount.trim() ? "" : "Amount is required.",
+      category: form.category.trim() ? "" : "Category is required.",
+      description: form.description.trim() ? "" : "Description is required.",
+      date: form.date.trim() ? "" : "Date is required."
+    }),
+    [form.amount, form.category, form.date, form.description]
+  );
+  const hasValidationErrors = Object.values(validationErrors).some(Boolean);
+  const activeFilters = [selectedCategory ? `Category: ${selectedCategory}` : null, selectedTimeRange !== "all" ? `Range: ${selectedTimeRange}` : null, !sortNewestFirst ? "Sort: created order" : null].filter(Boolean) as string[];
+
+  async function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
+    setShowValidation(true);
+
+    if (hasValidationErrors) {
+      event.preventDefault();
+      return;
+    }
+
+    await onSubmit(event);
+  }
+
+  function handleFieldAdvance(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>, nextField: HTMLTextAreaElement | HTMLInputElement | null) {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    nextField?.focus();
+  }
+
   return (
     <>
       <section className="hero-panel page-hero">
@@ -96,34 +146,42 @@ export function ExpensesPage({
       </section>
 
       <section className="content-grid expenses-page-grid">
-        <form className="card form-card" onSubmit={(event) => void onSubmit(event)}>
+        <form className="card form-card" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
           <div className="section-heading">
             <h2>{editingExpenseId ? "Edit expense" : "Add expense"}</h2>
             <p>{editingExpenseId ? "Update the selected expense and save the revised amount, category, description, or date." : "Each save is tied to your account, and retries remain idempotent per user."}</p>
           </div>
 
           <label>
-            <span>Amount</span>
+            <span>Amount <sup className="required-marker">*</sup></span>
             <input
               type="number"
               min="0.01"
               step="0.01"
               required
+              autoFocus={!editingExpenseId}
+              inputMode="decimal"
               disabled={!currentUserPresent}
               value={form.amount}
+              aria-invalid={showValidation && Boolean(validationErrors.amount)}
               onChange={(event) => onFormChange((current) => ({ ...current, amount: event.target.value }))}
+              onKeyDown={(event) => handleFieldAdvance(event, descriptionInputRef.current)}
             />
+            {showValidation && validationErrors.amount ? <small className="field-error-message">{validationErrors.amount}</small> : null}
           </label>
 
           <label>
-            <span>Category</span>
+            <span>Category <sup className="required-marker">*</sup></span>
             <div className="category-field">
               <div className="category-selector-grid" role="list" aria-label="Expense categories">
                 {availableCategoryOptions.map((category) => {
                   const isActive = selectedCategoryOption?.label.toLowerCase() === category.label.toLowerCase();
 
                   return (
-                    <button key={category.id} type="button" className={isActive ? "category-chip is-active" : "category-chip"} onClick={() => onCategorySelect(category)}>
+                    <button key={category.id} type="button" className={isActive ? "category-chip is-active" : "category-chip"} aria-pressed={isActive} onClick={() => {
+                      onCategorySelect(category);
+                      requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                    }}>
                       <span className="category-chip-icon">
                         <CategoryIcon iconId={category.icon} />
                       </span>
@@ -162,16 +220,35 @@ export function ExpensesPage({
 
               <input type="hidden" required value={form.category} readOnly />
             </div>
+            {showValidation && validationErrors.category ? <small className="field-error-message">{validationErrors.category}</small> : null}
           </label>
 
           <label>
-            <span>Description</span>
-            <textarea required rows={3} disabled={!currentUserPresent} value={form.description} onChange={(event) => onFormChange((current) => ({ ...current, description: event.target.value }))} />
+            <span>Description <sup className="required-marker">*</sup></span>
+            <textarea ref={descriptionInputRef} required rows={3} disabled={!currentUserPresent} value={form.description} aria-invalid={showValidation && Boolean(validationErrors.description)} onChange={(event) => onFormChange((current) => ({ ...current, description: event.target.value }))} onKeyDown={(event) => handleFieldAdvance(event, dateInputRef.current)} />
+            {showValidation && validationErrors.description ? <small className="field-error-message">{validationErrors.description}</small> : null}
           </label>
 
           <label>
-            <span>Date</span>
-            <input type="date" required disabled={!currentUserPresent} value={form.date} onChange={(event) => onFormChange((current) => ({ ...current, date: event.target.value }))} />
+            <span>Date <sup className="required-marker">*</sup></span>
+            <input ref={dateInputRef} type="date" required disabled={!currentUserPresent} value={form.date} aria-invalid={showValidation && Boolean(validationErrors.date)} onChange={(event) => onFormChange((current) => ({ ...current, date: event.target.value }))} />
+            <div className="date-shortcuts">
+              <button type="button" className="table-action-button" onClick={() => onFormChange((current) => ({ ...current, date: new Date().toISOString().slice(0, 10) }))}>
+                Today
+              </button>
+              <button
+                type="button"
+                className="table-action-button"
+                onClick={() => {
+                  const yesterday = new Date();
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  onFormChange((current) => ({ ...current, date: yesterday.toISOString().slice(0, 10) }));
+                }}
+              >
+                Yesterday
+              </button>
+            </div>
+            {showValidation && validationErrors.date ? <small className="field-error-message">{validationErrors.date}</small> : null}
           </label>
 
           <div className="form-actions">
@@ -227,13 +304,24 @@ export function ExpensesPage({
               </select>
             </label>
           </div>
+
+          <div className="filter-feedback-row">
+            <p className="filter-feedback-copy">{activeFilters.length > 0 ? `Showing: ${activeFilters.join(" | ")}` : "Showing: All categories | All time | Newest first"}</p>
+            <button type="button" className="ghost-button filter-clear-button" disabled={activeFilters.length === 0} onClick={onClearFilters}>
+              Clear filters
+            </button>
+          </div>
         </section>
 
         <section className="card list-card">
           <div className="list-card-heading">
             <div className="section-heading">
               <h2>Your expenses</h2>
-              <p>Only the expenses tied to your authenticated account are returned by the API.</p>
+              <p>
+                {totalVisibleExpenses > 0
+                  ? `Showing ${pageStart}-${pageEnd} of ${totalVisibleExpenses} expenses tied to your authenticated account.`
+                  : "Only the expenses tied to your authenticated account are returned by the API."}
+              </p>
             </div>
 
             <div className="list-card-tools">
@@ -254,58 +342,81 @@ export function ExpensesPage({
           {currentUserPresent && !isLoading && visibleExpenses.length === 0 ? <p className="empty-state">No expenses match the current filters.</p> : null}
 
           {currentUserPresent && !isLoading && visibleExpenses.length > 0 ? (
-            <div className="table-shell">
-              <table>
-                <thead>
-                  <tr>
-                    <th>
-                      <input type="checkbox" aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"} checked={areAllVisibleExpensesSelected} onChange={onToggleSelectAllVisibleExpenses} />
-                    </th>
-                    <th>Date</th>
-                    <th>Category</th>
-                    <th>Description</th>
-                    <th>Amount</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleExpenses.map((expense) => (
-                    <tr key={expense.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${expense.description}`}
-                          checked={selectedExpenseIds.includes(expense.id)}
-                          disabled={deletingExpenseIds.includes(expense.id)}
-                          onChange={() => onToggleExpenseSelection(expense.id)}
-                        />
-                      </td>
-                      <td>{expense.date}</td>
-                      <td>
-                        <div className="expense-category-cell">
-                          <span className="expense-category-icon">
-                            <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
-                          </span>
-                          <span>{expense.category}</span>
-                        </div>
-                      </td>
-                      <td>{expense.description}</td>
-                      <td>{formatCurrency(expense.amount)}</td>
-                      <td>
-                        <div className="table-actions">
-                          <button type="button" className="table-action-button" onClick={() => onEditStart(expense)}>
-                            Edit
-                          </button>
-                          <button type="button" className="table-action-button danger-button" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void onDeleteExpense(expense.id)}>
-                            {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                          </button>
-                        </div>
-                      </td>
+            <>
+              <div className="table-shell">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        <input type="checkbox" aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"} checked={areAllVisibleExpensesSelected} onChange={onToggleSelectAllVisibleExpenses} />
+                      </th>
+                      <th>Date</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th>Amount</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {visibleExpenses.map((expense) => (
+                      <tr key={expense.id} className="expense-row" onClick={() => onEditStart(expense)}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${expense.description}`}
+                            checked={selectedExpenseIds.includes(expense.id)}
+                            disabled={deletingExpenseIds.includes(expense.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => onToggleExpenseSelection(expense.id)}
+                          />
+                        </td>
+                        <td>{expense.date}</td>
+                        <td>
+                          <div className="expense-category-cell expense-category-badge">
+                            <span className="expense-category-icon">
+                              <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
+                            </span>
+                            <span>{expense.category}</span>
+                          </div>
+                        </td>
+                        <td>{expense.description}</td>
+                        <td className="expense-amount-cell">{formatCurrency(expense.amount)}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button type="button" className="table-action-button" onClick={(event) => {
+                              event.stopPropagation();
+                              onEditStart(expense);
+                            }}>
+                              Edit
+                            </button>
+                            <button type="button" className="table-action-button danger-button" disabled={deletingExpenseIds.includes(expense.id)} onClick={(event) => {
+                              event.stopPropagation();
+                              void onDeleteExpense(expense.id);
+                            }}>
+                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {totalExpensePages > 1 ? (
+                <div className="pagination-bar" aria-label="Expenses pagination">
+                  <p className="pagination-copy">Page {currentExpensesPage} of {totalExpensePages}</p>
+                  <div className="pagination-actions">
+                    <button type="button" className="table-action-button" disabled={currentExpensesPage === 1} onClick={() => onExpensesPageChange(currentExpensesPage - 1)}>
+                      Previous
+                    </button>
+                    <button type="button" className="table-action-button" disabled={currentExpensesPage === totalExpensePages} onClick={() => onExpensesPageChange(currentExpensesPage + 1)}>
+                      Next
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : null}
         </section>
       </section>

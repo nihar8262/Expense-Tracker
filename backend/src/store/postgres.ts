@@ -2,8 +2,8 @@ import postgres, { type Sql, type TransactionSql } from "postgres";
 import { randomUUID } from "node:crypto";
 import { formatMinorUnits } from "../lib/money.js";
 import { createExpenseRequestHash } from "../lib/request-hash.js";
-import type { CreateExpenseInput, ExpensesQueryInput } from "../lib/validation.js";
-import { ExpenseNotFoundError, IdempotencyConflictError, type CreateExpenseResult, type ExpenseRecord, type ExpenseStore } from "./types.js";
+import type { CreateBudgetInput, CreateExpenseInput, ExpensesQueryInput } from "../lib/validation.js";
+import { BudgetNotFoundError, type BudgetRecord, ExpenseNotFoundError, IdempotencyConflictError, type CreateExpenseResult, type ExpenseRecord, type ExpenseStore } from "./types.js";
 
 type ExpenseRow = {
   id: string;
@@ -17,6 +17,15 @@ type ExpenseRow = {
 type IdempotencyRow = {
   request_hash: string;
   expense_id: string;
+};
+
+type BudgetRow = {
+  id: string;
+  amount_minor: number | string;
+  budget_scope: "monthly" | "category";
+  category: string | null;
+  budget_month: string;
+  created_at: string | Date;
 };
 
 declare global {
@@ -39,6 +48,17 @@ function mapExpense(row: ExpenseRow): ExpenseRecord {
     category: row.category,
     description: row.description,
     date: asIsoDate(row.expense_date),
+    created_at: asIsoTimestamp(row.created_at)
+  };
+}
+
+function mapBudget(row: BudgetRow): BudgetRecord {
+  return {
+    id: row.id,
+    amount: formatMinorUnits(Number(row.amount_minor)),
+    scope: row.budget_scope,
+    category: row.category,
+    month: row.budget_month,
     created_at: asIsoTimestamp(row.created_at)
   };
 }
@@ -92,6 +112,24 @@ async function ensureSchema(sql: Sql): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL
         )
       `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS budgets (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+          budget_scope VARCHAR(16) NOT NULL CHECK (budget_scope IN ('monthly', 'category')),
+          category VARCHAR(64),
+          budget_month CHAR(7) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          CHECK (
+            (budget_scope = 'monthly' AND category IS NULL)
+            OR (budget_scope = 'category' AND category IS NOT NULL)
+          )
+        )
+      `;
+
+      await sql`CREATE INDEX IF NOT EXISTS budgets_user_id_budget_month_idx ON budgets (user_id, budget_month DESC, created_at DESC)`;
     })();
   }
 
@@ -240,6 +278,77 @@ export function createPostgresExpenseStore(): ExpenseStore {
       });
     },
 
+    async createBudget(userId: string, input: CreateBudgetInput): Promise<BudgetRecord> {
+      await ensureSchema(sql);
+
+      const budgetId = randomUUID();
+      const createdAt = new Date().toISOString();
+      const insertedBudgets = await sql<BudgetRow[]>`
+        INSERT INTO budgets (id, user_id, amount_minor, budget_scope, category, budget_month, created_at)
+        VALUES (
+          ${budgetId},
+          ${userId},
+          ${input.amount},
+          ${input.scope},
+          ${input.scope === "category" ? input.category?.trim() ?? null : null},
+          ${input.month},
+          ${createdAt}
+        )
+        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+      `;
+
+      return mapBudget(insertedBudgets[0]);
+    },
+
+    async listBudgets(userId: string): Promise<BudgetRecord[]> {
+      await ensureSchema(sql);
+
+      const rows = await sql<BudgetRow[]>`
+        SELECT id, amount_minor, budget_scope, category, budget_month, created_at
+        FROM budgets
+        WHERE user_id = ${userId}
+        ORDER BY budget_month DESC, created_at DESC
+      `;
+
+      return rows.map(mapBudget);
+    },
+
+    async updateBudget(userId: string, budgetId: string, input: CreateBudgetInput): Promise<BudgetRecord> {
+      await ensureSchema(sql);
+
+      const updatedRows = await sql<BudgetRow[]>`
+        UPDATE budgets
+        SET amount_minor = ${input.amount},
+            budget_scope = ${input.scope},
+            category = ${input.scope === "category" ? input.category?.trim() ?? null : null},
+            budget_month = ${input.month}
+        WHERE id = ${budgetId} AND user_id = ${userId}
+        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+      `;
+
+      const updatedBudget = updatedRows[0];
+
+      if (!updatedBudget) {
+        throw new BudgetNotFoundError();
+      }
+
+      return mapBudget(updatedBudget);
+    },
+
+    async deleteBudget(userId: string, budgetId: string): Promise<void> {
+      await ensureSchema(sql);
+
+      const deletedRows = await sql<BudgetRow[]>`
+        DELETE FROM budgets
+        WHERE id = ${budgetId} AND user_id = ${userId}
+        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+      `;
+
+      if (!deletedRows[0]) {
+        throw new BudgetNotFoundError();
+      }
+    },
+
     async deleteUserData(userId: string): Promise<void> {
       await ensureSchema(sql);
 
@@ -256,6 +365,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
         await tx`
           DELETE FROM expenses
+          WHERE user_id = ${userId}
+        `;
+
+        await tx`
+          DELETE FROM budgets
           WHERE user_id = ${userId}
         `;
       });

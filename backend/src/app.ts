@@ -1,6 +1,6 @@
 import express from "express";
 import { authenticateBearerToken, AuthenticationConfigurationError, AuthenticationError, deleteAuthenticatedUser } from "./auth.js";
-import { handleCreateExpense, handleDeleteAccount, handleDeleteExpense, handleHealthcheck, handleListExpenses, handleUpdateExpense } from "./http.js";
+import { handleCreateBudget, handleCreateExpense, handleDeleteAccount, handleDeleteBudget, handleDeleteExpense, handleHealthcheck, handleListBudgets, handleListExpenses, handleUpdateBudget, handleUpdateExpense } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
 
 type RequestAuthenticator = (authorizationHeader: string | undefined) => Promise<{ id: string }>;
@@ -60,6 +60,64 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       return response.status(result.status).json(result.body);
       },
       "Failed to create expense."
+    );
+  });
+
+  app.get("/api/budgets", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleListBudgets(user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to load budgets."
+    );
+  });
+
+  app.post("/api/budgets", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateBudget(request.body, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to create budget."
+    );
+  });
+
+  app.put("/api/budgets/:budgetId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateBudget(request.body, request.params.budgetId, user.id, store);
+
+        if (result.body === null) {
+          return response.sendStatus(result.status);
+        }
+
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update budget."
+    );
+  });
+
+  app.delete("/api/budgets/:budgetId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteBudget(request.params.budgetId, user.id, store);
+
+        if (result.body === null) {
+          return response.sendStatus(result.status);
+        }
+
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete budget."
     );
   });
 
