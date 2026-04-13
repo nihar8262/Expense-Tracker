@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { EmptyState, PageHero, SectionHeader, SurfaceCard, cn } from "../components/ui";
 import { useNavigate } from "react-router-dom";
@@ -114,6 +114,7 @@ export function DashboardPage({
   const navigate = useNavigate();
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
   const [activeChartPointKey, setActiveChartPointKey] = useState<string | null>(null);
+  const [isSmallScreen, setIsSmallScreen] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 640 : false));
   const trendSectionRef = useRef<HTMLElement | null>(null);
   const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const activeTrendPoint = spendTrend.find((point) => point.key === activeTrendDetailKey) ?? null;
@@ -121,12 +122,31 @@ export function DashboardPage({
   const chartBarWidth = chartSummary.points.length > 0 ? 100 / chartSummary.points.length : 0;
   const activeChartPoint = chartSummary.points.find((point) => point.key === activeChartPointKey) ?? null;
   const chartMinWidth = Math.max(
-    chartSummary.points.length * (chartGranularity === "daily" ? 42 : chartGranularity === "weekly" ? 52 : chartGranularity === "monthly" ? 56 : 68),
-    320
+    chartSummary.points.length * (chartGranularity === "daily" ? 46 : chartGranularity === "weekly" ? 56 : chartGranularity === "monthly" ? 62 : 70),
+    300
   );
   const chartScaleTicks = [chartSummary.peakValue, chartSummary.peakValue * 0.66, chartSummary.peakValue * 0.33, 0].map((value) =>
     Math.max(0, Number(value.toFixed(2)))
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 639px)");
+    const handleChange = (event: MediaQueryListEvent) => setIsSmallScreen(event.matches);
+
+    setIsSmallScreen(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
 
   function getChartLabel(amount: number): string {
     return new Intl.NumberFormat("en-IN", {
@@ -164,6 +184,9 @@ export function DashboardPage({
 
     return "left-1/2 -translate-x-1/2";
   }
+
+  const enableTrendHover = isTrendDetailEnabled && !isSmallScreen;
+  const enableTrendTap = isTrendDetailEnabled && isSmallScreen;
 
   return (
     <>
@@ -369,9 +392,9 @@ export function DashboardPage({
             <EmptyState title="No spend trend yet" description="Add expenses inside the selected filters to render the spending graph." />
           ) : (
             <>
-              <div className="rounded-[28px] border border-[color:var(--border)] bg-white/80 p-3 sm:p-5 lg:p-6">
+              <div className="rounded-[28px] border border-[color:var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,243,232,0.74))] p-3 sm:p-4 lg:p-5">
                 <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 sm:gap-4">
-                  <div className="flex h-[240px] flex-col justify-between pb-7 pr-2 pt-1 text-[10px] font-semibold text-ink sm:h-[360px] sm:text-xs lg:h-[540px] xl:h-[600px]">
+                  <div className="flex h-[260px] flex-col justify-between pb-7 pr-2 pt-1 text-[10px] font-semibold text-ink sm:h-[320px] sm:text-xs lg:h-[430px] xl:h-[480px]">
                     {chartScaleTicks.map((tick, index) => (
                       <span key={`${tick}-${index}`} className="whitespace-nowrap leading-none">
                         {getChartLabel(tick)}
@@ -381,47 +404,48 @@ export function DashboardPage({
 
                   <div className="overflow-x-auto pb-2">
                     <div style={{ minWidth: `${chartMinWidth}px` }}>
-                      <div className="relative h-[240px] sm:h-[360px] lg:h-[540px] xl:h-[600px]" onMouseLeave={() => setActiveChartPointKey(null)}>
+                      <div className="relative h-[360px] sm:h-[580px] lg:h-[720px] xl:h-[800px]" onMouseLeave={() => setActiveChartPointKey(null)}>
                         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-label="Expense trend graph">
                           <defs>
                             <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
-                              <stop offset="0%" stopColor="rgba(30,122,83,0.26)" />
-                              <stop offset="100%" stopColor="rgba(30,122,83,0.02)" />
+                              <stop offset="0%" stopColor="rgba(30,122,83,0.22)" />
+                              <stop offset="100%" stopColor="rgba(30,122,83,0.03)" />
                             </linearGradient>
                             <linearGradient id="trendBarFill" x1="0" x2="0" y1="0" y2="1">
                               <stop offset="0%" stopColor="#1e7a53" />
                               <stop offset="100%" stopColor="#d4a857" />
                             </linearGradient>
                           </defs>
-                          <line x1="0" y1="100" x2="100" y2="100" stroke="rgba(29,42,34,0.14)" strokeWidth="0.4" />
-                          <line x1="0" y1="66" x2="100" y2="66" stroke="rgba(29,42,34,0.08)" strokeWidth="0.35" />
-                          <line x1="0" y1="33" x2="100" y2="33" stroke="rgba(29,42,34,0.08)" strokeWidth="0.35" />
-                          <line x1="0" y1="0" x2="100" y2="0" stroke="rgba(29,42,34,0.08)" strokeWidth="0.35" />
+                          <line x1="0" y1="100" x2="100" y2="100" stroke="rgba(29,42,34,0.14)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                          <line x1="0" y1="66" x2="100" y2="66" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                          <line x1="0" y1="33" x2="100" y2="33" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                          <line x1="0" y1="0" x2="100" y2="0" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
                           {chartDisplayType === "area" ? (
                             <>
                               <path d={chartSummary.areaPath} fill="url(#trendFill)" />
-                              <path d={chartSummary.linePath} fill="none" stroke="#1e7a53" strokeWidth="1.6" />
+                              <path d={chartSummary.linePath} fill="none" stroke="#1e7a53" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                               {chartSummary.points.map((point) => (
                                 <g key={point.key}>
                                   <circle
                                     cx={point.x}
                                     cy={point.y}
-                                    r="4.2"
+                                    r="4.4"
                                     fill="transparent"
+                                    className="cursor-pointer"
                                     onMouseEnter={() => setActiveChartPointKey(point.key)}
                                     onFocus={() => setActiveChartPointKey(point.key)}
                                     onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
                                     onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
                                     tabIndex={0}
                                   />
-                                  <circle cx={point.x} cy={point.y} r="1.6" fill="#1e7a53" />
+                                  <circle cx={point.x} cy={point.y} r="1.8" fill="#1e7a53" stroke="#ffffff" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />
                                 </g>
                               ))}
                             </>
                           ) : (
                             chartSummary.points.map((point, index) => {
-                              const barWidth = Math.max(chartBarWidth * 0.62, 4);
+                              const barWidth = Math.max(chartBarWidth * 0.66, 4.8);
                               const x = chartSummary.points.length === 1 ? 50 - barWidth / 2 : index * chartBarWidth + (chartBarWidth - barWidth) / 2;
                               const height = chartSummary.peakValue === 0 ? 0 : (point.total / chartSummary.peakValue) * 100;
                               const y = 100 - height;
@@ -433,15 +457,16 @@ export function DashboardPage({
                                     y={y}
                                     width={barWidth}
                                     height={height}
-                                    rx="1.4"
+                                    rx="1.9"
                                     fill="url(#trendBarFill)"
+                                    className="cursor-pointer"
                                     onMouseEnter={() => setActiveChartPointKey(point.key)}
                                     onFocus={() => setActiveChartPointKey(point.key)}
                                     onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
                                     onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
                                     tabIndex={0}
                                   />
-                                  <text x={x + barWidth / 2} y={Math.max(y - 2.5, 6)} fill="#26342d" fontWeight="700" fontSize="2.5" textAnchor="middle">
+                                  <text x={x + barWidth / 2} y={Math.max(y - 2.8, 6)} fill="#26342d" fontWeight="700" fontSize="2.2" textAnchor="middle">
                                     {getChartLabel(point.total)}
                                   </text>
                                 </g>
@@ -466,7 +491,7 @@ export function DashboardPage({
                     ) : null}
                       </div>
 
-                      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(48px,1fr))] gap-1.5 text-[11px] font-medium text-muted sm:mt-5 sm:grid-cols-[repeat(auto-fit,minmax(72px,1fr))] sm:gap-2 sm:text-xs">
+                      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(48px,1fr))] gap-1.5 text-[11px] font-medium text-muted sm:mt-4 sm:grid-cols-[repeat(auto-fit,minmax(72px,1fr))] sm:gap-2 sm:text-xs">
                         {chartSummary.points.map((point) => (
                           <span key={point.key} className="truncate text-center">
                             {point.shortLabel}
@@ -492,14 +517,14 @@ export function DashboardPage({
                     key={point.key}
                     type="button"
                     className={cn(
-                      "relative rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 text-left shadow-sm hover:-translate-y-0.5",
+                      "relative cursor-pointer rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 text-left shadow-sm hover:-translate-y-0.5",
                       activeTrendDetailKey === point.key && "border-primary/25 ring-2 ring-primary/10"
                     )}
-                    onMouseEnter={isTrendDetailEnabled ? () => setActiveTrendDetailKey(point.key) : undefined}
-                    onMouseLeave={isTrendDetailEnabled ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : current)) : undefined}
-                    onFocus={isTrendDetailEnabled ? () => setActiveTrendDetailKey(point.key) : undefined}
+                    onMouseEnter={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
+                    onMouseLeave={enableTrendHover ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : current)) : undefined}
+                    onFocus={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
                     onBlur={
-                      isTrendDetailEnabled
+                      enableTrendHover
                         ? (event) => {
                             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                               setActiveTrendDetailKey((current) => (current === point.key ? null : current));
@@ -507,13 +532,13 @@ export function DashboardPage({
                           }
                         : undefined
                     }
-                    onClick={isTrendDetailEnabled ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
+                    onClick={enableTrendTap ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
                   >
                     <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2))}</strong>
                     <span className="mt-2 block text-sm font-medium text-secondary">{point.label}</span>
                     <small className="mt-1 block text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
 
-                    {isTrendDetailEnabled && activeTrendDetailKey === point.key && trendDetailLookup[point.key]?.length ? (
+                    {enableTrendHover && activeTrendDetailKey === point.key && trendDetailLookup[point.key]?.length ? (
                       <div
                         className={cn(
                           "pointer-events-none absolute bottom-[calc(100%+14px)] z-20 hidden w-[min(18rem,calc(100vw-2rem))] rounded-[20px] border border-[color:var(--border)] bg-[#faf8f1]/98 p-3 shadow-[0_18px_40px_rgba(40,44,35,0.14)] backdrop-blur-md sm:block",

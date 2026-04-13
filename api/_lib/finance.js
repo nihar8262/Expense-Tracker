@@ -333,6 +333,14 @@ function getSqlClient() {
   return sqlClient;
 }
 
+async function safeSchemaStep(stepName, action) {
+  try {
+    await action();
+  } catch (error) {
+    console.error(`Schema step failed: ${stepName}`, error);
+  }
+}
+
 async function ensureSchema(sql) {
   if (!schemaReady) {
     schemaReady = (async () => {
@@ -349,25 +357,75 @@ async function ensureSchema(sql) {
       await sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`;
       await sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`;
       await sql`CREATE TABLE IF NOT EXISTS bill_reminders (id UUID PRIMARY KEY, user_id TEXT NOT NULL, title VARCHAR(120) NOT NULL, amount_minor BIGINT, category VARCHAR(64), due_date DATE NOT NULL, recurrence VARCHAR(16) NOT NULL CHECK (recurrence IN ('once', 'weekly', 'monthly', 'yearly')), interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 24), reminder_days_before INTEGER NOT NULL CHECK (reminder_days_before BETWEEN 0 AND 60), is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL)`;
-      await sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS invite_status VARCHAR(16) NOT NULL DEFAULT 'linked'`;
-      await sql`ALTER TABLE wallet_members DROP CONSTRAINT IF EXISTS wallet_members_invite_status_check`;
-      await sql`ALTER TABLE wallet_members ADD CONSTRAINT wallet_members_invite_status_check CHECK (invite_status IN ('linked', 'pending', 'declined'))`;
-      await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
-      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite'))`;
-      await sql`
-        DELETE FROM notifications
-        WHERE id IN (
-          SELECT id
-          FROM (
-            SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, dedupe_key ORDER BY created_at DESC, id DESC) AS row_number
-            FROM notifications
-          ) ranked_notifications
-          WHERE ranked_notifications.row_number > 1
-        )
-      `;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS notifications_user_id_dedupe_key_idx ON notifications (user_id, dedupe_key)`;
-      await sql`CREATE INDEX IF NOT EXISTS wallet_budgets_wallet_id_budget_month_idx ON wallet_budgets (wallet_id, budget_month DESC, created_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
+      await safeSchemaStep("wallets description column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS description VARCHAR(280)`);
+      await safeSchemaStep("wallets split rule column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS default_split_rule VARCHAR(16)`);
+      await safeSchemaStep("wallets created at column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`);
+      await safeSchemaStep("wallets split rule backfill", () => sql`UPDATE wallets SET default_split_rule = 'equal' WHERE default_split_rule IS NULL`);
+      await safeSchemaStep("wallets created at backfill", () => sql`UPDATE wallets SET created_at = NOW() WHERE created_at IS NULL`);
+
+      await safeSchemaStep("wallet members email column", () => sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS email VARCHAR(160)`);
+      await safeSchemaStep("wallet members role column", () => sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS member_role VARCHAR(16)`);
+      await safeSchemaStep("wallet members invite status column", () => sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS invite_status VARCHAR(16)`);
+      await safeSchemaStep("wallet members joined at column", () => sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ`);
+      await safeSchemaStep("wallet members role backfill", () => sql`UPDATE wallet_members SET member_role = 'member' WHERE member_role IS NULL`);
+      await safeSchemaStep("wallet members invite status backfill", () => sql`UPDATE wallet_members SET invite_status = 'linked' WHERE invite_status IS NULL OR invite_status NOT IN ('linked', 'pending', 'declined')`);
+      await safeSchemaStep("wallet members joined at backfill", () => sql`UPDATE wallet_members SET joined_at = NOW() WHERE joined_at IS NULL`);
+
+      await safeSchemaStep("notifications scheduled for column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ`);
+      await safeSchemaStep("notifications metadata column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS metadata_json TEXT`);
+      await safeSchemaStep("notifications dedupe key column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS dedupe_key TEXT`);
+      await safeSchemaStep("notifications title column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title VARCHAR(120)`);
+      await safeSchemaStep("notifications message column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS message VARCHAR(280)`);
+      await safeSchemaStep("notifications status column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS notification_status VARCHAR(16)`);
+      await safeSchemaStep("notifications created at column", () => sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`);
+      await safeSchemaStep("notifications type backfill", () => sql`UPDATE notifications SET notification_type = 'daily-log' WHERE notification_type IS NULL`);
+      await safeSchemaStep("notifications title backfill", () => sql`UPDATE notifications SET title = COALESCE(title, 'Notification') WHERE title IS NULL`);
+      await safeSchemaStep("notifications message backfill", () => sql`UPDATE notifications SET message = COALESCE(message, '') WHERE message IS NULL`);
+      await safeSchemaStep("notifications status backfill", () => sql`UPDATE notifications SET notification_status = 'unread' WHERE notification_status IS NULL`);
+      await safeSchemaStep("notifications created at backfill", () => sql`UPDATE notifications SET created_at = NOW() WHERE created_at IS NULL`);
+      await safeSchemaStep("notifications dedupe key backfill", () => sql`UPDATE notifications SET dedupe_key = CONCAT('legacy:', id::text) WHERE dedupe_key IS NULL OR dedupe_key = ''`);
+      await safeSchemaStep(
+        "notifications dedupe cleanup",
+        () => sql`
+          DELETE FROM notifications
+          WHERE id IN (
+            SELECT id
+            FROM (
+              SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, dedupe_key ORDER BY created_at DESC, id DESC) AS row_number
+              FROM notifications
+            ) ranked_notifications
+            WHERE ranked_notifications.row_number > 1
+          )
+        `
+      );
+      await safeSchemaStep("notifications dedupe index", () => sql`CREATE UNIQUE INDEX IF NOT EXISTS notifications_user_id_dedupe_key_idx ON notifications (user_id, dedupe_key)`);
+
+      await safeSchemaStep("reminder preferences daily enabled column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS daily_logging_enabled BOOLEAN`);
+      await safeSchemaStep("reminder preferences daily hour column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS daily_logging_hour INTEGER`);
+      await safeSchemaStep("reminder preferences budget enabled column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS budget_alerts_enabled BOOLEAN`);
+      await safeSchemaStep("reminder preferences threshold column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS budget_alert_threshold INTEGER`);
+      await safeSchemaStep("reminder preferences updated at column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`);
+      await safeSchemaStep("reminder preferences backfill enabled", () => sql`UPDATE reminder_preferences SET daily_logging_enabled = TRUE WHERE daily_logging_enabled IS NULL`);
+      await safeSchemaStep("reminder preferences backfill hour", () => sql`UPDATE reminder_preferences SET daily_logging_hour = 20 WHERE daily_logging_hour IS NULL`);
+      await safeSchemaStep("reminder preferences backfill budget enabled", () => sql`UPDATE reminder_preferences SET budget_alerts_enabled = TRUE WHERE budget_alerts_enabled IS NULL`);
+      await safeSchemaStep("reminder preferences backfill threshold", () => sql`UPDATE reminder_preferences SET budget_alert_threshold = 80 WHERE budget_alert_threshold IS NULL`);
+      await safeSchemaStep("reminder preferences backfill updated", () => sql`UPDATE reminder_preferences SET updated_at = NOW() WHERE updated_at IS NULL`);
+
+      await safeSchemaStep("bill reminders amount column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS amount_minor BIGINT`);
+      await safeSchemaStep("bill reminders category column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS category VARCHAR(64)`);
+      await safeSchemaStep("bill reminders recurrence column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS recurrence VARCHAR(16)`);
+      await safeSchemaStep("bill reminders interval column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS interval_count INTEGER`);
+      await safeSchemaStep("bill reminders days before column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS reminder_days_before INTEGER`);
+      await safeSchemaStep("bill reminders active column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS is_active BOOLEAN`);
+      await safeSchemaStep("bill reminders created at column", () => sql`ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ`);
+      await safeSchemaStep("bill reminders recurrence backfill", () => sql`UPDATE bill_reminders SET recurrence = 'monthly' WHERE recurrence IS NULL`);
+      await safeSchemaStep("bill reminders interval backfill", () => sql`UPDATE bill_reminders SET interval_count = 1 WHERE interval_count IS NULL`);
+      await safeSchemaStep("bill reminders reminder days backfill", () => sql`UPDATE bill_reminders SET reminder_days_before = 3 WHERE reminder_days_before IS NULL`);
+      await safeSchemaStep("bill reminders active backfill", () => sql`UPDATE bill_reminders SET is_active = TRUE WHERE is_active IS NULL`);
+      await safeSchemaStep("bill reminders created at backfill", () => sql`UPDATE bill_reminders SET created_at = NOW() WHERE created_at IS NULL`);
+
+      await safeSchemaStep("wallet budget index", () => sql`CREATE INDEX IF NOT EXISTS wallet_budgets_wallet_id_budget_month_idx ON wallet_budgets (wallet_id, budget_month DESC, created_at DESC)`);
+      await safeSchemaStep("bill reminders index", () => sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`);
     })();
   }
 
