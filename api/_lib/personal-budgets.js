@@ -1,6 +1,4 @@
 const { randomUUID } = require("node:crypto");
-const { cert, getApps, initializeApp } = require("firebase-admin/app");
-const { getAuth } = require("firebase-admin/auth");
 const postgres = require("postgres");
 const { z } = require("zod");
 
@@ -95,64 +93,8 @@ function mapBudget(row) {
   };
 }
 
-class AuthenticationError extends Error {
-  constructor(message = "Authentication is required.") {
-    super(message);
-    this.name = "AuthenticationError";
-  }
-}
-
-class AuthenticationConfigurationError extends Error {
-  constructor(message = "Firebase admin credentials are not configured.") {
-    super(message);
-    this.name = "AuthenticationConfigurationError";
-  }
-}
-
 let sqlClient;
 let schemaReady;
-
-function readFirebaseAdminCredentials() {
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
-
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new AuthenticationConfigurationError();
-  }
-
-  return { projectId, clientEmail, privateKey };
-}
-
-function getFirebaseAuth() {
-  if (getApps().length === 0) {
-    initializeApp({
-      credential: cert(readFirebaseAdminCredentials())
-    });
-  }
-
-  return getAuth();
-}
-
-async function authenticateRequest(request) {
-  const headerValue = request.headers.authorization;
-  const token = headerValue && headerValue.startsWith("Bearer ") ? headerValue.slice(7).trim() : "";
-
-  if (!token) {
-    throw new AuthenticationError();
-  }
-
-  try {
-    const decoded = await getFirebaseAuth().verifyIdToken(token);
-    return { id: decoded.uid };
-  } catch (error) {
-    if (error instanceof AuthenticationConfigurationError) {
-      throw error;
-    }
-
-    throw new AuthenticationError("Your login session is invalid or expired.");
-  }
-}
 
 function getSqlClient() {
   if (sqlClient) {
@@ -256,41 +198,71 @@ async function createBudget(rawBody, userId) {
   };
 }
 
-module.exports = async function handler(request, response) {
-  let user;
+async function updateBudget(rawBody, budgetId, userId) {
+  const result = createBudgetSchema.safeParse(rawBody);
 
-  try {
-    user = await authenticateRequest(request);
-  } catch (error) {
-    if (error instanceof AuthenticationError) {
-      return response.status(401).json({ error: error.message });
-    }
-
-    if (error instanceof AuthenticationConfigurationError) {
-      return response.status(500).json({ error: error.message });
-    }
-
-    return response.status(500).json({ error: "Failed to authenticate request." });
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid budget payload.",
+        details: result.error.flatten()
+      }
+    };
   }
 
-  if (request.method === "GET") {
-    try {
-      const result = await listBudgets(user.id);
-      return response.status(result.status).json(result.body);
-    } catch {
-      return response.status(500).json({ error: "Failed to load budgets." });
-    }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    UPDATE budgets
+    SET amount_minor = ${result.data.amount},
+        budget_scope = ${result.data.scope},
+        category = ${result.data.scope === "category" ? result.data.category?.trim() ?? null : null},
+        budget_month = ${result.data.month}
+    WHERE id = ${budgetId} AND user_id = ${userId}
+    RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+  `;
+
+  if (!rows[0]) {
+    return {
+      status: 404,
+      body: { error: "Budget not found." }
+    };
   }
 
-  if (request.method === "POST") {
-    try {
-      const result = await createBudget(request.body, user.id);
-      return response.status(result.status).json(result.body);
-    } catch {
-      return response.status(500).json({ error: "Failed to create budget." });
-    }
+  return {
+    status: 200,
+    body: { budget: mapBudget(rows[0]) }
+  };
+}
+
+async function deleteBudget(budgetId, userId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`
+    DELETE FROM budgets
+    WHERE id = ${budgetId} AND user_id = ${userId}
+    RETURNING id
+  `;
+
+  if (!rows[0]) {
+    return {
+      status: 404,
+      body: { error: "Budget not found." }
+    };
   }
 
-  response.setHeader("Allow", "GET, POST");
-  return response.status(405).end("Method Not Allowed");
+  return {
+    status: 204,
+    body: null
+  };
+}
+
+module.exports = {
+  createBudget,
+  deleteBudget,
+  listBudgets,
+  updateBudget
 };

@@ -1,5 +1,4 @@
-const { cert, getApps, initializeApp } = require("firebase-admin/app");
-const { getAuth } = require("firebase-admin/auth");
+const { createHash, randomUUID } = require("node:crypto");
 const postgres = require("postgres");
 const { z } = require("zod");
 
@@ -61,6 +60,24 @@ const createExpenseSchema = z.object({
   date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value.")
 });
 
+const expensesQuerySchema = z.object({
+  category: z.string().trim().min(1).optional(),
+  sort: z.enum(["date_desc"]).optional()
+});
+
+function createExpenseRequestHash(input) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        amount: input.amount,
+        category: input.category.trim(),
+        description: input.description.trim(),
+        date: input.date
+      })
+    )
+    .digest("hex");
+}
+
 function asIsoDate(value) {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value;
 }
@@ -80,64 +97,8 @@ function mapExpense(row) {
   };
 }
 
-class AuthenticationError extends Error {
-  constructor(message = "Authentication is required.") {
-    super(message);
-    this.name = "AuthenticationError";
-  }
-}
-
-class AuthenticationConfigurationError extends Error {
-  constructor(message = "Firebase admin credentials are not configured.") {
-    super(message);
-    this.name = "AuthenticationConfigurationError";
-  }
-}
-
 let sqlClient;
 let schemaReady;
-
-function readFirebaseAdminCredentials() {
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
-
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new AuthenticationConfigurationError();
-  }
-
-  return { projectId, clientEmail, privateKey };
-}
-
-function getFirebaseAuth() {
-  if (getApps().length === 0) {
-    initializeApp({
-      credential: cert(readFirebaseAdminCredentials())
-    });
-  }
-
-  return getAuth();
-}
-
-async function authenticateRequest(request) {
-  const headerValue = request.headers.authorization;
-  const token = headerValue && headerValue.startsWith("Bearer ") ? headerValue.slice(7).trim() : "";
-
-  if (!token) {
-    throw new AuthenticationError();
-  }
-
-  try {
-    const decoded = await getFirebaseAuth().verifyIdToken(token);
-    return { id: decoded.uid };
-  } catch (error) {
-    if (error instanceof AuthenticationConfigurationError) {
-      throw error;
-    }
-
-    throw new AuthenticationError("Your login session is invalid or expired.");
-  }
-}
 
 function getSqlClient() {
   if (sqlClient) {
@@ -191,6 +152,157 @@ async function ensureSchema(sql) {
   }
 
   await schemaReady;
+}
+
+async function getExistingExpense(tx, idempotencyKey, requestHash) {
+  await tx`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
+
+  const existingRequests = await tx`
+    SELECT request_hash, expense_id
+    FROM idempotency_requests
+    WHERE idempotency_key = ${idempotencyKey}
+  `;
+
+  const existingRequest = existingRequests[0];
+
+  if (!existingRequest) {
+    return null;
+  }
+
+  if (existingRequest.request_hash !== requestHash) {
+    const error = new Error("An expense with this idempotency key already exists for a different payload.");
+    error.name = "IdempotencyConflictError";
+    throw error;
+  }
+
+  const expenses = await tx`
+    SELECT id, amount_minor, category, description, expense_date, created_at
+    FROM expenses
+    WHERE id = ${existingRequest.expense_id}
+  `;
+
+  if (!expenses[0]) {
+    throw new Error("Stored idempotency record is missing its expense.");
+  }
+
+  return {
+    expense: mapExpense(expenses[0]),
+    created: false
+  };
+}
+
+async function listExpenses(rawQuery, userId) {
+  const result = expensesQuerySchema.safeParse(rawQuery);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid query parameters.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const whereClause = result.data.category
+    ? sql`WHERE user_id = ${userId} AND category = ${result.data.category}`
+    : sql`WHERE user_id = ${userId}`;
+  const orderClause = result.data.sort === "date_desc"
+    ? sql`ORDER BY expense_date DESC, created_at DESC`
+    : sql`ORDER BY created_at DESC`;
+
+  const rows = await sql`
+    SELECT id, amount_minor, category, description, expense_date, created_at
+    FROM expenses
+    ${whereClause}
+    ${orderClause}
+  `;
+
+  return {
+    status: 200,
+    body: {
+      expenses: rows.map(mapExpense)
+    }
+  };
+}
+
+async function createExpense(rawBody, rawIdempotencyKey, userId) {
+  const idempotencyKey = rawIdempotencyKey && String(rawIdempotencyKey).trim();
+
+  if (!idempotencyKey) {
+    return {
+      status: 400,
+      body: {
+        error: "Idempotency-Key header is required."
+      }
+    };
+  }
+
+  const result = createExpenseSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid expense payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  try {
+    const created = await sql.begin(async (tx) => {
+      const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
+      const requestHash = createExpenseRequestHash(result.data);
+      const existing = await getExistingExpense(tx, scopedIdempotencyKey, requestHash);
+
+      if (existing) {
+        return existing;
+      }
+
+      const expenseId = randomUUID();
+      const createdAt = new Date().toISOString();
+
+      const insertedExpenses = await tx`
+        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at)
+        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt})
+        RETURNING id, amount_minor, category, description, expense_date, created_at
+      `;
+
+      await tx`
+        INSERT INTO idempotency_requests (idempotency_key, request_hash, expense_id, created_at)
+        VALUES (${scopedIdempotencyKey}, ${requestHash}, ${expenseId}, ${createdAt})
+      `;
+
+      return {
+        expense: mapExpense(insertedExpenses[0]),
+        created: true
+      };
+    });
+
+    return {
+      status: created.created ? 201 : 200,
+      body: created
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "IdempotencyConflictError") {
+      return {
+        status: 409,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to create expense." }
+    };
+  }
 }
 
 async function updateExpense(rawBody, expenseId, userId) {
@@ -273,44 +385,9 @@ async function deleteExpense(expenseId, userId) {
   };
 }
 
-module.exports = async function handler(request, response) {
-  let user;
-
-  try {
-    user = await authenticateRequest(request);
-  } catch (error) {
-    if (error instanceof AuthenticationError) {
-      return response.status(401).json({ error: error.message });
-    }
-
-    if (error instanceof AuthenticationConfigurationError) {
-      return response.status(500).json({ error: error.message });
-    }
-
-    return response.status(500).json({ error: "Failed to authenticate request." });
-  }
-
-  const expenseId = Array.isArray(request.query.id) ? request.query.id[0] : request.query.id;
-
-  if (!expenseId) {
-    return response.status(400).json({ error: "Expense id is required." });
-  }
-
-  if (request.method === "PUT") {
-    const result = await updateExpense(request.body, expenseId, user.id);
-    return response.status(result.status).json(result.body);
-  }
-
-  if (request.method === "DELETE") {
-    const result = await deleteExpense(expenseId, user.id);
-
-    if (result.body === null) {
-      return response.status(result.status).end();
-    }
-
-    return response.status(result.status).json(result.body);
-  }
-
-  response.setHeader("Allow", "PUT, DELETE");
-  return response.status(405).end("Method Not Allowed");
+module.exports = {
+  createExpense,
+  deleteExpense,
+  listExpenses,
+  updateExpense
 };
