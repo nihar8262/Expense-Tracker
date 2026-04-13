@@ -354,6 +354,18 @@ async function ensureSchema(sql) {
       await sql`ALTER TABLE wallet_members ADD CONSTRAINT wallet_members_invite_status_check CHECK (invite_status IN ('linked', 'pending', 'declined'))`;
       await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
       await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite'))`;
+      await sql`
+        DELETE FROM notifications
+        WHERE id IN (
+          SELECT id
+          FROM (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, dedupe_key ORDER BY created_at DESC, id DESC) AS row_number
+            FROM notifications
+          ) ranked_notifications
+          WHERE ranked_notifications.row_number > 1
+        )
+      `;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS notifications_user_id_dedupe_key_idx ON notifications (user_id, dedupe_key)`;
       await sql`CREATE INDEX IF NOT EXISTS wallet_budgets_wallet_id_budget_month_idx ON wallet_budgets (wallet_id, budget_month DESC, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
     })();

@@ -19,7 +19,11 @@ module.exports = async function handler(request, response) {
 
   if (segments.length === 0) {
     if (request.method === "GET") {
-      await linkWalletInvitesForUser(user);
+      try {
+        await linkWalletInvitesForUser(user);
+      } catch (error) {
+        console.error("Failed to sync wallet invite notifications.", error);
+      }
       const result = await listNotificationsForUser(user.id);
       return sendResult(response, result);
     }

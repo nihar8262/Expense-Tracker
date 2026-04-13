@@ -29,7 +29,11 @@ module.exports = async function handler(request, response) {
 
   if (segments.length === 0) {
     if (request.method === "GET") {
-      await linkWalletInvitesForUser(user);
+      try {
+        await linkWalletInvitesForUser(user);
+      } catch (error) {
+        console.error("Failed to sync wallet invite notifications.", error);
+      }
       const result = await listWalletsForUser(user.id);
       return sendResult(response, result);
     }
@@ -51,7 +55,11 @@ module.exports = async function handler(request, response) {
   if (segments.length === 1) {
     if (request.method === "GET") {
       try {
-        await linkWalletInvitesForUser(user);
+        try {
+          await linkWalletInvitesForUser(user);
+        } catch (error) {
+          console.error("Failed to sync wallet invite notifications.", error);
+        }
         const result = await getWalletForUser(user.id, walletId);
         return sendResult(response, result);
       } catch (error) {
