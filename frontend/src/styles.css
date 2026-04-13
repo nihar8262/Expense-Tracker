@@ -80,6 +80,11 @@
     @apply cursor-pointer;
   }
 
+  .required-mark::after {
+    content: " *";
+    @apply text-[color:var(--danger-text)];
+  }
+
   input,
   select,
   textarea {

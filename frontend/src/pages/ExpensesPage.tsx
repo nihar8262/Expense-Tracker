@@ -161,7 +161,7 @@ export function ExpensesPage({
 
         <form className="grid gap-4" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
           <label className="grid gap-2 text-sm font-medium text-secondary">
-            Amount
+            <span className="required-mark">Amount</span>
             <input
               type="number"
               min="0.01"
@@ -179,32 +179,32 @@ export function ExpensesPage({
           </label>
 
           <div className="grid gap-3">
-            <span className="text-sm font-medium text-secondary">Category</span>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-              {availableCategoryOptions.map((category) => {
-                const isActive = selectedCategoryOption?.label.toLowerCase() === category.label.toLowerCase();
-
-                return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    className={cn(
-                      "flex min-h-14 items-center gap-3 rounded-[20px] border px-4 py-3 text-left shadow-sm",
-                      isActive ? "border-primary/30 bg-success-tint text-primary" : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
-                    )}
-                    aria-pressed={isActive}
-                    onClick={() => {
-                      onCategorySelect(category);
-                      requestAnimationFrame(() => descriptionInputRef.current?.focus());
-                    }}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
-                      <CategoryIcon iconId={category.icon} />
-                    </span>
-                    <span className="text-sm font-semibold">{category.label}</span>
-                  </button>
-                );
-              })}
+            <span className="text-sm font-medium text-secondary required-mark">Category</span>
+            <div className="flex items-center gap-3">
+              {selectedCategoryOption ? (
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
+                  <CategoryIcon iconId={selectedCategoryOption.icon} />
+                </span>
+              ) : null}
+              <select
+                value={selectedCategoryOption?.label ?? ""}
+                disabled={!currentUserPresent}
+                onChange={(event) => {
+                  const match = availableCategoryOptions.find((option) => option.label === event.target.value);
+                  if (match) {
+                    onCategorySelect(match);
+                    requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                  }
+                }}
+                aria-invalid={showValidation && Boolean(validationErrors.category)}
+              >
+                <option value="">Select a category</option>
+                {availableCategoryOptions.map((category) => (
+                  <option key={category.id} value={category.label}>
+                    {category.label}
+                  </option>
+                ))}
+              </select>
             </div>
             {showValidation && validationErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.category}</span> : null}
           </div>
@@ -215,24 +215,24 @@ export function ExpensesPage({
                 <strong className="text-base text-ink">Need another category?</strong>
                 <p className="mt-1 text-sm leading-6 text-secondary">Write a category name and choose the icon you want to save with it.</p>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {iconOptions.map((iconOption) => (
-                  <button
-                    key={iconOption.id}
-                    type="button"
-                    className={cn(
-                      "flex items-center gap-3 rounded-[18px] border px-3 py-3",
-                      customCategoryIcon === iconOption.id ? "border-primary/30 bg-success-tint text-primary" : "border-[color:var(--border)] bg-white/80 text-secondary"
-                    )}
-                    onClick={() => onCustomCategoryIconChange(iconOption.id)}
+              <label className="grid gap-2 text-sm font-medium text-secondary">
+                Icon
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
+                    <CategoryIcon iconId={customCategoryIcon} />
+                  </span>
+                  <select
+                    value={customCategoryIcon}
+                    onChange={(event) => onCustomCategoryIconChange(event.target.value as CategoryIconId)}
                   >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/90 text-ink shadow-sm">
-                      <CategoryIcon iconId={iconOption.id} />
-                    </span>
-                    <span className="text-sm font-semibold">{iconOption.label}</span>
-                  </button>
-                ))}
-              </div>
+                    {iconOptions.map((iconOption) => (
+                      <option key={iconOption.id} value={iconOption.id}>
+                        {iconOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <input type="text" placeholder="Write your category name" disabled={!currentUserPresent} value={customCategoryName} onChange={(event) => onCustomCategoryNameChange(event.target.value)} />
                 <button type="button" className="ui-button-secondary" onClick={onCreateCustomCategory}>
@@ -243,7 +243,7 @@ export function ExpensesPage({
           ) : null}
 
           <label className="grid gap-2 text-sm font-medium text-secondary">
-            Description
+            <span className="required-mark">Description</span>
             <textarea
               ref={descriptionInputRef}
               required
@@ -258,7 +258,7 @@ export function ExpensesPage({
           </label>
 
           <label className="grid gap-2 text-sm font-medium text-secondary">
-            Date
+            <span className="required-mark">Date</span>
             <input
               ref={dateInputRef}
               type="date"

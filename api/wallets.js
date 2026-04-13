@@ -19,6 +19,7 @@ const {
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
+  try {
   const user = await authenticateUser(request, response);
 
   if (!user) {
@@ -231,4 +232,8 @@ module.exports = async function handler(request, response) {
   }
 
   return notFound(response);
+  } catch (error) {
+    console.error("Wallets handler error:", error);
+    return response.status(500).json({ error: error instanceof Error ? error.message : "Internal server error." });
+  }
 };

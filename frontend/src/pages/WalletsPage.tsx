@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
+import { CategoryIcon } from "../components/CategoryIcon";
 import { EmptyState, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
 import type { BudgetForm, BudgetHistoryRange, BudgetSummary, CategoryOption, SplitRule, Wallet, WalletDetail, WalletBudget } from "../types";
 
@@ -164,6 +166,43 @@ export function WalletsPage({
   const [walletBudgetStatusMessage, setWalletBudgetStatusMessage] = useState("");
   const [walletBudgetErrorMessage, setWalletBudgetErrorMessage] = useState("");
 
+  const [showCreateWalletValidation, setShowCreateWalletValidation] = useState(false);
+  const [showExpenseValidation, setShowExpenseValidation] = useState(false);
+  const [showSettlementValidation, setShowSettlementValidation] = useState(false);
+  const [showMemberValidation, setShowMemberValidation] = useState(false);
+
+  const createWalletErrors = useMemo(
+    () => ({
+      name: walletName.trim() ? "" : "Wallet name is required."
+    }),
+    [walletName]
+  );
+
+  const expenseErrors = useMemo(
+    () => ({
+      amount: expenseAmount.trim() ? "" : "Amount is required.",
+      date: expenseDate.trim() ? "" : "Date is required.",
+      category: expenseCategory.trim() ? "" : "Category is required.",
+      description: expenseDescription.trim() ? "" : "Description is required."
+    }),
+    [expenseAmount, expenseDate, expenseCategory, expenseDescription]
+  );
+
+  const settlementErrors = useMemo(
+    () => ({
+      amount: settlementAmount.trim() ? "" : "Amount is required.",
+      date: settlementDate.trim() ? "" : "Date is required."
+    }),
+    [settlementAmount, settlementDate]
+  );
+
+  const memberErrors = useMemo(
+    () => ({
+      displayName: inviteDisplayName.trim() ? "" : "Member name is required."
+    }),
+    [inviteDisplayName]
+  );
+
   const walletBudgetCategoryChoices = useMemo(() => {
     const optionsByLabel = new Map<string, CategoryOption>();
 
@@ -321,8 +360,13 @@ export function WalletsPage({
     });
   }
 
-  async function handleCreateWalletSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateWalletSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setShowCreateWalletValidation(true);
+
+    if (Object.values(createWalletErrors).some(Boolean)) {
+      return;
+    }
 
     const members = parseMemberEntries(walletMembersText);
 
@@ -338,11 +382,17 @@ export function WalletsPage({
       setWalletDescription("");
       setWalletMembersText("");
       setWalletSplitRule("equal");
+      setShowCreateWalletValidation(false);
     }
   }
 
-  async function handleAddWalletMemberSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleAddWalletMemberSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setShowMemberValidation(true);
+
+    if (Object.values(memberErrors).some(Boolean)) {
+      return;
+    }
 
     if (!selectedWallet) {
       return;
@@ -356,11 +406,17 @@ export function WalletsPage({
     if (created) {
       setInviteDisplayName("");
       setInviteEmail("");
+      setShowMemberValidation(false);
     }
   }
 
-  async function handleCreateWalletExpenseSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateWalletExpenseSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setShowExpenseValidation(true);
+
+    if (Object.values(expenseErrors).some(Boolean)) {
+      return;
+    }
 
     if (!selectedWallet) {
       return;
@@ -392,11 +448,17 @@ export function WalletsPage({
       setExpenseSplitRule(selectedWallet.wallet.default_split_rule);
       setSplitValues({});
       setEditingWalletExpenseId(null);
+      setShowExpenseValidation(false);
     }
   }
 
-  async function handleCreateSettlementSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateSettlementSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setShowSettlementValidation(true);
+
+    if (Object.values(settlementErrors).some(Boolean)) {
+      return;
+    }
 
     if (!selectedWallet) {
       return;
@@ -417,6 +479,7 @@ export function WalletsPage({
       setSettlementDate(getTodayIsoDate());
       setSettlementNote("");
       setEditingSettlementId(null);
+      setShowSettlementValidation(false);
     }
   }
 
@@ -611,10 +674,11 @@ export function WalletsPage({
 
           <div className="rounded-[26px] bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(248,243,232,0.8))] p-4 sm:p-5">
             <SectionHeader eyebrow="Create wallet" title="New shared group" description="Invite housemates, travel partners, or family members with a split rule that fits the group." />
-            <form className="mt-5 grid gap-4" onSubmit={handleCreateWalletSubmit}>
+            <form className="mt-5 grid gap-4" onSubmit={handleCreateWalletSubmit} noValidate>
               <label className="grid gap-2 text-sm font-medium text-secondary">
-                Wallet name
-                <input value={walletName} onChange={(event) => setWalletName(event.target.value)} placeholder="Apartment essentials" required />
+                <span className="required-mark">Wallet name</span>
+                <input value={walletName} onChange={(event) => setWalletName(event.target.value)} placeholder="Apartment essentials" required aria-invalid={showCreateWalletValidation && Boolean(createWalletErrors.name)} />
+                {showCreateWalletValidation && createWalletErrors.name ? <span className="text-sm text-[color:var(--danger-text)]">{createWalletErrors.name}</span> : null}
               </label>
 
               <label className="grid gap-2 text-sm font-medium text-secondary">
@@ -680,12 +744,17 @@ export function WalletsPage({
                   ))}
                 </div>
 
-                <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" onSubmit={handleAddWalletMemberSubmit}>
-                  <input value={inviteDisplayName} onChange={(event) => setInviteDisplayName(event.target.value)} placeholder="Invite member name" required />
-                  <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="Email to link existing user" />
-                  <button type="submit" className="ui-button-secondary justify-center" disabled={isSubmitting}>
-                    {isSubmitting ? "Saving..." : "Add member"}
-                  </button>
+                <form className="grid gap-3" onSubmit={handleAddWalletMemberSubmit} noValidate>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <div className="grid gap-2">
+                      <input value={inviteDisplayName} onChange={(event) => setInviteDisplayName(event.target.value)} placeholder="Invite member name *" required aria-invalid={showMemberValidation && Boolean(memberErrors.displayName)} />
+                      {showMemberValidation && memberErrors.displayName ? <span className="text-sm text-[color:var(--danger-text)]">{memberErrors.displayName}</span> : null}
+                    </div>
+                    <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="Email to link existing user" />
+                    <button type="submit" className="ui-button-secondary justify-center" disabled={isSubmitting}>
+                      {isSubmitting ? "Saving..." : "Add member"}
+                    </button>
+                  </div>
                 </form>
               </SurfaceCard>
 
@@ -753,7 +822,7 @@ export function WalletsPage({
                 <SurfaceCard className="space-y-5 p-5 sm:p-6">
                   <SectionHeader eyebrow="Shared expense" title={editingWalletExpenseId ? "Edit group transaction" : "Add a group transaction"} description="Capture a shared purchase, choose the payer, and define how the split should be distributed across members." />
 
-                  <form className="grid gap-4" onSubmit={handleCreateWalletExpenseSubmit}>
+                  <form className="grid gap-4" onSubmit={handleCreateWalletExpenseSubmit} noValidate>
                     <label className="grid gap-2 text-sm font-medium text-secondary">
                       Paid by
                       <select value={expensePayerId} onChange={(event) => setExpensePayerId(event.target.value)}>
@@ -765,23 +834,46 @@ export function WalletsPage({
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm font-medium text-secondary">
-                        Amount
-                        <input value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0.00" required />
+                        <span className="required-mark">Amount</span>
+                        <input value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0.00" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.amount)} />
+                        {showExpenseValidation && expenseErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.amount}</span> : null}
                       </label>
                       <label className="grid gap-2 text-sm font-medium text-secondary">
-                        Date
-                        <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} required />
+                        <span className="required-mark">Date</span>
+                        <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} required aria-invalid={showExpenseValidation && Boolean(expenseErrors.date)} />
+                        {showExpenseValidation && expenseErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.date}</span> : null}
                       </label>
                     </div>
 
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      Category
-                      <input value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value)} placeholder="Travel" required />
-                    </label>
+                    <div className="grid gap-2 text-sm font-medium text-secondary">
+                      <span className="required-mark">Category</span>
+                      <div className="flex items-center gap-3">
+                        {expenseCategory ? (
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
+                            <CategoryIcon iconId={walletBudgetCategoryChoices.find((option) => option.label === expenseCategory)?.icon ?? "other"} />
+                          </span>
+                        ) : null}
+                        <select
+                          value={expenseCategory}
+                          onChange={(event) => setExpenseCategory(event.target.value)}
+                          required
+                          aria-invalid={showExpenseValidation && Boolean(expenseErrors.category)}
+                        >
+                          <option value="">Select a category</option>
+                          {walletBudgetCategoryChoices.map((option) => (
+                            <option key={option.id} value={option.label}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {showExpenseValidation && expenseErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.category}</span> : null}
+                    </div>
 
                     <label className="grid gap-2 text-sm font-medium text-secondary">
-                      Description
-                      <input value={expenseDescription} onChange={(event) => setExpenseDescription(event.target.value)} placeholder="Hotel, groceries, tickets" required />
+                      <span className="required-mark">Description</span>
+                      <input value={expenseDescription} onChange={(event) => setExpenseDescription(event.target.value)} placeholder="Hotel, groceries, tickets" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.description)} />
+                      {showExpenseValidation && expenseErrors.description ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.description}</span> : null}
                     </label>
 
                     <label className="grid gap-2 text-sm font-medium text-secondary">
@@ -829,7 +921,7 @@ export function WalletsPage({
                 <SurfaceCard className="space-y-5 p-5 sm:p-6">
                   <SectionHeader eyebrow="Settlement" title={editingSettlementId ? "Edit payback" : "Record a payback"} description="Log repayments to keep group balances current and the shared ledger easy to reconcile." />
 
-                  <form className="grid gap-4" onSubmit={handleCreateSettlementSubmit}>
+                  <form className="grid gap-4" onSubmit={handleCreateSettlementSubmit} noValidate>
                     <label className="grid gap-2 text-sm font-medium text-secondary">
                       From member
                       <select value={settlementFromMemberId} onChange={(event) => setSettlementFromMemberId(event.target.value)}>
@@ -850,12 +942,14 @@ export function WalletsPage({
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm font-medium text-secondary">
-                        Amount
-                        <input value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)} placeholder="0.00" required />
+                        <span className="required-mark">Amount</span>
+                        <input value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)} placeholder="0.00" required aria-invalid={showSettlementValidation && Boolean(settlementErrors.amount)} />
+                        {showSettlementValidation && settlementErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.amount}</span> : null}
                       </label>
                       <label className="grid gap-2 text-sm font-medium text-secondary">
-                        Date
-                        <input type="date" value={settlementDate} onChange={(event) => setSettlementDate(event.target.value)} required />
+                        <span className="required-mark">Date</span>
+                        <input type="date" value={settlementDate} onChange={(event) => setSettlementDate(event.target.value)} required aria-invalid={showSettlementValidation && Boolean(settlementErrors.date)} />
+                        {showSettlementValidation && settlementErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.date}</span> : null}
                       </label>
                     </div>
 

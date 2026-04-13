@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { NotificationCenterProps } from "../types";
 import { EmptyState, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
 
@@ -49,6 +49,15 @@ export function AlertsSurface({
   const [billIntervalCount, setBillIntervalCount] = useState(1);
   const [billReminderDaysBefore, setBillReminderDaysBefore] = useState(3);
   const [billIsActive, setBillIsActive] = useState(true);
+  const [showBillValidation, setShowBillValidation] = useState(false);
+
+  const billErrors = useMemo(
+    () => ({
+      title: billTitle.trim() ? "" : "Bill title is required.",
+      dueDate: billDueDate.trim() ? "" : "Due date is required."
+    }),
+    [billTitle, billDueDate]
+  );
 
   useEffect(() => {
     if (editingBillReminderId && !billReminders.some((billReminder) => billReminder.id === editingBillReminderId)) {
@@ -66,10 +75,16 @@ export function AlertsSurface({
     setBillIntervalCount(1);
     setBillReminderDaysBefore(3);
     setBillIsActive(true);
+    setShowBillValidation(false);
   }
 
   async function handleBillReminderSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setShowBillValidation(true);
+
+    if (Object.values(billErrors).some(Boolean)) {
+      return;
+    }
 
     const saved = await onSaveBillReminder(
       {
@@ -234,10 +249,11 @@ export function AlertsSurface({
               description="Set title, amount, cadence, and lead time so the app can notify you before each bill is due."
             />
 
-            <form className="grid gap-4" onSubmit={(event) => void handleBillReminderSubmit(event)}>
+            <form className="grid gap-4" onSubmit={(event) => void handleBillReminderSubmit(event)} noValidate>
               <label className="grid gap-2 text-sm font-medium text-secondary">
-                Bill title
-                <input value={billTitle} onChange={(event) => setBillTitle(event.target.value)} placeholder="Electricity bill" required />
+                <span className="required-mark">Bill title</span>
+                <input value={billTitle} onChange={(event) => setBillTitle(event.target.value)} placeholder="Electricity bill" required aria-invalid={showBillValidation && Boolean(billErrors.title)} />
+                {showBillValidation && billErrors.title ? <span className="text-sm text-[color:var(--danger-text)]">{billErrors.title}</span> : null}
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -246,8 +262,9 @@ export function AlertsSurface({
                   <input value={billAmount} onChange={(event) => setBillAmount(event.target.value)} placeholder="0.00" />
                 </label>
                 <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Due date
-                  <input type="date" value={billDueDate} onChange={(event) => setBillDueDate(event.target.value)} required />
+                  <span className="required-mark">Due date</span>
+                  <input type="date" value={billDueDate} onChange={(event) => setBillDueDate(event.target.value)} required aria-invalid={showBillValidation && Boolean(billErrors.dueDate)} />
+                  {showBillValidation && billErrors.dueDate ? <span className="text-sm text-[color:var(--danger-text)]">{billErrors.dueDate}</span> : null}
                 </label>
               </div>
 
