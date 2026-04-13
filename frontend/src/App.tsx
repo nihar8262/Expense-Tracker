@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AuthProvider, User } from "firebase/auth";
-import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
+import { onAuthStateChanged, getRedirectResult, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
 import { SignedInLayout } from "./layouts/SignedInLayout";
@@ -1368,6 +1368,11 @@ export default function App() {
       setAuthMessage("Firebase web auth is not configured yet. Add the Firebase env values to enable sign-in.");
       return;
     }
+
+    getRedirectResult(auth).catch((error) => {
+      console.error("Firebase redirect sign-in failed.", error);
+      setAuthMessage(formatAuthError(error));
+    });
 
     return onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
