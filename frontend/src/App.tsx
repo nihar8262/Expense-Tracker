@@ -2140,7 +2140,7 @@ export default function App() {
       await respondToWalletInvite(walletMemberId, action, currentUser);
       await loadNotifications(currentUser);
       await loadWallets(currentUser);
-      setAuthMessage("");
+      setAuthMessage(action === "accept" ? "Invite accepted — you have been added to the group." : "Invite declined.");
       return true;
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to respond to wallet invite.");

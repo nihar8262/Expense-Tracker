@@ -173,7 +173,7 @@ export function AlertsSurface({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 sm:max-w-[240px] sm:justify-end">
-                    {notification.type === "wallet-invite" && notification.metadata?.walletMemberId ? (
+                    {notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
                       <>
                         <button type="button" className="ui-button-danger" onClick={() => void onDeleteNotification(notification.id)}>
                           Delete
