@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { CategoryIcon } from "../components/CategoryIcon";
+import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
 import type { CategoryIconId, CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 
 type ExpensesPageProps = {
@@ -52,6 +53,16 @@ type ExpensesPageProps = {
   onClearFilters: () => void;
 };
 
+function getTodayValue(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getYesterdayValue(): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return yesterday.toISOString().slice(0, 10);
+}
+
 export function ExpensesPage({
   currentUserPresent,
   authLoading,
@@ -101,6 +112,7 @@ export function ExpensesPage({
   onClearFilters
 }: ExpensesPageProps) {
   const [showValidation, setShowValidation] = useState(false);
+  const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const pageStart = totalVisibleExpenses === 0 ? 0 : (currentExpensesPage - 1) * expensesPageSize + 1;
@@ -126,6 +138,7 @@ export function ExpensesPage({
     }
 
     await onSubmit(event);
+    setIsExpenseSheetOpen(false);
   }
 
   function handleFieldAdvance(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>, nextField: HTMLTextAreaElement | HTMLInputElement | null) {
@@ -137,23 +150,18 @@ export function ExpensesPage({
     nextField?.focus();
   }
 
-  return (
-    <>
-      <section className="hero-panel page-hero">
-        <p className="eyebrow">Expenses</p>
-        <h1>Capture, review, and refine each expense in one place.</h1>
-        <p className="lede">This workspace is dedicated to adding new expenses, editing existing ones, and reviewing the filtered list without mixing it into the analytics view.</p>
-      </section>
+  function renderExpenseForm(isSheet = false) {
+    return (
+      <SurfaceCard className={cn("space-y-5 p-5 sm:p-6", isSheet && "border-none bg-transparent p-0 shadow-none") }>
+        <SectionHeader
+          eyebrow="Capture"
+          title={editingExpenseId ? "Edit expense" : "Add expense"}
+          description={editingExpenseId ? "Update the selected expense and save the revised amount, category, description, or date." : "Capture a new expense with tactile category chips, quick dates, and clear validation."}
+        />
 
-      <section className="content-grid expenses-page-grid">
-        <form className="card form-card" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
-          <div className="section-heading">
-            <h2>{editingExpenseId ? "Edit expense" : "Add expense"}</h2>
-            <p>{editingExpenseId ? "Update the selected expense and save the revised amount, category, description, or date." : "Each save is tied to your account, and retries remain idempotent per user."}</p>
-          </div>
-
-          <label>
-            <span>Amount <sup className="required-marker">*</sup></span>
+        <form className="grid gap-4" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Amount
             <input
               type="number"
               min="0.01"
@@ -167,259 +175,347 @@ export function ExpensesPage({
               onChange={(event) => onFormChange((current) => ({ ...current, amount: event.target.value }))}
               onKeyDown={(event) => handleFieldAdvance(event, descriptionInputRef.current)}
             />
-            {showValidation && validationErrors.amount ? <small className="field-error-message">{validationErrors.amount}</small> : null}
+            {showValidation && validationErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.amount}</span> : null}
           </label>
 
-          <label>
-            <span>Category <sup className="required-marker">*</sup></span>
-            <div className="category-field">
-              <div className="category-selector-grid" role="list" aria-label="Expense categories">
-                {availableCategoryOptions.map((category) => {
-                  const isActive = selectedCategoryOption?.label.toLowerCase() === category.label.toLowerCase();
+          <div className="grid gap-3">
+            <span className="text-sm font-medium text-secondary">Category</span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+              {availableCategoryOptions.map((category) => {
+                const isActive = selectedCategoryOption?.label.toLowerCase() === category.label.toLowerCase();
 
-                  return (
-                    <button key={category.id} type="button" className={isActive ? "category-chip is-active" : "category-chip"} aria-pressed={isActive} onClick={() => {
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={cn(
+                      "flex min-h-14 items-center gap-3 rounded-[20px] border px-4 py-3 text-left shadow-sm",
+                      isActive ? "border-primary/30 bg-success-tint text-primary" : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
+                    )}
+                    aria-pressed={isActive}
+                    onClick={() => {
                       onCategorySelect(category);
                       requestAnimationFrame(() => descriptionInputRef.current?.focus());
-                    }}>
-                      <span className="category-chip-icon">
-                        <CategoryIcon iconId={category.icon} />
-                      </span>
-                      <span>{category.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {isOtherCategorySelected ? (
-                <div className="custom-category-builder">
-                  <div className="custom-category-copy">
-                    <strong>Need another category?</strong>
-                    <p>Write your category name and choose the icon you want to save with it.</p>
-                  </div>
-
-                  <div className="icon-picker-grid" role="list" aria-label="Category icons">
-                    {iconOptions.map((iconOption) => (
-                      <button key={iconOption.id} type="button" className={customCategoryIcon === iconOption.id ? "icon-picker-button is-active" : "icon-picker-button"} onClick={() => onCustomCategoryIconChange(iconOption.id)}>
-                        <span className="category-chip-icon">
-                          <CategoryIcon iconId={iconOption.id} />
-                        </span>
-                        <span>{iconOption.label}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="custom-category-row">
-                    <input type="text" placeholder="Write your category name" disabled={!currentUserPresent} value={customCategoryName} onChange={(event) => onCustomCategoryNameChange(event.target.value)} />
-                    <button type="button" className="secondary-button" onClick={onCreateCustomCategory}>
-                      Add category
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <input type="hidden" required value={form.category} readOnly />
+                    }}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
+                      <CategoryIcon iconId={category.icon} />
+                    </span>
+                    <span className="text-sm font-semibold">{category.label}</span>
+                  </button>
+                );
+              })}
             </div>
-            {showValidation && validationErrors.category ? <small className="field-error-message">{validationErrors.category}</small> : null}
+            {showValidation && validationErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.category}</span> : null}
+          </div>
+
+          {isOtherCategorySelected ? (
+            <SurfaceCard className="space-y-4 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(248,243,232,0.8))] p-4 shadow-sm">
+              <div>
+                <strong className="text-base text-ink">Need another category?</strong>
+                <p className="mt-1 text-sm leading-6 text-secondary">Write a category name and choose the icon you want to save with it.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {iconOptions.map((iconOption) => (
+                  <button
+                    key={iconOption.id}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-3 rounded-[18px] border px-3 py-3",
+                      customCategoryIcon === iconOption.id ? "border-primary/30 bg-success-tint text-primary" : "border-[color:var(--border)] bg-white/80 text-secondary"
+                    )}
+                    onClick={() => onCustomCategoryIconChange(iconOption.id)}
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/90 text-ink shadow-sm">
+                      <CategoryIcon iconId={iconOption.id} />
+                    </span>
+                    <span className="text-sm font-semibold">{iconOption.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <input type="text" placeholder="Write your category name" disabled={!currentUserPresent} value={customCategoryName} onChange={(event) => onCustomCategoryNameChange(event.target.value)} />
+                <button type="button" className="ui-button-secondary" onClick={onCreateCustomCategory}>
+                  Add category
+                </button>
+              </div>
+            </SurfaceCard>
+          ) : null}
+
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Description
+            <textarea
+              ref={descriptionInputRef}
+              required
+              rows={3}
+              disabled={!currentUserPresent}
+              value={form.description}
+              aria-invalid={showValidation && Boolean(validationErrors.description)}
+              onChange={(event) => onFormChange((current) => ({ ...current, description: event.target.value }))}
+              onKeyDown={(event) => handleFieldAdvance(event, dateInputRef.current)}
+            />
+            {showValidation && validationErrors.description ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.description}</span> : null}
           </label>
 
-          <label>
-            <span>Description <sup className="required-marker">*</sup></span>
-            <textarea ref={descriptionInputRef} required rows={3} disabled={!currentUserPresent} value={form.description} aria-invalid={showValidation && Boolean(validationErrors.description)} onChange={(event) => onFormChange((current) => ({ ...current, description: event.target.value }))} onKeyDown={(event) => handleFieldAdvance(event, dateInputRef.current)} />
-            {showValidation && validationErrors.description ? <small className="field-error-message">{validationErrors.description}</small> : null}
-          </label>
-
-          <label>
-            <span>Date <sup className="required-marker">*</sup></span>
-            <input ref={dateInputRef} type="date" required disabled={!currentUserPresent} value={form.date} aria-invalid={showValidation && Boolean(validationErrors.date)} onChange={(event) => onFormChange((current) => ({ ...current, date: event.target.value }))} />
-            <div className="date-shortcuts">
-              <button type="button" className="table-action-button" onClick={() => onFormChange((current) => ({ ...current, date: new Date().toISOString().slice(0, 10) }))}>
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Date
+            <input
+              ref={dateInputRef}
+              type="date"
+              required
+              disabled={!currentUserPresent}
+              value={form.date}
+              aria-invalid={showValidation && Boolean(validationErrors.date)}
+              onChange={(event) => onFormChange((current) => ({ ...current, date: event.target.value }))}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="ui-button-ghost" onClick={() => onFormChange((current) => ({ ...current, date: getTodayValue() }))}>
                 Today
               </button>
-              <button
-                type="button"
-                className="table-action-button"
-                onClick={() => {
-                  const yesterday = new Date();
-                  yesterday.setDate(yesterday.getDate() - 1);
-                  onFormChange((current) => ({ ...current, date: yesterday.toISOString().slice(0, 10) }));
-                }}
-              >
+              <button type="button" className="ui-button-ghost" onClick={() => onFormChange((current) => ({ ...current, date: getYesterdayValue() }))}>
                 Yesterday
               </button>
             </div>
-            {showValidation && validationErrors.date ? <small className="field-error-message">{validationErrors.date}</small> : null}
+            {showValidation && validationErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.date}</span> : null}
           </label>
 
-          <div className="form-actions">
-            <button type="submit" className="primary-action-button" disabled={isSubmitting || !currentUserPresent}>
-              {isSubmitting ? (editingExpenseId ? "Updating..." : "Saving...") : editingExpenseId ? "Update expense" : "Save expense"}
-            </button>
-
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             {editingExpenseId ? (
-              <button type="button" className="ghost-button subtle-button" onClick={onEditCancel}>
+              <button type="button" className="ui-button-secondary" onClick={onEditCancel}>
                 Cancel edit
               </button>
             ) : null}
-          </div>
-
-          {statusMessage ? <p className="status-message success">{statusMessage}</p> : null}
-          {errorMessage ? <p className="status-message error">{errorMessage}</p> : null}
-        </form>
-
-        <section className="card filter-card expenses-filter-card">
-          <div className="section-heading">
-            <h2>Expense view</h2>
-            <p>These filters apply only to your expense list below.</p>
-          </div>
-
-          <div className="filter-grid filter-grid-wide">
-            <label>
-              <span>Category</span>
-              <select value={selectedCategory} disabled={!currentUserPresent} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
-                <option value="">All categories</option>
-                {categories.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Sort</span>
-              <select value={sortNewestFirst ? "date_desc" : "none"} disabled={!currentUserPresent} onChange={(event) => onSortNewestFirstChange(event.target.value === "date_desc")}>
-                <option value="date_desc">Newest first</option>
-                <option value="none">Created order</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Range</span>
-              <select value={selectedTimeRange} disabled={!currentUserPresent} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
-                <option value="all">All time</option>
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="year">This year</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="filter-feedback-row">
-            <p className="filter-feedback-copy">{activeFilters.length > 0 ? `Showing: ${activeFilters.join(" | ")}` : "Showing: All categories | All time | Newest first"}</p>
-            <button type="button" className="ghost-button filter-clear-button" disabled={activeFilters.length === 0} onClick={onClearFilters}>
-              Clear filters
+            <button type="submit" className="ui-button-primary" disabled={isSubmitting || !currentUserPresent}>
+              {isSubmitting ? (editingExpenseId ? "Updating..." : "Saving...") : editingExpenseId ? "Update expense" : "Save expense"}
             </button>
           </div>
-        </section>
 
-        <section className="card list-card">
-          <div className="list-card-heading">
-            <div className="section-heading">
-              <h2>Your expenses</h2>
-              <p>
-                {totalVisibleExpenses > 0
-                  ? `Showing ${pageStart}-${pageEnd} of ${totalVisibleExpenses} expenses tied to your authenticated account.`
-                  : "Only the expenses tied to your authenticated account are returned by the API."}
-              </p>
-            </div>
+          {statusMessage ? <StatusNotice tone="success">{statusMessage}</StatusNotice> : null}
+          {errorMessage ? <StatusNotice tone="error">{errorMessage}</StatusNotice> : null}
+        </form>
+      </SurfaceCard>
+    );
+  }
 
-            <div className="list-card-tools">
-              <span className="list-selection-copy">{selectedVisibleExpenseIds.length > 0 ? `${selectedVisibleExpenseIds.length} selected` : "Select expenses to delete together"}</span>
-              <button
-                type="button"
-                className="table-action-button bulk-delete-button danger-button"
-                disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
-                onClick={() => void onDeleteSelectedExpenses()}
-              >
-                Delete selected
-              </button>
-            </div>
+  return (
+    <>
+      <PageHero
+        eyebrow="Expenses"
+        title="Capture, review, and refine each expense in one place."
+        description="Move from quick entry to careful review without falling into a dense admin-table feel. On smaller screens, the list becomes stacked cards and the form moves into a sheet."
+        actions={
+          <button type="button" className="ui-button-primary lg:hidden" onClick={() => setIsExpenseSheetOpen(true)}>
+            Add expense
+          </button>
+        }
+      />
+
+      <div className="hidden lg:block">{renderExpenseForm(false)}</div>
+
+      <SurfaceCard className="space-y-5 p-5 sm:p-6">
+        <SectionHeader title="Expense view" description="Filter by category, sort order, and time range without losing context." />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Category
+            <select value={selectedCategory} disabled={!currentUserPresent} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Sort
+            <select value={sortNewestFirst ? "date_desc" : "none"} disabled={!currentUserPresent} onChange={(event) => onSortNewestFirstChange(event.target.value === "date_desc")}>
+              <option value="date_desc">Newest first</option>
+              <option value="none">Created order</option>
+            </select>
+          </label>
+
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Range
+            <select value={selectedTimeRange} disabled={!currentUserPresent} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
+              <option value="all">All time</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="year">This year</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-col gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-secondary">{activeFilters.length > 0 ? `Showing: ${activeFilters.join(" • ")}` : "Showing: All categories • All time • Newest first"}</p>
+          <button type="button" className="ui-button-ghost" disabled={activeFilters.length === 0} onClick={onClearFilters}>
+            Clear filters
+          </button>
+        </div>
+      </SurfaceCard>
+
+      <SurfaceCard className="space-y-5 p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <SectionHeader
+            title="Your expenses"
+            description={
+              totalVisibleExpenses > 0
+                ? `Showing ${pageStart}-${pageEnd} of ${totalVisibleExpenses} expenses tied to your authenticated account.`
+                : "Only the expenses tied to your authenticated account are returned by the API."
+            }
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm text-secondary">{selectedVisibleExpenseIds.length > 0 ? `${selectedVisibleExpenseIds.length} selected` : "Select expenses to delete together"}</span>
+            <button
+              type="button"
+              className="ui-button-danger"
+              disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
+              onClick={() => void onDeleteSelectedExpenses()}
+            >
+              Delete selected
+            </button>
           </div>
+        </div>
 
-          {!currentUserPresent && !authLoading ? <p className="empty-state">Sign in to view your private expense history.</p> : null}
-          {currentUserPresent && isLoading ? <p className="empty-state">Loading expenses...</p> : null}
-          {currentUserPresent && !isLoading && visibleExpenses.length === 0 ? <p className="empty-state">No expenses match the current filters.</p> : null}
+        {!currentUserPresent && !authLoading ? <EmptyState title="Sign in to view expenses" description="Your private expense history only appears after authentication." /> : null}
+        {currentUserPresent && isLoading ? <StatusNotice tone="neutral">Loading expenses...</StatusNotice> : null}
+        {currentUserPresent && !isLoading && visibleExpenses.length === 0 ? <EmptyState title="No expenses match the current filters" description="Adjust the filters or add a new expense to bring this list back to life." /> : null}
 
-          {currentUserPresent && !isLoading && visibleExpenses.length > 0 ? (
-            <>
-              <div className="table-shell">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>
-                        <input type="checkbox" aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"} checked={areAllVisibleExpensesSelected} onChange={onToggleSelectAllVisibleExpenses} />
-                      </th>
-                      <th>Date</th>
-                      <th>Category</th>
-                      <th>Description</th>
-                      <th>Amount</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleExpenses.map((expense) => (
-                      <tr key={expense.id} className="expense-row" onClick={() => onEditStart(expense)}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${expense.description}`}
-                            checked={selectedExpenseIds.includes(expense.id)}
+        {currentUserPresent && !isLoading && visibleExpenses.length > 0 ? (
+          <>
+            <div className="hidden overflow-hidden rounded-[24px] border border-[color:var(--border)] lg:block">
+              <table className="bg-white/80">
+                <thead>
+                  <tr>
+                    <th>
+                      <input type="checkbox" aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"} checked={areAllVisibleExpensesSelected} onChange={onToggleSelectAllVisibleExpenses} />
+                    </th>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th className="text-right">Amount</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleExpenses.map((expense) => (
+                    <tr key={expense.id} className="cursor-pointer hover:bg-white" onClick={() => onEditStart(expense)}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${expense.description}`}
+                          checked={selectedExpenseIds.includes(expense.id)}
+                          disabled={deletingExpenseIds.includes(expense.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={() => onToggleExpenseSelection(expense.id)}
+                        />
+                      </td>
+                      <td className="text-secondary">{expense.date}</td>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                            <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
+                          </span>
+                          <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <strong className="block text-ink">{expense.description}</strong>
+                      </td>
+                      <td className="text-right text-lg font-semibold text-ink">{formatCurrency(expense.amount)}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" className="ui-button-ghost" onClick={(event) => { event.stopPropagation(); onEditStart(expense); }}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-button-danger"
                             disabled={deletingExpenseIds.includes(expense.id)}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={() => onToggleExpenseSelection(expense.id)}
-                          />
-                        </td>
-                        <td>{expense.date}</td>
-                        <td>
-                          <div className="expense-category-cell expense-category-badge">
-                            <span className="expense-category-icon">
-                              <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
-                            </span>
-                            <span>{expense.category}</span>
-                          </div>
-                        </td>
-                        <td>{expense.description}</td>
-                        <td className="expense-amount-cell">{formatCurrency(expense.amount)}</td>
-                        <td>
-                          <div className="table-actions">
-                            <button type="button" className="table-action-button" onClick={(event) => {
-                              event.stopPropagation();
-                              onEditStart(expense);
-                            }}>
-                              Edit
-                            </button>
-                            <button type="button" className="table-action-button danger-button" disabled={deletingExpenseIds.includes(expense.id)} onClick={(event) => {
+                            onClick={(event) => {
                               event.stopPropagation();
                               void onDeleteExpense(expense.id);
-                            }}>
-                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                            }}
+                          >
+                            {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-              {totalExpensePages > 1 ? (
-                <div className="pagination-bar" aria-label="Expenses pagination">
-                  <p className="pagination-copy">Page {currentExpensesPage} of {totalExpensePages}</p>
-                  <div className="pagination-actions">
-                    <button type="button" className="table-action-button" disabled={currentExpensesPage === 1} onClick={() => onExpensesPageChange(currentExpensesPage - 1)}>
-                      Previous
+            <div className="grid gap-3 lg:hidden">
+              {visibleExpenses.map((expense) => (
+                <article key={expense.id} className="table-card-mobile space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${expense.description}`}
+                        checked={selectedExpenseIds.includes(expense.id)}
+                        disabled={deletingExpenseIds.includes(expense.id)}
+                        onChange={() => onToggleExpenseSelection(expense.id)}
+                      />
+                      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                        <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
+                      </span>
+                    </div>
+                    <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                  </div>
+
+                  <div className="space-y-2">
+                    <strong className="block text-lg text-ink">{expense.description}</strong>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                      <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                      <span>{expense.date}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="ui-button-secondary" onClick={() => onEditStart(expense)}>
+                      Edit
                     </button>
-                    <button type="button" className="table-action-button" disabled={currentExpensesPage === totalExpensePages} onClick={() => onExpensesPageChange(currentExpensesPage + 1)}>
-                      Next
+                    <button type="button" className="ui-button-danger" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void onDeleteExpense(expense.id)}>
+                      {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
                     </button>
                   </div>
+                </article>
+              ))}
+            </div>
+
+            {totalExpensePages > 1 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4">
+                <p className="text-sm text-secondary">Page {currentExpensesPage} of {totalExpensePages}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="ui-button-secondary" disabled={currentExpensesPage === 1} onClick={() => onExpensesPageChange(currentExpensesPage - 1)}>
+                    Previous
+                  </button>
+                  <button type="button" className="ui-button-secondary" disabled={currentExpensesPage === totalExpensePages} onClick={() => onExpensesPageChange(currentExpensesPage + 1)}>
+                    Next
+                  </button>
                 </div>
-              ) : null}
-            </>
-          ) : null}
-        </section>
-      </section>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </SurfaceCard>
+
+      <button
+        type="button"
+        className="fixed bottom-28 right-4 z-20 inline-flex h-15 w-15 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-3xl text-white shadow-[0_24px_60px_rgba(30,122,83,0.28)] lg:hidden"
+        onClick={() => setIsExpenseSheetOpen(true)}
+        aria-label="Add expense"
+      >
+        +
+      </button>
+
+      {isExpenseSheetOpen ? (
+        <ModalFrame onClose={() => setIsExpenseSheetOpen(false)} className="max-w-[760px] overflow-y-auto p-5 sm:p-6">
+          {renderExpenseForm(true)}
+        </ModalFrame>
+      ) : null}
     </>
   );
 }

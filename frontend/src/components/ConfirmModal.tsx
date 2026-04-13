@@ -1,3 +1,5 @@
+import { ModalFrame } from "./ui";
+
 type ConfirmModalProps = {
   isOpen: boolean;
   title: string;
@@ -24,30 +26,23 @@ export function ConfirmModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
-      <section
-        className="card confirm-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-modal-title"
-        aria-describedby="confirm-modal-copy"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <p className="eyebrow">Confirm deletion</p>
-        <h2 id="confirm-modal-title">{title}</h2>
-        <p id="confirm-modal-copy" className="confirm-modal-copy">
-          {description}
-        </p>
+    <ModalFrame onClose={onCancel} className="max-w-[560px] p-6 sm:p-8">
+      <div className="space-y-5">
+        <div className="space-y-3">
+          <p className="section-eyebrow">Confirm action</p>
+          <h2 className="font-display text-4xl leading-none tracking-[-0.03em] text-ink">{title}</h2>
+          <p className="text-sm leading-7 text-secondary sm:text-base">{description}</p>
+        </div>
 
-        <div className="confirm-modal-actions">
-          <button type="button" className="ghost-button confirm-modal-button" onClick={onCancel} disabled={isConfirming}>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button type="button" className="ui-button-secondary" onClick={onCancel} disabled={isConfirming}>
             {cancelLabel}
           </button>
-          <button type="button" className="secondary-button confirm-modal-button destructive-shell-button" onClick={onConfirm} disabled={isConfirming}>
-            {isConfirming ? "Deleting account..." : confirmLabel}
+          <button type="button" className="ui-button-danger" onClick={onConfirm} disabled={isConfirming}>
+            {isConfirming ? "Working..." : confirmLabel}
           </button>
         </div>
-      </section>
-    </div>
+      </div>
+    </ModalFrame>
   );
 }

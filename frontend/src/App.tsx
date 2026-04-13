@@ -4,11 +4,39 @@ import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
 import { SignedInLayout } from "./layouts/SignedInLayout";
+import { AlertsPage } from "./pages/AlertsPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
 import { LandingPage } from "./pages/LandingPage";
-import type { Budget, BudgetForm, BudgetHistoryGroup, BudgetHistoryRange, BudgetSummary, CategoryIconId, CategoryOption, ChartDisplayType, ChartGranularity, DashboardInsight, DashboardStats, Expense, ExpenseForm, PendingSubmission, ProviderOption, TimeRangeFilter, TrendDetailItem, TrendPoint } from "./types";
+import { WalletsPage } from "./pages/WalletsPage";
+import type {
+  BillReminder,
+  BillReminderRecurrence,
+  Budget,
+  BudgetForm,
+  BudgetHistoryGroup,
+  BudgetHistoryRange,
+  BudgetSummary,
+  CategoryIconId,
+  CategoryOption,
+  ChartDisplayType,
+  ChartGranularity,
+  DashboardInsight,
+  DashboardStats,
+  Expense,
+  ExpenseForm,
+  Notification,
+  PendingSubmission,
+  ProviderOption,
+  ReminderPreferences,
+  SplitRule,
+  TimeRangeFilter,
+  TrendDetailItem,
+  TrendPoint,
+  Wallet,
+  WalletDetail
+} from "./types";
 import { ApiError } from "./types";
 
 const providerOptions: ProviderOption[] = [
@@ -135,6 +163,22 @@ function buildExpensesUrl(category: string, sortNewestFirst: boolean): string {
 
 function buildBudgetsUrl(): string {
   return API_BASE_URL ? new URL("/api/budgets", API_BASE_URL).toString() : "/api/budgets";
+}
+
+function buildWalletsUrl(): string {
+  return API_BASE_URL ? new URL("/api/wallets", API_BASE_URL).toString() : "/api/wallets";
+}
+
+function buildNotificationsUrl(): string {
+  return API_BASE_URL ? new URL("/api/notifications", API_BASE_URL).toString() : "/api/notifications";
+}
+
+function buildReminderPreferencesUrl(): string {
+  return API_BASE_URL ? new URL("/api/reminder-preferences", API_BASE_URL).toString() : "/api/reminder-preferences";
+}
+
+function buildBillRemindersUrl(): string {
+  return API_BASE_URL ? new URL("/api/bill-reminders", API_BASE_URL).toString() : "/api/bill-reminders";
 }
 
 function getCurrentMonthValue(baseDate = new Date()): string {
@@ -424,6 +468,11 @@ async function buildAuthorizedHeaders(user: User, extraHeaders: Record<string, s
   };
 }
 
+async function parseApiResponseError(response: Response, fallbackMessage: string): Promise<ApiError> {
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return new ApiError(body?.error ?? fallbackMessage, response.status);
+}
+
 async function createExpense(payload: ExpenseForm, idempotencyKey: string, user: User): Promise<void> {
   const endpoint = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL).toString() : "/api/expenses";
   const response = await fetch(endpoint, {
@@ -532,9 +581,356 @@ async function deleteAccountData(user: User): Promise<void> {
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to delete account.", response.status);
+    throw await parseApiResponseError(response, "Failed to delete account.");
   }
+}
+
+async function createWallet(
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> },
+  user: User
+): Promise<WalletDetail> {
+  const response = await fetch(buildWalletsUrl(), {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to create wallet.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function addWalletMember(walletId: string, payload: { displayName: string; email?: string }, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/members`, API_BASE_URL).toString() : `/api/wallets/${walletId}/members`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to add wallet member.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function getWalletDetail(walletId: string, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
+  const response = await fetch(endpoint, {
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to load wallet.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function deleteWalletGroup(walletId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete group.");
+  }
+}
+
+async function leaveWalletGroup(walletId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/leave`, API_BASE_URL).toString() : `/api/wallets/${walletId}/leave`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to exit group.");
+  }
+}
+
+async function createWalletBudget(walletId: string, payload: BudgetForm, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({
+      amount: payload.amount,
+      scope: payload.scope,
+      category: payload.scope === "category" ? payload.category : undefined,
+      month: payload.month
+    })
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to create wallet budget.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function updateWalletBudget(walletId: string, walletBudgetId: string, payload: BudgetForm, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets/${walletBudgetId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets/${walletBudgetId}`;
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({
+      amount: payload.amount,
+      scope: payload.scope,
+      category: payload.scope === "category" ? payload.category : undefined,
+      month: payload.month
+    })
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to update wallet budget.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function deleteWalletBudget(walletId: string, walletBudgetId: string, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets/${walletBudgetId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets/${walletBudgetId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete wallet budget.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function createSharedWalletExpense(
+  walletId: string,
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to create shared expense.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function updateSharedWalletExpense(
+  walletId: string,
+  walletExpenseId: string,
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to update shared expense.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function deleteSharedWalletExpense(walletId: string, walletExpenseId: string, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete shared expense.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function createWalletSettlement(
+  walletId: string,
+  payload: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string },
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to record settlement.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function updateWalletSettlementEntry(
+  walletId: string,
+  settlementId: string,
+  payload: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string },
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements/${settlementId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements/${settlementId}`;
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to update settlement.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function deleteWalletSettlementEntry(walletId: string, settlementId: string, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements/${settlementId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements/${settlementId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete settlement.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
+async function listBillReminders(user: User): Promise<BillReminder[]> {
+  const response = await fetch(buildBillRemindersUrl(), {
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to load bill reminders.");
+  }
+
+  const body = (await response.json()) as { billReminders: BillReminder[] };
+  return body.billReminders;
+}
+
+async function saveBillReminder(
+  payload: { title: string; amount: string; category: string; dueDate: string; recurrence: BillReminderRecurrence; intervalCount: number; reminderDaysBefore: number; isActive: boolean },
+  user: User,
+  billReminderId?: string
+): Promise<BillReminder> {
+  const endpoint = billReminderId
+    ? API_BASE_URL ? new URL(`/api/bill-reminders/${billReminderId}`, API_BASE_URL).toString() : `/api/bill-reminders/${billReminderId}`
+    : buildBillRemindersUrl();
+  const response = await fetch(endpoint, {
+    method: billReminderId ? "PUT" : "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, billReminderId ? "Failed to update bill reminder." : "Failed to create bill reminder.");
+  }
+
+  const body = (await response.json()) as { billReminder: BillReminder };
+  return body.billReminder;
+}
+
+async function deleteBillReminderEntry(billReminderId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/bill-reminders/${billReminderId}`, API_BASE_URL).toString() : `/api/bill-reminders/${billReminderId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete bill reminder.");
+  }
+}
+
+async function respondToWalletInvite(walletMemberId: string, action: "accept" | "decline", user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallet-invites/${walletMemberId}/respond`, API_BASE_URL).toString() : `/api/wallet-invites/${walletMemberId}/respond`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user, {
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ action })
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to respond to wallet invite.");
+  }
+}
+
+async function deleteNotification(notificationId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/notifications/${notificationId}`, API_BASE_URL).toString() : `/api/notifications/${notificationId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to delete notification.");
+  }
+}
+
+async function runNotificationChecks(user: User): Promise<Notification[]> {
+  const endpoint = API_BASE_URL ? new URL("/api/notifications/run-checks", API_BASE_URL).toString() : "/api/notifications/run-checks";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to run reminder checks.");
+  }
+
+  const body = (await response.json()) as { created_notifications: Notification[] };
+  return body.created_notifications;
 }
 
 export default function App() {
@@ -543,6 +939,12 @@ export default function App() {
   const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [selectedWallet, setSelectedWallet] = useState<WalletDetail | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
+  const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [customCategoryIcon, setCustomCategoryIcon] = useState<CategoryIconId>("other");
@@ -555,6 +957,7 @@ export default function App() {
   const [currentExpensesPage, setCurrentExpensesPage] = useState(1);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
   const [isBudgetHistoryOpen, setIsBudgetHistoryOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
@@ -563,17 +966,25 @@ export default function App() {
   const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isBudgetLoading, setIsBudgetLoading] = useState(false);
+  const [isWalletLoading, setIsWalletLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isBudgetSubmitting, setIsBudgetSubmitting] = useState(false);
+  const [isWalletSubmitting, setIsWalletSubmitting] = useState(false);
+  const [isSavingReminderPreferences, setIsSavingReminderPreferences] = useState(false);
+  const [isSavingBillReminder, setIsSavingBillReminder] = useState(false);
+  const [isRunningNotificationChecks, setIsRunningNotificationChecks] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [budgetErrorMessage, setBudgetErrorMessage] = useState("");
   const [budgetStatusMessage, setBudgetStatusMessage] = useState("");
+  const [walletErrorMessage, setWalletErrorMessage] = useState("");
+  const [walletStatusMessage, setWalletStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const notificationPanelRef = useRef<HTMLDivElement | null>(null);
 
   const categories = useMemo(() => [...new Set(expenses.map((expense) => expense.category))].sort((left, right) => left.localeCompare(right)), [expenses]);
 
@@ -817,6 +1228,8 @@ export default function App() {
       }));
   }, [budgetHistoryRange, budgetSummaries]);
 
+  const unreadNotificationCount = useMemo(() => notifications.filter((notification) => notification.status === "unread").length, [notifications]);
+
   async function loadExpenses(user: User, activeCategory = selectedCategory, activeSort = sortNewestFirst) {
     setIsLoading(true);
     setErrorMessage("");
@@ -863,6 +1276,92 @@ export default function App() {
     }
   }
 
+  async function loadWallets(user: User) {
+    setIsWalletLoading(true);
+    setWalletErrorMessage("");
+
+    try {
+      const response = await fetch(buildWalletsUrl(), {
+        headers: await buildAuthorizedHeaders(user)
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to load wallets.");
+      }
+
+      const body = (await response.json()) as { wallets: Wallet[] };
+      setWallets(body.wallets);
+      setSelectedWalletId((current) => {
+        if (current && body.wallets.some((wallet) => wallet.id === current)) {
+          return current;
+        }
+
+        return body.wallets[0]?.id ?? null;
+      });
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallets.");
+    } finally {
+      setIsWalletLoading(false);
+    }
+  }
+
+  async function loadSelectedWallet(user: User, walletId: string) {
+    setIsWalletLoading(true);
+    setWalletErrorMessage("");
+
+    try {
+      const wallet = await getWalletDetail(walletId, user);
+      setSelectedWallet(wallet);
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallet.");
+    } finally {
+      setIsWalletLoading(false);
+    }
+  }
+
+  async function loadNotifications(user: User) {
+    try {
+      const response = await fetch(buildNotificationsUrl(), {
+        headers: await buildAuthorizedHeaders(user)
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to load notifications.");
+      }
+
+      const body = (await response.json()) as { notifications: Notification[] };
+      setNotifications(body.notifications);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to load notifications.");
+    }
+  }
+
+  async function loadReminderPreferences(user: User) {
+    try {
+      const response = await fetch(buildReminderPreferencesUrl(), {
+        headers: await buildAuthorizedHeaders(user)
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to load reminder preferences.");
+      }
+
+      const body = (await response.json()) as { preferences: ReminderPreferences };
+      setReminderPreferences(body.preferences);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to load reminder preferences.");
+    }
+  }
+
+  async function loadBillReminders(user: User) {
+    try {
+      const entries = await listBillReminders(user);
+      setBillReminders(entries);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to load bill reminders.");
+    }
+  }
+
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
       setAuthLoading(false);
@@ -874,11 +1373,18 @@ export default function App() {
       setCurrentUser(user);
       setAuthLoading(false);
       setIsProfileMenuOpen(false);
+      setIsNotificationPanelOpen(false);
       setIsDeleteAccountModalOpen(false);
 
       if (!user) {
         setExpenses([]);
         setBudgets([]);
+        setWallets([]);
+        setSelectedWalletId(null);
+        setSelectedWallet(null);
+        setNotifications([]);
+        setBillReminders([]);
+        setReminderPreferences(null);
         setCustomCategories([]);
         setCustomCategoryName("");
         setCustomCategoryIcon("other");
@@ -925,6 +1431,37 @@ export default function App() {
 
     void loadBudgets(currentUser);
   }, [authLoading, currentUser]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setIsWalletLoading(false);
+      setWallets([]);
+      setSelectedWalletId(null);
+      setSelectedWallet(null);
+      setNotifications([]);
+      setBillReminders([]);
+      setReminderPreferences(null);
+      return;
+    }
+
+    void loadWallets(currentUser);
+    void loadNotifications(currentUser);
+    void loadBillReminders(currentUser);
+    void loadReminderPreferences(currentUser);
+  }, [authLoading, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || !selectedWalletId) {
+      setSelectedWallet(null);
+      return;
+    }
+
+    void loadSelectedWallet(currentUser, selectedWalletId);
+  }, [currentUser, selectedWalletId]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
@@ -977,6 +1514,10 @@ export default function App() {
       if (!profileMenuRef.current?.contains(event.target as Node)) {
         setIsProfileMenuOpen(false);
       }
+
+      if (!notificationPanelRef.current?.contains(event.target as Node)) {
+        setIsNotificationPanelOpen(false);
+      }
     }
 
     document.addEventListener("mousedown", handlePointerDown);
@@ -1011,6 +1552,7 @@ export default function App() {
     setBudgetStatusMessage("");
     setBudgetErrorMessage("");
     setIsProfileMenuOpen(false);
+    setIsNotificationPanelOpen(false);
     setIsBudgetHistoryOpen(false);
     setSelectedExpenseIds([]);
     setEditingExpenseId(null);
@@ -1148,9 +1690,16 @@ export default function App() {
       clearCustomCategories(currentUser.uid);
       writePendingSubmission(null);
       setIsProfileMenuOpen(false);
+      setIsNotificationPanelOpen(false);
       setIsDeleteAccountModalOpen(false);
       setExpenses([]);
       setBudgets([]);
+      setWallets([]);
+      setSelectedWalletId(null);
+      setSelectedWallet(null);
+      setNotifications([]);
+      setBillReminders([]);
+      setReminderPreferences(null);
       setCustomCategories([]);
       setForm(initialFormState);
       setBudgetForm(initialBudgetFormState);
@@ -1172,6 +1721,507 @@ export default function App() {
       }
     } finally {
       setIsDeletingAccount(false);
+    }
+  }
+
+  async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to create a shared wallet.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await createWallet(input, currentUser);
+      await loadWallets(currentUser);
+      setSelectedWalletId(wallet.wallet.id);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Wallet created.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create wallet.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleAddWalletMember(inputWalletId: string, input: { displayName: string; email?: string }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to add a wallet member.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await addWalletMember(inputWalletId, input, currentUser);
+      await loadWallets(currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Wallet member added.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to add wallet member.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleCreateWalletBudget(inputWalletId: string, input: BudgetForm) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to create a group budget.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+
+    try {
+      const wallet = await createWalletBudget(inputWalletId, input, currentUser);
+      setSelectedWallet(wallet);
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create wallet budget.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleUpdateWalletBudget(inputWalletId: string, walletBudgetId: string, input: BudgetForm) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update a group budget.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+
+    try {
+      const wallet = await updateWalletBudget(inputWalletId, walletBudgetId, input, currentUser);
+      setSelectedWallet(wallet);
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update wallet budget.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleDeleteWalletBudget(inputWalletId: string, walletBudgetId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete a group budget.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+
+    try {
+      const wallet = await deleteWalletBudget(inputWalletId, walletBudgetId, currentUser);
+      setSelectedWallet(wallet);
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete wallet budget.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleDeleteWallet(inputWalletId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete this group.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      await deleteWalletGroup(inputWalletId, currentUser);
+      setSelectedWallet(null);
+      setSelectedWalletId(null);
+      await loadWallets(currentUser);
+      await loadNotifications(currentUser);
+      setWalletStatusMessage("Group deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete group.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleLeaveWallet(inputWalletId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to exit this group.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      await leaveWalletGroup(inputWalletId, currentUser);
+      setSelectedWallet(null);
+      setSelectedWalletId(null);
+      await loadWallets(currentUser);
+      await loadNotifications(currentUser);
+      setWalletStatusMessage("You exited the group.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to exit group.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleCreateWalletExpense(inputWalletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to add a shared expense.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await createSharedWalletExpense(inputWalletId, input, currentUser);
+      await loadWallets(currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Shared expense added.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create shared expense.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleUpdateWalletExpense(inputWalletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update a shared expense.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await updateSharedWalletExpense(inputWalletId, walletExpenseId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Shared expense updated.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update shared expense.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleDeleteWalletExpense(inputWalletId: string, walletExpenseId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete a shared expense.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await deleteSharedWalletExpense(inputWalletId, walletExpenseId, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Shared expense deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete shared expense.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleCreateWalletSettlement(inputWalletId: string, input: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to record a settlement.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await createWalletSettlement(inputWalletId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Settlement recorded.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record settlement.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleUpdateWalletSettlement(inputWalletId: string, settlementId: string, input: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update a settlement.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await updateWalletSettlementEntry(inputWalletId, settlementId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Settlement updated.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update settlement.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleDeleteWalletSettlement(inputWalletId: string, settlementId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete a settlement.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await deleteWalletSettlementEntry(inputWalletId, settlementId, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Settlement deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete settlement.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
+  async function handleMarkNotificationRead(notificationId: string) {
+    if (!currentUser) {
+      return;
+    }
+
+    const endpoint = API_BASE_URL ? new URL(`/api/notifications/${notificationId}/read`, API_BASE_URL).toString() : `/api/notifications/${notificationId}/read`;
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: await buildAuthorizedHeaders(currentUser)
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to update notification.");
+      }
+
+      const body = (await response.json()) as { notification: Notification };
+      setNotifications((current) => current.map((notification) => (notification.id === notificationId ? body.notification : notification)));
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to update notification.");
+    }
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    if (!currentUser) {
+      return;
+    }
+
+    const endpoint = API_BASE_URL ? new URL("/api/notifications/read-all", API_BASE_URL).toString() : "/api/notifications/read-all";
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: await buildAuthorizedHeaders(currentUser)
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to update notifications.");
+      }
+
+      setNotifications((current) => current.map((notification) => ({ ...notification, status: "read" })));
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to update notifications.");
+    }
+  }
+
+  async function handleDeleteNotification(notificationId: string) {
+    if (!currentUser) {
+      return false;
+    }
+
+    try {
+      await deleteNotification(notificationId, currentUser);
+      setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
+      return true;
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to delete notification.");
+      return false;
+    }
+  }
+
+  async function handleRespondToWalletInvite(walletMemberId: string, action: "accept" | "decline") {
+    if (!currentUser) {
+      return false;
+    }
+
+    try {
+      await respondToWalletInvite(walletMemberId, action, currentUser);
+      await loadNotifications(currentUser);
+      await loadWallets(currentUser);
+      setAuthMessage("");
+      return true;
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to respond to wallet invite.");
+      return false;
+    }
+  }
+
+  async function handleRunNotificationChecks() {
+    if (!currentUser) {
+      return;
+    }
+
+    setIsRunningNotificationChecks(true);
+
+    try {
+      await runNotificationChecks(currentUser);
+      await loadNotifications(currentUser);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to run reminder checks.");
+    } finally {
+      setIsRunningNotificationChecks(false);
+    }
+  }
+
+  function handleReminderPreferencesChange(field: "daily_logging_enabled" | "daily_logging_hour" | "budget_alerts_enabled" | "budget_alert_threshold", value: boolean | number) {
+    setReminderPreferences((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [field]: value
+      };
+    });
+  }
+
+  async function handleSaveReminderPreferences() {
+    if (!currentUser || !reminderPreferences) {
+      return;
+    }
+
+    setIsSavingReminderPreferences(true);
+
+    try {
+      const response = await fetch(buildReminderPreferencesUrl(), {
+        method: "PUT",
+        headers: await buildAuthorizedHeaders(currentUser, {
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify({
+          dailyLoggingEnabled: reminderPreferences.daily_logging_enabled,
+          dailyLoggingHour: reminderPreferences.daily_logging_hour,
+          budgetAlertsEnabled: reminderPreferences.budget_alerts_enabled,
+          budgetAlertThreshold: reminderPreferences.budget_alert_threshold
+        })
+      });
+
+      if (!response.ok) {
+        throw await parseApiResponseError(response, "Failed to update reminder preferences.");
+      }
+
+      const body = (await response.json()) as { preferences: ReminderPreferences };
+      setReminderPreferences(body.preferences);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to update reminder preferences.");
+    } finally {
+      setIsSavingReminderPreferences(false);
+    }
+  }
+
+  async function handleSaveBillReminder(
+    input: {
+      title: string;
+      amount: string;
+      category: string;
+      dueDate: string;
+      recurrence: BillReminderRecurrence;
+      intervalCount: number;
+      reminderDaysBefore: number;
+      isActive: boolean;
+    },
+    billReminderId?: string
+  ) {
+    if (!currentUser) {
+      setAuthMessage("Sign in to manage bill reminders.");
+      return false;
+    }
+
+    setIsSavingBillReminder(true);
+
+    try {
+      await saveBillReminder(input, currentUser, billReminderId);
+      await loadBillReminders(currentUser);
+      await loadNotifications(currentUser);
+      setAuthMessage("");
+      return true;
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to save bill reminder.");
+      return false;
+    } finally {
+      setIsSavingBillReminder(false);
+    }
+  }
+
+  async function handleDeleteBillReminder(billReminderId: string) {
+    if (!currentUser) {
+      setAuthMessage("Sign in to manage bill reminders.");
+      return false;
+    }
+
+    setIsSavingBillReminder(true);
+
+    try {
+      await deleteBillReminderEntry(billReminderId, currentUser);
+      await loadBillReminders(currentUser);
+      setAuthMessage("");
+      return true;
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to delete bill reminder.");
+      return false;
+    } finally {
+      setIsSavingBillReminder(false);
     }
   }
 
@@ -1384,7 +2434,7 @@ export default function App() {
     setSortNewestFirst(true);
   }
 
-  function renderSignedInPage(page: "dashboard" | "expenses") {
+  function renderSignedInPage(page: "dashboard" | "expenses" | "wallets" | "alerts") {
     if (!currentUser) {
       return null;
     }
@@ -1394,10 +2444,41 @@ export default function App() {
         currentUser={currentUser}
         isProfileMenuOpen={isProfileMenuOpen}
         profileMenuRef={profileMenuRef}
+        isNotificationPanelOpen={isNotificationPanelOpen}
+        notificationPanelRef={notificationPanelRef}
         isDeleteAccountModalOpen={isDeleteAccountModalOpen}
         isDeletingAccount={isDeletingAccount}
+        notifications={notifications}
+        billReminders={billReminders}
+        unreadNotificationCount={unreadNotificationCount}
+        reminderPreferences={reminderPreferences}
+        isSavingReminderPreferences={isSavingReminderPreferences}
+        isSavingBillReminder={isSavingBillReminder}
+        isRunningNotificationChecks={isRunningNotificationChecks}
         onToggleProfileMenu={() => setIsProfileMenuOpen((current) => !current)}
         onCloseProfileMenu={() => setIsProfileMenuOpen(false)}
+        onToggleNotificationPanel={() => {
+          setIsProfileMenuOpen(false);
+          setIsNotificationPanelOpen((current) => !current);
+        }}
+        onCloseNotificationPanel={() => setIsNotificationPanelOpen(false)}
+        onMarkNotificationRead={(notificationId) => {
+          void handleMarkNotificationRead(notificationId);
+        }}
+        onMarkAllNotificationsRead={() => {
+          void handleMarkAllNotificationsRead();
+        }}
+        onDeleteNotification={(notificationId) => handleDeleteNotification(notificationId)}
+        onRunNotificationChecks={() => {
+          void handleRunNotificationChecks();
+        }}
+        onRespondToWalletInvite={(walletMemberId, action) => handleRespondToWalletInvite(walletMemberId, action)}
+        onSaveBillReminder={(input, billReminderId) => handleSaveBillReminder(input, billReminderId)}
+        onDeleteBillReminder={(billReminderId) => handleDeleteBillReminder(billReminderId)}
+        onReminderPreferencesChange={handleReminderPreferencesChange}
+        onSaveReminderPreferences={() => {
+          void handleSaveReminderPreferences();
+        }}
         onSignOut={handleSignOut}
         onOpenDeleteAccountModal={openDeleteAccountModal}
         onCloseDeleteAccountModal={closeDeleteAccountModal}
@@ -1444,67 +2525,112 @@ export default function App() {
             onChartDisplayTypeChange={setChartDisplayType}
             onChartGranularityChange={setChartGranularity}
           />
-        ) : (
-          <ExpensesPage
-            currentUserPresent={Boolean(currentUser)}
-            authLoading={authLoading}
-            form={form}
-            editingExpenseId={editingExpenseId}
-            isSubmitting={isSubmitting}
-            statusMessage={statusMessage}
-            errorMessage={errorMessage}
-            customCategoryName={customCategoryName}
-            customCategoryIcon={customCategoryIcon}
-            selectedCategory={selectedCategory}
-            selectedTimeRange={selectedTimeRange}
-            sortNewestFirst={sortNewestFirst}
-            categories={categories}
-            visibleExpenses={paginatedExpenses}
-            totalVisibleExpenses={visibleExpenses.length}
-            currentExpensesPage={currentExpensesPage}
-            totalExpensePages={totalExpensePages}
-            expensesPageSize={EXPENSES_PAGE_SIZE}
-            availableCategoryOptions={availableCategoryOptions}
-            selectedCategoryOption={selectedCategoryOption}
-            isOtherCategorySelected={isOtherCategorySelected}
-            iconOptions={iconOptions}
-            selectedExpenseIds={selectedExpenseIds}
-            selectedVisibleExpenseIds={selectedVisibleExpenseIds}
-            areAllVisibleExpensesSelected={areAllVisibleExpensesSelected}
-            deletingExpenseIds={deletingExpenseIds}
-            isLoading={isLoading}
-            formatCurrency={formatCurrency}
-            resolveCategoryIcon={resolveCategoryIcon}
-            onFormChange={setForm}
-            onCategorySelect={handleCategorySelect}
-            onCustomCategoryNameChange={setCustomCategoryName}
-            onCustomCategoryIconChange={setCustomCategoryIcon}
-            onCreateCustomCategory={handleCreateCustomCategory}
-            onSubmit={handleSubmit}
-            onEditCancel={handleEditCancel}
-            onSelectedCategoryChange={setSelectedCategory}
-            onSortNewestFirstChange={setSortNewestFirst}
-            onSelectedTimeRangeChange={setSelectedTimeRange}
-            onExpensesPageChange={setCurrentExpensesPage}
-            onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
-            onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
-            onToggleExpenseSelection={handleToggleExpenseSelection}
-            onEditStart={handleEditStart}
-            onDeleteExpense={handleDeleteExpense}
-            onClearFilters={handleClearExpenseFilters}
-          />
-        )}
+        ) : page === "expenses" ? (
+            <ExpensesPage
+              currentUserPresent={Boolean(currentUser)}
+              authLoading={authLoading}
+              form={form}
+              editingExpenseId={editingExpenseId}
+              isSubmitting={isSubmitting}
+              statusMessage={statusMessage}
+              errorMessage={errorMessage}
+              customCategoryName={customCategoryName}
+              customCategoryIcon={customCategoryIcon}
+              selectedCategory={selectedCategory}
+              selectedTimeRange={selectedTimeRange}
+              sortNewestFirst={sortNewestFirst}
+              categories={categories}
+              visibleExpenses={paginatedExpenses}
+              totalVisibleExpenses={visibleExpenses.length}
+              currentExpensesPage={currentExpensesPage}
+              totalExpensePages={totalExpensePages}
+              expensesPageSize={EXPENSES_PAGE_SIZE}
+              availableCategoryOptions={availableCategoryOptions}
+              selectedCategoryOption={selectedCategoryOption}
+              isOtherCategorySelected={isOtherCategorySelected}
+              iconOptions={iconOptions}
+              selectedExpenseIds={selectedExpenseIds}
+              selectedVisibleExpenseIds={selectedVisibleExpenseIds}
+              areAllVisibleExpensesSelected={areAllVisibleExpensesSelected}
+              deletingExpenseIds={deletingExpenseIds}
+              isLoading={isLoading}
+              formatCurrency={formatCurrency}
+              resolveCategoryIcon={resolveCategoryIcon}
+              onFormChange={setForm}
+              onCategorySelect={handleCategorySelect}
+              onCustomCategoryNameChange={setCustomCategoryName}
+              onCustomCategoryIconChange={setCustomCategoryIcon}
+              onCreateCustomCategory={handleCreateCustomCategory}
+              onSubmit={handleSubmit}
+              onEditCancel={handleEditCancel}
+              onSelectedCategoryChange={setSelectedCategory}
+              onSortNewestFirstChange={setSortNewestFirst}
+              onSelectedTimeRangeChange={setSelectedTimeRange}
+              onExpensesPageChange={setCurrentExpensesPage}
+              onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
+              onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
+              onToggleExpenseSelection={handleToggleExpenseSelection}
+              onEditStart={handleEditStart}
+              onDeleteExpense={handleDeleteExpense}
+              onClearFilters={handleClearExpenseFilters}
+            />
+          ) : page === "wallets" ? (
+            <WalletsPage
+              wallets={wallets}
+              selectedWallet={selectedWallet}
+              selectedWalletId={selectedWalletId}
+              currentUserId={currentUser.uid}
+              budgetCategoryOptions={budgetCategoryOptions}
+              isLoading={isWalletLoading}
+              isSubmitting={isWalletSubmitting}
+              statusMessage={walletStatusMessage}
+              errorMessage={walletErrorMessage}
+              formatCurrency={formatCurrency}
+              onSelectWallet={setSelectedWalletId}
+              onCreateWallet={handleCreateWallet}
+              onDeleteWallet={handleDeleteWallet}
+              onLeaveWallet={handleLeaveWallet}
+              onAddWalletMember={handleAddWalletMember}
+              onCreateWalletExpense={handleCreateWalletExpense}
+              onUpdateWalletExpense={handleUpdateWalletExpense}
+              onDeleteWalletExpense={handleDeleteWalletExpense}
+              onCreateWalletBudget={handleCreateWalletBudget}
+              onUpdateWalletBudget={handleUpdateWalletBudget}
+              onDeleteWalletBudget={handleDeleteWalletBudget}
+              onCreateWalletSettlement={handleCreateWalletSettlement}
+              onUpdateWalletSettlement={handleUpdateWalletSettlement}
+              onDeleteWalletSettlement={handleDeleteWalletSettlement}
+            />
+          ) : (
+            <AlertsPage
+              notifications={notifications}
+              billReminders={billReminders}
+              isSavingPreferences={isSavingReminderPreferences}
+              isSavingBillReminder={isSavingBillReminder}
+              isRunningChecks={isRunningNotificationChecks}
+              preferences={reminderPreferences}
+              onMarkRead={handleMarkNotificationRead}
+              onMarkAllRead={handleMarkAllNotificationsRead}
+              onDeleteNotification={handleDeleteNotification}
+              onRefreshChecks={handleRunNotificationChecks}
+              onRespondToWalletInvite={handleRespondToWalletInvite}
+              onSaveBillReminder={handleSaveBillReminder}
+              onDeleteBillReminder={handleDeleteBillReminder}
+              onPreferencesChange={handleReminderPreferencesChange}
+              onSavePreferences={handleSaveReminderPreferences}
+            />
+          )}
       </SignedInLayout>
     );
   }
 
   if (authLoading) {
     return (
-      <main className="app-shell auth-shell">
-        <section className="auth-page-frame">
-          <section className="card auth-panel auth-panel-minimal">
-            <p className="empty-state">Checking your session...</p>
-          </section>
+      <main className="mx-auto flex min-h-screen max-w-[780px] items-center justify-center px-4 py-6 sm:px-6">
+        <section className="surface-card w-full max-w-[520px] p-8 text-center sm:p-10">
+          <p className="section-eyebrow">Secure access</p>
+          <h1 className="mt-4 font-display text-[3.2rem] leading-none tracking-[-0.04em] text-ink">Checking your session...</h1>
+          <p className="mt-4 text-base leading-7 text-secondary">The app is verifying whether you already have an authenticated session before routing you into the product.</p>
         </section>
       </main>
     );
@@ -1519,6 +2645,8 @@ export default function App() {
           <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={renderSignedInPage("dashboard")} />
           <Route path="/expenses" element={renderSignedInPage("expenses")} />
+          <Route path="/wallets" element={renderSignedInPage("wallets")} />
+          <Route path="/alerts" element={renderSignedInPage("alerts")} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </>
       ) : (
@@ -1528,6 +2656,8 @@ export default function App() {
           <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={handleSignIn} />} />
           <Route path="/dashboard" element={<Navigate to="/" replace />} />
           <Route path="/expenses" element={<Navigate to="/" replace />} />
+          <Route path="/wallets" element={<Navigate to="/" replace />} />
+          <Route path="/alerts" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </>
       )}
