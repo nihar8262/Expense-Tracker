@@ -653,6 +653,8 @@ async function leaveWalletForUser(userId, walletId) {
         AND metadata_json IS NOT NULL
         AND metadata_json <> ''
         AND LEFT(metadata_json, 1) = '{'
+        AND metadata_json::jsonb ->> 'walletId' = ${walletId}
+    `;
   });
 
   return result;
@@ -800,6 +802,7 @@ async function respondToWalletInvite(user, walletMemberId, rawBody) {
           AND metadata_json IS NOT NULL
           AND metadata_json <> ''
           AND LEFT(metadata_json, 1) = '{'
+          AND metadata_json::jsonb ->> 'walletMemberId' = ${walletMemberId}
       `;
     });
   } catch (error) {
