@@ -1176,6 +1176,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
           WHERE user_id = ${userId}
             AND notification_type = ${"wallet-invite"}
             AND metadata_json IS NOT NULL
+            AND metadata_json <> ''
+            AND LEFT(metadata_json, 1) = '{'
             AND metadata_json::jsonb ->> 'walletMemberId' = ${walletMemberId}
         `;
       });
@@ -1221,9 +1223,16 @@ export function createPostgresExpenseStore(): ExpenseStore {
         await tx`
           DELETE FROM notifications
           WHERE metadata_json IS NOT NULL
+            AND metadata_json <> ''
+            AND LEFT(metadata_json, 1) = '{'
             AND metadata_json::jsonb ->> 'walletId' = ${walletId}
         `;
 
+        await tx`DELETE FROM wallet_expense_splits WHERE wallet_expense_id IN (SELECT id FROM wallet_expenses WHERE wallet_id = ${walletId})`;
+        await tx`DELETE FROM wallet_expenses WHERE wallet_id = ${walletId}`;
+        await tx`DELETE FROM wallet_settlements WHERE wallet_id = ${walletId}`;
+        await tx`DELETE FROM wallet_budgets WHERE wallet_id = ${walletId}`;
+        await tx`DELETE FROM wallet_members WHERE wallet_id = ${walletId}`;
         await tx`DELETE FROM wallets WHERE id = ${walletId}`;
       });
     },
@@ -1280,6 +1289,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
           DELETE FROM notifications
           WHERE user_id = ${userId}
             AND metadata_json IS NOT NULL
+            AND metadata_json <> ''
+            AND LEFT(metadata_json, 1) = '{'
             AND metadata_json::jsonb ->> 'walletId' = ${walletId}
         `;
       });

@@ -351,6 +351,7 @@ export async function handleDeleteWallet(walletId: string, userId: string, store
       };
     }
 
+    console.error("deleteWallet error:", error);
     return {
       status: 500,
       body: { error: "Failed to delete wallet." }
