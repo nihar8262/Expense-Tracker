@@ -153,7 +153,7 @@
   }
 
   .ui-button-danger {
-    @apply inline-flex min-h-11 items-center justify-center rounded-full bg-danger-tint px-5 py-2.5 text-sm font-semibold text-[color:var(--danger-text)] transition duration-200 ease-out hover:bg-[#f3d4d1] active:scale-[0.98];
+    @apply inline-flex items-center justify-center rounded-full bg-danger-tint px-5 py-2.5 text-sm font-semibold text-[color:var(--danger-text)] transition duration-200 ease-out hover:bg-[#f3d4d1] active:scale-[0.98];
   }
 
   .status-notice {

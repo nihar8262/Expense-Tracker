@@ -556,6 +556,24 @@ export async function handleCreateWalletMember(rawBody: unknown, walletId: strin
   }
 }
 
+export async function handleRemoveWalletMember(walletId: string, memberId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const wallet = await store.removeWalletMember(userId, walletId, memberId);
+    return {
+      status: 200,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError) {
+      return { status: 404, body: { error: error.message } };
+    }
+    if (error instanceof WalletValidationError) {
+      return { status: 400, body: { error: error.message } };
+    }
+    return { status: 500, body: { error: "Failed to remove wallet member." } };
+  }
+}
+
 export async function handleLinkWalletInvites(user: { id: string; name?: string | null; email?: string | null }, store: ExpenseStore): Promise<HandlerResponse> {
   try {
     const linkedCount = await store.linkWalletInvites(user.id, { email: user.email ?? null, name: user.name ?? null });

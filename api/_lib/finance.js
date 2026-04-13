@@ -354,7 +354,7 @@ async function ensureSchema(sql) {
       await safeSchemaStep("create wallet_expenses table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expenses (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, paid_by_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), category VARCHAR(64) NOT NULL, description VARCHAR(280) NOT NULL, expense_date DATE NOT NULL, split_rule VARCHAR(16) NOT NULL CHECK (split_rule IN ('equal', 'fixed', 'percentage')), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create wallet_expense_splits table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expense_splits (wallet_expense_id UUID NOT NULL REFERENCES wallet_expenses(id) ON DELETE CASCADE, member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0), percentage_basis_points INTEGER, PRIMARY KEY (wallet_expense_id, member_id))`);
       await safeSchemaStep("create wallet_settlements table", () => sql`CREATE TABLE IF NOT EXISTS wallet_settlements (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, from_member_id UUID NOT NULL REFERENCES wallet_members(id), to_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), settlement_date DATE NOT NULL, note VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
-      await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
+      await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
       await safeSchemaStep("create reminder_preferences table", () => sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create bill_reminders table", () => sql`CREATE TABLE IF NOT EXISTS bill_reminders (id UUID PRIMARY KEY, user_id TEXT NOT NULL, title VARCHAR(120) NOT NULL, amount_minor BIGINT, category VARCHAR(64), due_date DATE NOT NULL, recurrence VARCHAR(16) NOT NULL CHECK (recurrence IN ('once', 'weekly', 'monthly', 'yearly')), interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 24), reminder_days_before INTEGER NOT NULL CHECK (reminder_days_before BETWEEN 0 AND 60), is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("wallets description column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS description VARCHAR(280)`);
@@ -426,6 +426,10 @@ async function ensureSchema(sql) {
 
       await safeSchemaStep("wallet budget index", () => sql`CREATE INDEX IF NOT EXISTS wallet_budgets_wallet_id_budget_month_idx ON wallet_budgets (wallet_id, budget_month DESC, created_at DESC)`);
       await safeSchemaStep("bill reminders index", () => sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`);
+      await safeSchemaStep("notifications type constraint update", async () => {
+        await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
+        await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
+      });
     })().catch((error) => {
       schemaReady = null;
       throw error;
@@ -778,6 +782,9 @@ async function respondToWalletInvite(user, walletMemberId, rawBody) {
         throw new Error("Wallet invite not found.");
       }
 
+      const walletRows = await tx`SELECT name, owner_user_id FROM wallets WHERE id = ${invite.wallet_id}`;
+      const wallet = walletRows[0];
+
       if (result.data.action === "accept") {
         await tx`
           UPDATE wallet_members
@@ -804,6 +811,25 @@ async function respondToWalletInvite(user, walletMemberId, rawBody) {
           AND LEFT(metadata_json, 1) = '{'
           AND metadata_json::jsonb ->> 'walletMemberId' = ${walletMemberId}
       `;
+
+      if (wallet) {
+        const displayName = user.name?.trim() || normalizedEmail;
+        const verb = result.data.action === "accept" ? "accepted" : "declined";
+        await upsertNotification(tx, {
+          userId: wallet.owner_user_id,
+          type: "invite-response",
+          title: `${displayName} ${verb} your invite`,
+          message: `${displayName} has ${verb} the invitation to join ${wallet.name}.`,
+          scheduledFor: null,
+          metadata: {
+            walletId: invite.wallet_id,
+            walletMemberId: invite.id,
+            action: result.data.action,
+            respondedBy: displayName
+          },
+          dedupeKey: `invite-response:${invite.id}`
+        });
+      }
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Wallet invite not found.") {
@@ -854,6 +880,72 @@ async function createWalletMemberForUser(userId, walletId, rawBody) {
   });
 
   return { status: 201, body: { wallet } };
+}
+
+async function removeWalletMemberForUser(userId, walletId, memberId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    if (!walletRows[0]) {
+      throw new Error("Wallet not found.");
+    }
+
+    await ensureWalletAccess(tx, userId, walletId);
+
+    if (walletRows[0].owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can remove members.");
+    }
+
+    const memberRows = await tx`
+      SELECT id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at
+      FROM wallet_members
+      WHERE id = ${memberId} AND wallet_id = ${walletId}
+    `;
+    const member = memberRows[0];
+
+    if (!member) {
+      throw new Error("Wallet member not found.");
+    }
+
+    if (member.member_role === "owner") {
+      throw new Error("Cannot remove the wallet owner.");
+    }
+
+    const historyRows = await tx`
+      SELECT
+        EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
+        EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
+        EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+    `;
+
+    const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+
+    if (hasHistory) {
+      await tx`
+        UPDATE wallet_members
+        SET user_id = ${null},
+            email = ${null},
+            invite_status = ${"declined"}
+        WHERE id = ${member.id}
+      `;
+    } else {
+      await tx`DELETE FROM wallet_members WHERE id = ${member.id}`;
+    }
+
+    await tx`
+      DELETE FROM notifications
+      WHERE metadata_json IS NOT NULL
+        AND metadata_json <> ''
+        AND LEFT(metadata_json, 1) = '{'
+        AND metadata_json::jsonb ->> 'walletMemberId' = ${member.id}
+    `;
+
+    return loadWalletDetail(tx, walletId);
+  });
+
+  return { status: 200, body: { wallet } };
 }
 
 async function createWalletExpenseForUser(userId, walletId, rawBody) {
@@ -1258,6 +1350,7 @@ module.exports = {
   updateWalletBudgetForUser,
   deleteWalletBudgetForUser,
   createWalletMemberForUser,
+  removeWalletMemberForUser,
   respondToWalletInvite,
   createWalletExpenseForUser,
   updateWalletExpenseForUser,

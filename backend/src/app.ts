@@ -18,6 +18,7 @@ import {
   handleDeleteWallet,
   handleDeleteWalletExpense,
   handleDeleteWalletSettlement,
+  handleRemoveWalletMember,
   handleGetReminderPreferences,
   handleGetWalletForUser,
   handleHealthcheck,
@@ -217,6 +218,21 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to add wallet member."
+    );
+  });
+
+  app.delete("/api/wallets/:walletId/members/:memberId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleRemoveWalletMember(request.params.walletId, request.params.memberId, user.id, store);
+        if (result.body === null) {
+          return response.sendStatus(result.status);
+        }
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to remove wallet member."
     );
   });
 

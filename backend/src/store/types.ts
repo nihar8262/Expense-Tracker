@@ -122,7 +122,7 @@ export type BillReminderRecord = {
   created_at: string;
 };
 
-export type NotificationType = "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite";
+export type NotificationType = "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
 
 export type NotificationStatus = "unread" | "read";
 
@@ -173,6 +173,7 @@ export interface ExpenseStore {
   updateWalletBudget(userId: string, walletId: string, walletBudgetId: string, input: CreateBudgetInput): Promise<WalletDetailRecord>;
   deleteWalletBudget(userId: string, walletId: string, walletBudgetId: string): Promise<WalletDetailRecord>;
   createWalletMember(userId: string, walletId: string, input: CreateWalletMemberInput): Promise<WalletDetailRecord>;
+  removeWalletMember(userId: string, walletId: string, memberId: string): Promise<WalletDetailRecord>;
   linkWalletInvites(userId: string, profile: { email: string | null; name: string | null }): Promise<number>;
   respondToWalletInvite(userId: string, profile: { email: string | null; name: string | null }, walletMemberId: string, action: "accept" | "decline"): Promise<void>;
   createWalletExpense(userId: string, walletId: string, input: CreateWalletExpenseInput): Promise<WalletDetailRecord>;

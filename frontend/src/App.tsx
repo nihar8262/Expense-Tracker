@@ -623,6 +623,23 @@ async function addWalletMember(walletId: string, payload: { displayName: string;
   return body.wallet;
 }
 
+async function removeWalletMember(walletId: string, memberId: string, user: User): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL
+    ? new URL(`/api/wallets/${walletId}/members/${memberId}`, API_BASE_URL).toString()
+    : `/api/wallets/${walletId}/members/${memberId}`;
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: await buildAuthorizedHeaders(user)
+  });
+
+  if (!response.ok) {
+    throw await parseApiResponseError(response, "Failed to remove wallet member.");
+  }
+
+  const body = (await response.json()) as { wallet: WalletDetail };
+  return body.wallet;
+}
+
 async function getWalletDetail(walletId: string, user: User): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
   const response = await fetch(endpoint, {
@@ -1774,6 +1791,30 @@ export default function App() {
     }
   }
 
+  async function handleRemoveWalletMember(inputWalletId: string, memberId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to remove a wallet member.");
+      return false;
+    }
+
+    setIsWalletSubmitting(true);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+
+    try {
+      const wallet = await removeWalletMember(inputWalletId, memberId, currentUser);
+      await loadWallets(currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Member removed.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to remove wallet member.");
+      return false;
+    } finally {
+      setIsWalletSubmitting(false);
+    }
+  }
+
   async function handleCreateWalletBudget(inputWalletId: string, input: BudgetForm) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to create a group budget.");
@@ -2592,6 +2633,7 @@ export default function App() {
               onDeleteWallet={handleDeleteWallet}
               onLeaveWallet={handleLeaveWallet}
               onAddWalletMember={handleAddWalletMember}
+              onRemoveWalletMember={handleRemoveWalletMember}
               onCreateWalletExpense={handleCreateWalletExpense}
               onUpdateWalletExpense={handleUpdateWalletExpense}
               onDeleteWalletExpense={handleDeleteWalletExpense}

@@ -21,6 +21,7 @@ type WalletsPageProps = {
   onDeleteWallet: (walletId: string) => Promise<boolean>;
   onLeaveWallet: (walletId: string) => Promise<boolean>;
   onAddWalletMember: (walletId: string, input: { displayName: string; email?: string }) => Promise<boolean>;
+  onRemoveWalletMember: (walletId: string, memberId: string) => Promise<boolean>;
   onCreateWalletExpense: (walletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) => Promise<boolean>;
   onUpdateWalletExpense: (walletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) => Promise<boolean>;
   onDeleteWalletExpense: (walletId: string, walletExpenseId: string) => Promise<boolean>;
@@ -125,6 +126,7 @@ export function WalletsPage({
   onDeleteWallet,
   onLeaveWallet,
   onAddWalletMember,
+  onRemoveWalletMember,
   onCreateWalletExpense,
   onUpdateWalletExpense,
   onDeleteWalletExpense,
@@ -198,9 +200,14 @@ export function WalletsPage({
 
   const memberErrors = useMemo(
     () => ({
-      displayName: inviteDisplayName.trim() ? "" : "Member name is required."
+      displayName: inviteDisplayName.trim() ? "" : "Member name is required.",
+      email: !inviteEmail.trim()
+        ? "Email is required."
+        : selectedWallet?.members.some((m) => m.email && m.email.toLowerCase() === inviteEmail.trim().toLowerCase())
+          ? "A member with this email is already in this group."
+          : ""
     }),
-    [inviteDisplayName]
+    [inviteDisplayName, inviteEmail, selectedWallet]
   );
 
   const walletBudgetCategoryChoices = useMemo(() => {
@@ -738,8 +745,25 @@ export function WalletsPage({
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {selectedWallet.members.map((member) => (
                     <article key={member.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-                      <strong className="block text-base text-ink">{member.display_name}</strong>
-                      <p className="mt-1 text-sm text-secondary">{member.role}{member.invite_status === "pending" ? " • invite pending" : ""}</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <strong className="block text-base text-ink">{member.display_name}</strong>
+                          <p className="mt-1 text-sm text-secondary">{member.role}{member.invite_status === "pending" ? " • invite pending" : ""}</p>
+                        </div>
+                        {isWalletOwner && member.role !== "owner" ? (
+                          <button
+                            type="button"
+                            className="ui-button-danger !p-1.5"
+                            disabled={isSubmitting}
+                            onClick={() => { if (confirm(`Remove ${member.display_name} from this group?`)) { void onRemoveWalletMember(selectedWallet.wallet.id, member.id); } }}
+                            title="Remove member"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                              <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -750,7 +774,10 @@ export function WalletsPage({
                       <input value={inviteDisplayName} onChange={(event) => setInviteDisplayName(event.target.value)} placeholder="Invite member name *" required aria-invalid={showMemberValidation && Boolean(memberErrors.displayName)} />
                       {showMemberValidation && memberErrors.displayName ? <span className="text-sm text-[color:var(--danger-text)]">{memberErrors.displayName}</span> : null}
                     </div>
-                    <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="Email to link existing user" />
+                    <div className="grid gap-2">
+                      <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="Email to link existing user *" required aria-invalid={showMemberValidation && Boolean(memberErrors.email)} />
+                      {showMemberValidation && memberErrors.email ? <span className="text-sm text-[color:var(--danger-text)]">{memberErrors.email}</span> : null}
+                    </div>
                     <button type="submit" className="ui-button-secondary justify-center" disabled={isSubmitting}>
                       {isSubmitting ? "Saving..." : "Add member"}
                     </button>

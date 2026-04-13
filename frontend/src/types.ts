@@ -111,7 +111,7 @@ export type WalletDetail = {
 
 export type Notification = {
 	id: string;
-	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite";
+	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
 	title: string;
 	message: string;
 	status: "unread" | "read";

@@ -134,7 +134,7 @@ type WalletSettlementRow = {
 type NotificationRow = {
   id: string;
   user_id: string;
-  notification_type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite";
+  notification_type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
   title: string;
   message: string;
   notification_status: "unread" | "read";
@@ -539,7 +539,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
         CREATE TABLE IF NOT EXISTS notifications (
           id UUID PRIMARY KEY,
           user_id TEXT NOT NULL,
-          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite')),
+          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response')),
           title VARCHAR(120) NOT NULL,
           message VARCHAR(280) NOT NULL,
           notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')),
@@ -584,7 +584,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`ALTER TABLE wallet_members DROP CONSTRAINT IF EXISTS wallet_members_invite_status_check`;
       await sql`ALTER TABLE wallet_members ADD CONSTRAINT wallet_members_invite_status_check CHECK (invite_status IN ('linked', 'pending', 'declined'))`;
       await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
-      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite'))`;
+      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
     })();
   }
@@ -1087,6 +1087,75 @@ export function createPostgresExpenseStore(): ExpenseStore {
       });
     },
 
+    async removeWalletMember(userId: string, walletId: string, memberId: string): Promise<WalletDetailRecord> {
+      await ensureSchema(sql);
+
+      return sql.begin(async (tx) => {
+        const walletRows = await tx<{ owner_user_id: string }[]>`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+        const wallet = walletRows[0];
+
+        if (!wallet) {
+          throw new WalletNotFoundError();
+        }
+
+        await ensureWalletAccess(tx, userId, walletId);
+
+        if (wallet.owner_user_id !== userId) {
+          throw new WalletValidationError("Only the wallet owner can remove members.");
+        }
+
+        const memberRows = await tx<WalletMemberRow[]>`
+          SELECT id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at
+          FROM wallet_members
+          WHERE id = ${memberId} AND wallet_id = ${walletId}
+        `;
+        const member = memberRows[0];
+
+        if (!member) {
+          throw new WalletNotFoundError();
+        }
+
+        if (member.member_role === "owner") {
+          throw new WalletValidationError("Cannot remove the wallet owner.");
+        }
+
+        const historyRows = await tx<{
+          has_expenses: boolean;
+          has_splits: boolean;
+          has_settlements: boolean;
+        }[]>`
+          SELECT
+            EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
+            EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
+            EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+        `;
+
+        const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+
+        if (hasHistory) {
+          await tx`
+            UPDATE wallet_members
+            SET user_id = ${null},
+                email = ${null},
+                invite_status = ${"declined"}
+            WHERE id = ${member.id}
+          `;
+        } else {
+          await tx`DELETE FROM wallet_members WHERE id = ${member.id}`;
+        }
+
+        await tx`
+          DELETE FROM notifications
+          WHERE metadata_json IS NOT NULL
+            AND metadata_json <> ''
+            AND LEFT(metadata_json, 1) = '{'
+            AND metadata_json::jsonb ->> 'walletMemberId' = ${member.id}
+        `;
+
+        return loadWalletDetail(tx, walletId);
+      });
+    },
+
     async linkWalletInvites(userId: string, profile: { email: string | null; name: string | null }): Promise<number> {
       await ensureSchema(sql);
 
@@ -1154,6 +1223,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletInviteNotFoundError();
         }
 
+        const walletRows = await tx<{ name: string; owner_user_id: string }[]>`
+          SELECT name, owner_user_id FROM wallets WHERE id = ${invite.wallet_id}
+        `;
+        const wallet = walletRows[0];
+
         if (action === "accept") {
           await tx`
             UPDATE wallet_members
@@ -1180,6 +1254,25 @@ export function createPostgresExpenseStore(): ExpenseStore {
             AND LEFT(metadata_json, 1) = '{'
             AND metadata_json::jsonb ->> 'walletMemberId' = ${walletMemberId}
         `;
+
+        if (wallet) {
+          const displayName = profile.name?.trim() || normalizedEmail;
+          const verb = action === "accept" ? "accepted" : "declined";
+          await upsertNotification(tx, {
+            userId: wallet.owner_user_id,
+            type: "invite-response",
+            title: `${displayName} ${verb} your invite`,
+            message: `${displayName} has ${verb} the invitation to join ${wallet.name}.`,
+            scheduledFor: null,
+            metadata: {
+              walletId: invite.wallet_id,
+              walletMemberId: invite.id,
+              action,
+              respondedBy: displayName
+            },
+            dedupeKey: `invite-response:${invite.id}`
+          });
+        }
       });
     },
 

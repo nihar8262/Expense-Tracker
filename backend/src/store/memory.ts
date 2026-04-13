@@ -888,6 +888,43 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return buildWalletDetail(walletId);
   }
 
+  async function removeWalletMember(userId: string, walletId: string, memberId: string): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can remove members.");
+    }
+
+    const member = walletMembers.get(memberId);
+    if (!member || member.walletId !== walletId) {
+      throw new WalletNotFoundError();
+    }
+
+    if (member.role === "owner") {
+      throw new WalletValidationError("Cannot remove the wallet owner.");
+    }
+
+    const hasExpenses = [...walletExpenses.values()].some((e) => e.walletId === walletId && e.paidByMemberId === memberId);
+    const hasSplits = [...walletExpenseSplits.values()].some((splits) => splits.some((split) => split.memberId === memberId));
+    const hasSettlements = [...walletSettlements.values()].some((s) => s.walletId === walletId && (s.fromMemberId === memberId || s.toMemberId === memberId));
+
+    if (hasExpenses || hasSplits || hasSettlements) {
+      member.userId = null;
+      member.email = null;
+      member.inviteStatus = "declined";
+    } else {
+      walletMembers.delete(memberId);
+    }
+
+    for (const [id, notification] of notifications.entries()) {
+      if (notification.metadata?.walletMemberId === memberId) {
+        notifications.delete(id);
+      }
+    }
+
+    return buildWalletDetail(walletId);
+  }
+
   async function linkWalletInvites(userId: string, profile: { email: string | null; name: string | null }): Promise<number> {
     const normalizedEmail = profile.email?.trim().toLowerCase();
 
@@ -1460,6 +1497,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     updateWalletBudget,
     deleteWalletBudget,
     createWalletMember,
+    removeWalletMember,
     linkWalletInvites,
     respondToWalletInvite,
     createWalletExpense,

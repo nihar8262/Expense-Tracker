@@ -3,6 +3,7 @@ const {
   createWalletExpenseForUser,
   createWalletForUser,
   createWalletMemberForUser,
+  removeWalletMemberForUser,
   createWalletSettlementForUser,
   deleteWalletBudgetForUser,
   deleteWalletExpenseForUser,
@@ -106,6 +107,19 @@ module.exports = async function handler(request, response) {
     }
 
     return methodNotAllowed(response, "POST");
+  }
+
+  if (resource === "members" && segments.length === 3 && resourceId) {
+    if (request.method === "DELETE") {
+      try {
+        const result = await removeWalletMemberForUser(user.id, walletId, resourceId);
+        return sendResult(response, result);
+      } catch (error) {
+        return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to remove wallet member." });
+      }
+    }
+
+    return methodNotAllowed(response, "DELETE");
   }
 
   if (resource === "budgets") {
