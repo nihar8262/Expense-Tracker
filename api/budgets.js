@@ -1,5 +1,5 @@
-const { createBudget, deleteBudget, listBudgets, updateBudget } = require("../_lib/personal-budgets");
-const { authenticateUser, getPathSegments, methodNotAllowed, notFound, sendResult } = require("../_lib/route-utils");
+const { createBudget, deleteBudget, listBudgets, updateBudget } = require("./_lib/personal-budgets");
+const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
   const user = await authenticateUser(request, response);
@@ -8,7 +8,7 @@ module.exports = async function handler(request, response) {
     return undefined;
   }
 
-  const segments = getPathSegments(request).slice(2);
+  const segments = getRoutedSegments(request);
 
   if (segments.length === 0) {
     if (request.method === "GET") {

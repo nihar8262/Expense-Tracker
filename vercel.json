@@ -4,6 +4,34 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api/expenses/:route*",
+      "destination": "/api/expenses?route=:route*"
+    },
+    {
+      "source": "/api/budgets/:route*",
+      "destination": "/api/budgets?route=:route*"
+    },
+    {
+      "source": "/api/notifications/:route*",
+      "destination": "/api/notifications?route=:route*"
+    },
+    {
+      "source": "/api/wallets/:route*",
+      "destination": "/api/wallets?route=:route*"
+    },
+    {
+      "source": "/api/bill-reminders/:route*",
+      "destination": "/api/bill-reminders?route=:route*"
+    },
+    {
+      "source": "/api/wallet-invites/:route*",
+      "destination": "/api/wallet-invites?route=:route*"
+    },
+    {
+      "source": "/api/internal/:route*",
+      "destination": "/api/internal?route=:route*"
+    },
+    {
       "source": "/((?!api/|assets/|.*\\..*).*)",
       "destination": "/index.html"
     }

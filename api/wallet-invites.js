@@ -1,5 +1,5 @@
-const { respondToWalletInvite } = require("../_lib/finance");
-const { authenticateUser, getPathSegments, methodNotAllowed, notFound, sendResult } = require("../_lib/route-utils");
+const { respondToWalletInvite } = require("./_lib/finance");
+const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
   const user = await authenticateUser(request, response);
@@ -8,7 +8,7 @@ module.exports = async function handler(request, response) {
     return undefined;
   }
 
-  const segments = getPathSegments(request).slice(2);
+  const segments = getRoutedSegments(request);
 
   if (segments.length === 2 && segments[0] && segments[1] === "respond") {
     if (request.method === "POST") {

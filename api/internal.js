@@ -1,8 +1,8 @@
-const { runReminderChecks, runReminderChecksForUser } = require("../_lib/finance");
-const { authenticateUser, getPathSegments, methodNotAllowed, notFound, sendResult } = require("../_lib/route-utils");
+const { runReminderChecks, runReminderChecksForUser } = require("./_lib/finance");
+const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
-  const segments = getPathSegments(request).slice(2);
+  const segments = getRoutedSegments(request);
 
   if (segments.length !== 2 || segments[0] !== "reminders" || segments[1] !== "run") {
     return notFound(response);

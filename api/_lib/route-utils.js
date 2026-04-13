@@ -10,6 +10,20 @@ function getPathSegments(request) {
   return pathname.split("/").filter(Boolean);
 }
 
+function getRoutedSegments(request, baseSegmentsLength = 2) {
+  const routeValue = request.query?.route;
+
+  if (Array.isArray(routeValue)) {
+    return routeValue.flatMap((segment) => String(segment).split("/").filter(Boolean));
+  }
+
+  if (typeof routeValue === "string" && routeValue.trim()) {
+    return routeValue.split("/").filter(Boolean);
+  }
+
+  return getPathSegments(request).slice(baseSegmentsLength);
+}
+
 async function authenticateUser(request, response) {
   try {
     return await authenticateRequest(request);
@@ -49,6 +63,7 @@ function notFound(response) {
 module.exports = {
   authenticateUser,
   getPathSegments,
+  getRoutedSegments,
   methodNotAllowed,
   notFound,
   sendResult
