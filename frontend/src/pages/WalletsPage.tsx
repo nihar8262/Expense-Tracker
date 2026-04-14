@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
-import { EmptyState, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
+import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
 import type { BudgetForm, BudgetHistoryRange, BudgetSummary, CategoryOption, SplitRule, Wallet, WalletDetail, WalletBudget } from "../types";
 
 type WalletsPageProps = {
@@ -13,6 +13,7 @@ type WalletsPageProps = {
   budgetCategoryOptions: CategoryOption[];
   isLoading: boolean;
   isSubmitting: boolean;
+  submittingAction: string;
   statusMessage: string;
   errorMessage: string;
   formatCurrency: (amount: string) => string;
@@ -118,6 +119,7 @@ export function WalletsPage({
   budgetCategoryOptions,
   isLoading,
   isSubmitting,
+  submittingAction,
   statusMessage,
   errorMessage,
   formatCurrency,
@@ -152,6 +154,7 @@ export function WalletsPage({
   const [expensePayerId, setExpensePayerId] = useState("");
   const [selectedSplitMemberIds, setSelectedSplitMemberIds] = useState<string[]>([]);
   const [splitValues, setSplitValues] = useState<Record<string, string>>({});
+  const [alreadySettledMemberIds, setAlreadySettledMemberIds] = useState<string[]>([]);
   const [editingWalletExpenseId, setEditingWalletExpenseId] = useState<string | null>(null);
 
   const [settlementFromMemberId, setSettlementFromMemberId] = useState("");
@@ -172,6 +175,15 @@ export function WalletsPage({
   const [showExpenseValidation, setShowExpenseValidation] = useState(false);
   const [showSettlementValidation, setShowSettlementValidation] = useState(false);
   const [showMemberValidation, setShowMemberValidation] = useState(false);
+
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [expenseFilterMonth, setExpenseFilterMonth] = useState("all");
+  const [expenseFilterCategory, setExpenseFilterCategory] = useState("all");
+  const [expenseFilterAmount, setExpenseFilterAmount] = useState("all");
+
+  const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
+  const [settlementFilterMonth, setSettlementFilterMonth] = useState("all");
+  const [settlementFilterAmount, setSettlementFilterAmount] = useState("all");
 
   const createWalletErrors = useMemo(
     () => ({
@@ -315,6 +327,43 @@ export function WalletsPage({
       }));
   }, [walletBudgetHistoryRange, walletBudgetSummaries]);
 
+  const expenseMonthOptions = useMemo(() => {
+    const months = new Set((selectedWallet?.expenses ?? []).map((e) => e.date.slice(0, 7)));
+    return [...months].sort().reverse();
+  }, [selectedWallet]);
+
+  const expenseCategoryOptions = useMemo(() => {
+    const cats = new Set((selectedWallet?.expenses ?? []).map((e) => e.category));
+    return [...cats].sort();
+  }, [selectedWallet]);
+
+  const settlementMonthOptions = useMemo(() => {
+    const months = new Set((selectedWallet?.settlements ?? []).map((s) => s.date.slice(0, 7)));
+    return [...months].sort().reverse();
+  }, [selectedWallet]);
+
+  function filterByAmount<T extends { amount: string }>(items: T[], filter: string): T[] {
+    if (filter === "all") return items;
+    const num = (item: T) => Number(item.amount);
+    if (filter === "lt100") return items.filter((i) => num(i) < 100);
+    if (filter === "100to500") return items.filter((i) => num(i) >= 100 && num(i) <= 500);
+    if (filter === "gt500") return items.filter((i) => num(i) > 500);
+    return items;
+  }
+
+  const filteredExpenses = useMemo(() => {
+    let items = selectedWallet?.expenses ?? [];
+    if (expenseFilterMonth !== "all") items = items.filter((e) => e.date.slice(0, 7) === expenseFilterMonth);
+    if (expenseFilterCategory !== "all") items = items.filter((e) => e.category === expenseFilterCategory);
+    return filterByAmount(items, expenseFilterAmount);
+  }, [selectedWallet, expenseFilterMonth, expenseFilterCategory, expenseFilterAmount]);
+
+  const filteredSettlements = useMemo(() => {
+    let items = selectedWallet?.settlements ?? [];
+    if (settlementFilterMonth !== "all") items = items.filter((s) => s.date.slice(0, 7) === settlementFilterMonth);
+    return filterByAmount(items, settlementFilterAmount);
+  }, [selectedWallet, settlementFilterMonth, settlementFilterAmount]);
+
   useEffect(() => {
     if (!selectedWallet) {
       setExpensePayerId("");
@@ -333,6 +382,7 @@ export function WalletsPage({
     setInviteDisplayName("");
     setInviteEmail("");
     setEditingWalletExpenseId(null);
+    setAlreadySettledMemberIds([]);
     setEditingSettlementId(null);
     setWalletBudgetForm({ ...initialWalletBudgetForm, month: getCurrentMonthValue() });
     setEditingWalletBudgetId(null);
@@ -360,11 +410,18 @@ export function WalletsPage({
   function handleToggleSplitMember(memberId: string) {
     setSelectedSplitMemberIds((current) => {
       if (current.includes(memberId)) {
+        setAlreadySettledMemberIds((settled) => settled.filter((id) => id !== memberId));
         return current.filter((id) => id !== memberId);
       }
 
       return [...current, memberId];
     });
+  }
+
+  function handleToggleAlreadySettled(memberId: string) {
+    setAlreadySettledMemberIds((current) =>
+      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]
+    );
   }
 
   async function handleCreateWalletSubmit(event: FormEvent<HTMLFormElement>) {
@@ -448,12 +505,43 @@ export function WalletsPage({
     const created = editingWalletExpenseId ? await onUpdateWalletExpense(selectedWallet.wallet.id, editingWalletExpenseId, payload) : await onCreateWalletExpense(selectedWallet.wallet.id, payload);
 
     if (created) {
+      // Auto-create settlements for members marked as "already settled" (new expenses only)
+      const settledNonPayers = !editingWalletExpenseId ? alreadySettledMemberIds.filter((id) => id !== expensePayerId && normalizedMemberIds.includes(id)) : [];
+
+      if (settledNonPayers.length > 0) {
+        const totalAmount = parseFloat(expenseAmount) || 0;
+
+        for (const memberId of settledNonPayers) {
+          let shareAmount: string;
+
+          if (expenseSplitRule === "equal") {
+            shareAmount = (totalAmount / normalizedMemberIds.length).toFixed(2);
+          } else if (expenseSplitRule === "fixed") {
+            shareAmount = splitValues[memberId] ?? "0";
+          } else {
+            const pct = parseFloat(splitValues[memberId] ?? "0");
+            shareAmount = ((totalAmount * pct) / 100).toFixed(2);
+          }
+
+          if (parseFloat(shareAmount) > 0) {
+            await onCreateWalletSettlement(selectedWallet.wallet.id, {
+              fromMemberId: memberId,
+              toMemberId: expensePayerId,
+              amount: shareAmount,
+              date: expenseDate,
+              note: `Auto-settled: ${expenseDescription}`
+            });
+          }
+        }
+      }
+
       setExpenseAmount("");
       setExpenseCategory("");
       setExpenseDescription("");
       setExpenseDate(getTodayIsoDate());
       setExpenseSplitRule(selectedWallet.wallet.default_split_rule);
       setSplitValues({});
+      setAlreadySettledMemberIds([]);
       setEditingWalletExpenseId(null);
       setShowExpenseValidation(false);
     }
@@ -578,6 +666,7 @@ export function WalletsPage({
     setExpenseSplitRule(walletExpense.split_rule);
     setSelectedSplitMemberIds(walletExpense.splits.map((split) => split.member_id));
     setSplitValues(Object.fromEntries(walletExpense.splits.map((split) => [split.member_id, split.percentage === null ? split.amount : split.percentage.toString()])));
+    setAlreadySettledMemberIds([]);
   }
 
   async function handleDeleteExpenseClick(walletExpenseId: string) {
@@ -589,6 +678,7 @@ export function WalletsPage({
 
     if (deleted && editingWalletExpenseId === walletExpenseId) {
       setEditingWalletExpenseId(null);
+      setAlreadySettledMemberIds([]);
       setExpenseAmount("");
       setExpenseCategory("");
       setExpenseDescription("");
@@ -708,7 +798,7 @@ export function WalletsPage({
               </label>
 
               <button type="submit" className="ui-button-primary justify-center" disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : "Create wallet"}
+                {submittingAction === "create-wallet" ? "Saving..." : "Create wallet"}
               </button>
             </form>
           </div>
@@ -779,7 +869,7 @@ export function WalletsPage({
                       {showMemberValidation && memberErrors.email ? <span className="text-sm text-[color:var(--danger-text)]">{memberErrors.email}</span> : null}
                     </div>
                     <button type="submit" className="ui-button-secondary justify-center" disabled={isSubmitting}>
-                      {isSubmitting ? "Saving..." : "Add member"}
+                      {submittingAction === "member" ? "Saving..." : "Add member"}
                     </button>
                   </div>
                 </form>
@@ -823,7 +913,7 @@ export function WalletsPage({
                 editingBudgetId={editingWalletBudgetId}
                 deletingBudgetIds={deletingWalletBudgetIds}
                 isBudgetLoading={isLoading}
-                isBudgetSubmitting={isSubmitting}
+                isBudgetSubmitting={submittingAction === "budget"}
                 budgetStatusMessage={walletBudgetStatusMessage}
                 budgetErrorMessage={walletBudgetErrorMessage}
                 budgetHistoryGroups={walletBudgetHistoryGroups}
@@ -918,19 +1008,31 @@ export function WalletsPage({
                         {selectedWallet.members.map((member) => {
                           const isSelected = selectedSplitMemberIds.includes(member.id);
                           const needsValue = expenseSplitRule !== "equal" && isSelected;
+                          const canMarkSettled = isSelected && member.id !== expensePayerId && !editingWalletExpenseId;
+                          const isSettled = alreadySettledMemberIds.includes(member.id);
 
                           return (
-                            <label key={member.id} className="grid gap-3 rounded-[18px] border border-[color:var(--border)] bg-white/85 p-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(110px,140px)] sm:items-center">
-                              <input type="checkbox" checked={isSelected} onChange={() => handleToggleSplitMember(member.id)} />
-                              <span className="text-sm font-semibold text-ink">{member.display_name}</span>
-                              {needsValue ? (
-                                <input
-                                  value={splitValues[member.id] ?? ""}
-                                  onChange={(event) => setSplitValues((current) => ({ ...current, [member.id]: event.target.value }))}
-                                  placeholder={expenseSplitRule === "fixed" ? "0.00" : "%"}
-                                />
-                              ) : <span className="text-sm text-muted">{isSelected ? "Included" : "Excluded"}</span>}
-                            </label>
+                            <div key={member.id} className={cn("rounded-[18px] border p-3 transition-colors", isSettled ? "border-primary/20 bg-success-tint" : "border-[color:var(--border)] bg-white/85")}>
+                              <label className="grid cursor-pointer gap-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(110px,140px)] sm:items-center">
+                                <input type="checkbox" checked={isSelected} onChange={() => handleToggleSplitMember(member.id)} />
+                                <span className="text-sm font-semibold text-ink">{member.display_name}</span>
+                                {needsValue ? (
+                                  <input
+                                    value={splitValues[member.id] ?? ""}
+                                    onChange={(event) => setSplitValues((current) => ({ ...current, [member.id]: event.target.value }))}
+                                    placeholder={expenseSplitRule === "fixed" ? "0.00" : "%"}
+                                  />
+                                ) : <span className="text-sm text-muted">{isSelected ? "Included" : "Excluded"}</span>}
+                              </label>
+                              {canMarkSettled ? (
+                                <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-[color:var(--border)] pt-3 text-xs font-medium text-secondary">
+                                  <input type="checkbox" checked={isSettled} onChange={() => handleToggleAlreadySettled(member.id)} />
+                                  <span className={isSettled ? "text-ink" : "text-muted"}>
+                                    {isSettled ? "✓ Already settled their share" : "Already settled their share?"}
+                                  </span>
+                                </label>
+                              ) : null}
+                            </div>
                           );
                         })}
                       </div>
@@ -939,7 +1041,7 @@ export function WalletsPage({
                     <div className="flex flex-wrap justify-end gap-2">
                       {editingWalletExpenseId ? <button type="button" className="ui-button-secondary" onClick={() => setEditingWalletExpenseId(null)}>Cancel edit</button> : null}
                       <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
-                        {isSubmitting ? "Saving..." : editingWalletExpenseId ? "Update shared expense" : "Add shared expense"}
+                        {submittingAction === "expense" ? "Saving..." : editingWalletExpenseId ? "Update shared expense" : "Add shared expense"}
                       </button>
                     </div>
                   </form>
@@ -988,7 +1090,7 @@ export function WalletsPage({
                     <div className="flex flex-wrap justify-end gap-2">
                       {editingSettlementId ? <button type="button" className="ui-button-secondary" onClick={() => setEditingSettlementId(null)}>Cancel edit</button> : null}
                       <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
-                        {isSubmitting ? "Saving..." : editingSettlementId ? "Update settlement" : "Record settlement"}
+                        {submittingAction === "settlement" ? "Saving..." : editingSettlementId ? "Update settlement" : "Record settlement"}
                       </button>
                     </div>
                   </form>
@@ -1001,26 +1103,33 @@ export function WalletsPage({
                   {selectedWallet.expenses.length === 0 ? (
                     <EmptyState title="No shared expenses yet" description="Add the first group transaction to start tracking how this wallet is being used." />
                   ) : (
-                    <div className="grid gap-3">
-                      {selectedWallet.expenses.map((expense) => (
-                        <article key={expense.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="space-y-1.5">
-                              <strong className="block text-base text-ink">{expense.description}</strong>
-                              <p className="text-sm leading-6 text-secondary">{expense.category} · paid by {expense.paid_by_member_name} · {expense.date}</p>
+                    <>
+                      <div className="grid gap-3">
+                        {selectedWallet.expenses.slice(0, 5).map((expense) => (
+                          <article key={expense.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="space-y-1.5">
+                                <strong className="block text-base text-ink">{expense.description}</strong>
+                                <p className="text-sm leading-6 text-secondary">{expense.category} · paid by {expense.paid_by_member_name} · {expense.date}</p>
+                              </div>
+                              <div className="text-left lg:text-right">
+                                <strong className="block text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                                <span className="text-sm text-secondary">{expense.split_rule} split</span>
+                              </div>
                             </div>
-                            <div className="text-left lg:text-right">
-                              <strong className="block text-xl text-ink">{formatCurrency(expense.amount)}</strong>
-                              <span className="text-sm text-secondary">{expense.split_rule} split</span>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button type="button" className="ui-button-ghost" onClick={() => handleStartExpenseEdit(expense.id)}>Edit</button>
+                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteExpenseClick(expense.id)}>Delete</button>
                             </div>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button type="button" className="ui-button-ghost" onClick={() => handleStartExpenseEdit(expense.id)}>Edit</button>
-                            <button type="button" className="ui-button-danger" onClick={() => void handleDeleteExpenseClick(expense.id)}>Delete</button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                          </article>
+                        ))}
+                      </div>
+                      {selectedWallet.expenses.length > 5 ? (
+                        <button type="button" className="ui-button-secondary w-full justify-center" onClick={() => { setExpenseFilterMonth("all"); setExpenseFilterCategory("all"); setExpenseFilterAmount("all"); setIsExpenseModalOpen(true); }}>
+                          Show all {selectedWallet.expenses.length} expenses
+                        </button>
+                      ) : null}
+                    </>
                   )}
                 </SurfaceCard>
 
@@ -1029,26 +1138,153 @@ export function WalletsPage({
                   {selectedWallet.settlements.length === 0 ? (
                     <EmptyState title="No settlements yet" description="Record a payback once members start settling balances inside this wallet." />
                   ) : (
-                    <div className="grid gap-3">
-                      {selectedWallet.settlements.map((settlement) => (
-                        <article key={settlement.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="space-y-1.5">
-                              <strong className="block text-base text-ink">{settlement.from_member_name} paid {settlement.to_member_name}</strong>
-                              <p className="text-sm leading-6 text-secondary">{settlement.date}{settlement.note ? ` · ${settlement.note}` : ""}</p>
+                    <>
+                      <div className="grid gap-3">
+                        {selectedWallet.settlements.slice(0, 5).map((settlement) => (
+                          <article key={settlement.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="space-y-1.5">
+                                <strong className="block text-base text-ink">{settlement.from_member_name} paid {settlement.to_member_name}</strong>
+                                <p className="text-sm leading-6 text-secondary">{settlement.date}{settlement.note ? ` · ${settlement.note}` : ""}</p>
+                              </div>
+                              <strong className="text-xl text-ink">{formatCurrency(settlement.amount)}</strong>
                             </div>
-                            <strong className="text-xl text-ink">{formatCurrency(settlement.amount)}</strong>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button type="button" className="ui-button-ghost" onClick={() => handleStartSettlementEdit(settlement.id)}>Edit</button>
-                            <button type="button" className="ui-button-danger" onClick={() => void handleDeleteSettlementClick(settlement.id)}>Delete</button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button type="button" className="ui-button-ghost" onClick={() => handleStartSettlementEdit(settlement.id)}>Edit</button>
+                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteSettlementClick(settlement.id)}>Delete</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      {selectedWallet.settlements.length > 5 ? (
+                        <button type="button" className="ui-button-secondary w-full justify-center" onClick={() => { setSettlementFilterMonth("all"); setSettlementFilterAmount("all"); setIsSettlementModalOpen(true); }}>
+                          Show all {selectedWallet.settlements.length} settlements
+                        </button>
+                      ) : null}
+                    </>
                   )}
                 </SurfaceCard>
               </section>
+
+              {isExpenseModalOpen ? (
+                <ModalFrame onClose={() => setIsExpenseModalOpen(false)} className="flex max-h-[88vh] flex-col p-0">
+                  <div className="border-b border-[color:var(--border)] px-5 py-5 sm:px-7">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-2">
+                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-[2rem]">All shared expenses</h2>
+                        <p className="text-sm leading-7 text-secondary">{filteredExpenses.length} expense{filteredExpenses.length !== 1 ? "s" : ""} found</p>
+                      </div>
+                      <button type="button" className="ui-button-secondary shrink-0" onClick={() => setIsExpenseModalOpen(false)}>Close</button>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                        Month
+                        <select value={expenseFilterMonth} onChange={(e) => setExpenseFilterMonth(e.target.value)}>
+                          <option value="all">All months</option>
+                          {expenseMonthOptions.map((m) => <option key={m} value={m}>{formatBudgetMonth(m)}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                        Category
+                        <select value={expenseFilterCategory} onChange={(e) => setExpenseFilterCategory(e.target.value)}>
+                          <option value="all">All categories</option>
+                          {expenseCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                        Amount
+                        <select value={expenseFilterAmount} onChange={(e) => setExpenseFilterAmount(e.target.value)}>
+                          <option value="all">Any amount</option>
+                          <option value="lt100">Under 100</option>
+                          <option value="100to500">100 – 500</option>
+                          <option value="gt500">Over 500</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+                    {filteredExpenses.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-muted">No expenses match the current filters.</p>
+                    ) : (
+                      <div className="grid gap-3">
+                        {filteredExpenses.map((expense) => (
+                          <article key={expense.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0 space-y-1.5">
+                                <strong className="block truncate text-base text-ink">{expense.description}</strong>
+                                <p className="text-sm leading-6 text-secondary">{expense.category} · paid by {expense.paid_by_member_name} · {expense.date}</p>
+                              </div>
+                              <div className="shrink-0 text-left sm:text-right">
+                                <strong className="block text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                                <span className="text-sm text-secondary">{expense.split_rule} split</span>
+                              </div>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button type="button" className="ui-button-ghost" onClick={() => { handleStartExpenseEdit(expense.id); setIsExpenseModalOpen(false); }}>Edit</button>
+                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteExpenseClick(expense.id)}>Delete</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </ModalFrame>
+              ) : null}
+
+              {isSettlementModalOpen ? (
+                <ModalFrame onClose={() => setIsSettlementModalOpen(false)} className="flex max-h-[88vh] flex-col p-0">
+                  <div className="border-b border-[color:var(--border)] px-5 py-5 sm:px-7">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-2">
+                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-[2rem]">All settlements</h2>
+                        <p className="text-sm leading-7 text-secondary">{filteredSettlements.length} settlement{filteredSettlements.length !== 1 ? "s" : ""} found</p>
+                      </div>
+                      <button type="button" className="ui-button-secondary shrink-0" onClick={() => setIsSettlementModalOpen(false)}>Close</button>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                        Month
+                        <select value={settlementFilterMonth} onChange={(e) => setSettlementFilterMonth(e.target.value)}>
+                          <option value="all">All months</option>
+                          {settlementMonthOptions.map((m) => <option key={m} value={m}>{formatBudgetMonth(m)}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                        Amount
+                        <select value={settlementFilterAmount} onChange={(e) => setSettlementFilterAmount(e.target.value)}>
+                          <option value="all">Any amount</option>
+                          <option value="lt100">Under 100</option>
+                          <option value="100to500">100 – 500</option>
+                          <option value="gt500">Over 500</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+                    {filteredSettlements.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-muted">No settlements match the current filters.</p>
+                    ) : (
+                      <div className="grid gap-3">
+                        {filteredSettlements.map((settlement) => (
+                          <article key={settlement.id} className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0 space-y-1.5">
+                                <strong className="block truncate text-base text-ink">{settlement.from_member_name} paid {settlement.to_member_name}</strong>
+                                <p className="text-sm leading-6 text-secondary">{settlement.date}{settlement.note ? ` · ${settlement.note}` : ""}</p>
+                              </div>
+                              <strong className="shrink-0 text-xl text-ink">{formatCurrency(settlement.amount)}</strong>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button type="button" className="ui-button-ghost" onClick={() => { handleStartSettlementEdit(settlement.id); setIsSettlementModalOpen(false); }}>Edit</button>
+                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteSettlementClick(settlement.id)}>Delete</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </ModalFrame>
+              ) : null}
             </>
           ) : null}
         </section>

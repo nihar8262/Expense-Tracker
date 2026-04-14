@@ -987,6 +987,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isBudgetSubmitting, setIsBudgetSubmitting] = useState(false);
   const [isWalletSubmitting, setIsWalletSubmitting] = useState(false);
+  const [walletSubmittingAction, setWalletSubmittingAction] = useState("");
+  const [dashboardViewMode, setDashboardViewMode] = useState<"personal" | "wallet">("personal");
+  const [dashboardWalletId, setDashboardWalletId] = useState<string | null>(null);
+  const [dashboardWallet, setDashboardWallet] = useState<WalletDetail | null>(null);
   const [isSavingReminderPreferences, setIsSavingReminderPreferences] = useState(false);
   const [isSavingBillReminder, setIsSavingBillReminder] = useState(false);
   const [isRunningNotificationChecks, setIsRunningNotificationChecks] = useState(false);
@@ -1047,7 +1051,31 @@ export default function App() {
   const selectedCategoryOption = useMemo(() => availableCategoryOptions.find((option) => option.label.toLowerCase() === form.category.trim().toLowerCase()) ?? null, [availableCategoryOptions, form.category]);
   const isOtherCategorySelected = selectedCategoryOption?.id === "others";
 
+  const dashboardExpenses = useMemo<Expense[]>(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return expenses;
+    }
+
+    return dashboardWallet.expenses.map((walletExpense) => ({
+      id: walletExpense.id,
+      amount: walletExpense.amount,
+      category: walletExpense.category,
+      description: walletExpense.description,
+      date: walletExpense.date,
+      created_at: walletExpense.created_at
+    }));
+  }, [dashboardViewMode, dashboardWallet, expenses]);
+
+  const dashboardCategories = useMemo(
+    () => [...new Set(dashboardExpenses.map((e) => e.category))].sort((l, r) => l.localeCompare(r)),
+    [dashboardExpenses]
+  );
+
   const visibleExpenses = useMemo(() => expenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange)), [expenses, selectedTimeRange]);
+  const dashboardVisibleExpenses = useMemo(
+    () => dashboardExpenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange)),
+    [dashboardExpenses, selectedTimeRange]
+  );
   const totalExpensePages = Math.max(1, Math.ceil(visibleExpenses.length / EXPENSES_PAGE_SIZE));
   const paginatedExpenses = useMemo(() => {
     const startIndex = (currentExpensesPage - 1) * EXPENSES_PAGE_SIZE;
@@ -1058,8 +1086,8 @@ export default function App() {
   const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
   const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
 
-  const spendTrend = useMemo(() => buildTrendPoints(visibleExpenses, chartGranularity), [visibleExpenses, chartGranularity]);
-  const trendDetailLookup = useMemo(() => buildTrendDetailLookup(visibleExpenses, chartGranularity), [visibleExpenses, chartGranularity]);
+  const spendTrend = useMemo(() => buildTrendPoints(dashboardVisibleExpenses, chartGranularity), [dashboardVisibleExpenses, chartGranularity]);
+  const trendDetailLookup = useMemo(() => buildTrendDetailLookup(dashboardVisibleExpenses, chartGranularity), [dashboardVisibleExpenses, chartGranularity]);
 
   const chartSummary = useMemo(() => {
     const peakValue = spendTrend.reduce((currentMax, point) => Math.max(currentMax, point.total), 0);
@@ -1089,14 +1117,14 @@ export default function App() {
     };
   }, [spendTrend]);
 
-  const total = useMemo(() => formatCurrency(visibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2)), [visibleExpenses]);
+  const total = useMemo(() => formatCurrency(dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2)), [dashboardVisibleExpenses]);
 
   const dashboardStats = useMemo<DashboardStats>(() => {
-    const expenseCount = visibleExpenses.length;
-    const rawTotal = visibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+    const expenseCount = dashboardVisibleExpenses.length;
+    const rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
     const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
 
-    const categoryTotals = visibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
+    const categoryTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
       accumulator[expense.category] = (accumulator[expense.category] ?? 0) + Number(expense.amount);
       return accumulator;
     }, {});
@@ -1110,7 +1138,7 @@ export default function App() {
         share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0
       }));
 
-    const latestExpense = [...visibleExpenses].sort((left, right) => {
+    const latestExpense = [...dashboardVisibleExpenses].sort((left, right) => {
       const byDate = right.date.localeCompare(left.date);
       return byDate !== 0 ? byDate : right.created_at.localeCompare(left.created_at);
     })[0] ?? null;
@@ -1122,7 +1150,7 @@ export default function App() {
       latestExpense,
       categoryBreakdown
     };
-  }, [visibleExpenses]);
+  }, [dashboardVisibleExpenses]);
 
   const budgetSummaries = useMemo<BudgetSummary[]>(() => {
     return budgets
@@ -1160,11 +1188,50 @@ export default function App() {
   }, [budgets, expenses]);
 
   const currentBudgetMonth = getCurrentMonthValue();
-  const currentMonthBudgetSummaries = useMemo(() => budgetSummaries.filter((budget) => budget.month === currentBudgetMonth), [budgetSummaries, currentBudgetMonth]);
 
-  const currentMonthBudgetOverview = useMemo(() => {
-    const totalBudgetAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
-    const totalSpentAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
+  const dashboardBudgetSummaries = useMemo<BudgetSummary[]>(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return budgetSummaries;
+    }
+
+    const walletExpensesAsBudgetExpenses = dashboardWallet.expenses.map((we) => ({
+      amount: we.amount,
+      category: we.category,
+      date: we.date
+    }));
+
+    return dashboardWallet.budgets
+      .map((budget) => {
+        const spent = walletExpensesAsBudgetExpenses
+          .filter((expense) => getExpenseMonth(expense.date) === budget.month)
+          .filter((expense) => (budget.scope === "category" ? expense.category === budget.category : true))
+          .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        const totalBudgetAmount = Number(budget.amount);
+        const remaining = totalBudgetAmount - spent;
+
+        return {
+          ...budget,
+          spent,
+          remaining,
+          formattedAmount: formatCurrency(budget.amount),
+          formattedSpent: formatCurrency(spent.toFixed(2)),
+          formattedRemaining: formatCurrency(remaining.toFixed(2)),
+          isOverspent: remaining < 0
+        };
+      })
+      .sort((left, right) => {
+        const byMonth = right.month.localeCompare(left.month);
+        if (byMonth !== 0) return byMonth;
+        if (left.scope !== right.scope) return left.scope === "monthly" ? -1 : 1;
+        return (left.category ?? "").localeCompare(right.category ?? "");
+      });
+  }, [dashboardViewMode, dashboardWallet, budgetSummaries]);
+
+  const dashboardCurrentMonthBudgetSummaries = useMemo(() => dashboardBudgetSummaries.filter((budget) => budget.month === currentBudgetMonth), [dashboardBudgetSummaries, currentBudgetMonth]);
+
+  const dashboardCurrentMonthBudgetOverview = useMemo(() => {
+    const totalBudgetAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
+    const totalSpentAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
     const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
 
     return {
@@ -1173,12 +1240,12 @@ export default function App() {
       totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2)),
       isOverspent: totalRemainingAmount < 0
     };
-  }, [currentMonthBudgetSummaries]);
+  }, [dashboardCurrentMonthBudgetSummaries]);
 
   const dashboardInsights = useMemo<DashboardInsight[]>(() => {
     const insights: DashboardInsight[] = [];
     const previousMonth = getMonthValueWithOffset(currentBudgetMonth, -1);
-    const filteredExpenses = selectedCategory ? expenses.filter((expense) => expense.category === selectedCategory) : expenses;
+    const filteredExpenses = selectedCategory ? dashboardExpenses.filter((expense) => expense.category === selectedCategory) : dashboardExpenses;
     const currentMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === currentBudgetMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
     const previousMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === previousMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
 
@@ -1192,9 +1259,9 @@ export default function App() {
       });
     }
 
-    if (currentMonthBudgetSummaries.length > 0) {
-      const totalBudgetAmount = currentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
-      const remainingBudgetAmount = totalBudgetAmount - currentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
+    if (dashboardCurrentMonthBudgetSummaries.length > 0) {
+      const totalBudgetAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
+      const remainingBudgetAmount = totalBudgetAmount - dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
       const remainingShare = totalBudgetAmount > 0 ? remainingBudgetAmount / totalBudgetAmount : 0;
 
       insights.push({
@@ -1224,10 +1291,10 @@ export default function App() {
     }
 
     return insights.slice(0, 3);
-  }, [currentBudgetMonth, currentMonthBudgetSummaries, dashboardStats, expenses, selectedCategory]);
+  }, [currentBudgetMonth, dashboardCurrentMonthBudgetSummaries, dashboardStats, dashboardExpenses, selectedCategory]);
 
-  const budgetHistoryGroups = useMemo<BudgetHistoryGroup[]>(() => {
-    const filteredBudgets = budgetSummaries.filter((budget) => isBudgetMonthInRange(budget.month, budgetHistoryRange));
+  const dashboardBudgetHistoryGroups = useMemo<BudgetHistoryGroup[]>(() => {
+    const filteredBudgets = dashboardBudgetSummaries.filter((budget) => isBudgetMonthInRange(budget.month, budgetHistoryRange));
     const groupedBudgets = new Map<string, BudgetSummary[]>();
 
     for (const budget of filteredBudgets) {
@@ -1243,7 +1310,7 @@ export default function App() {
         label: formatBudgetMonth(month),
         items
       }));
-  }, [budgetHistoryRange, budgetSummaries]);
+  }, [budgetHistoryRange, dashboardBudgetSummaries]);
 
   const unreadNotificationCount = useMemo(() => notifications.filter((notification) => notification.status === "unread").length, [notifications]);
 
@@ -1479,6 +1546,20 @@ export default function App() {
 
     void loadSelectedWallet(currentUser, selectedWalletId);
   }, [currentUser, selectedWalletId]);
+
+  useEffect(() => {
+    if (!currentUser || !dashboardWalletId || dashboardViewMode !== "wallet") {
+      setDashboardWallet(null);
+      return;
+    }
+
+    if (selectedWallet && selectedWallet.wallet.id === dashboardWalletId) {
+      setDashboardWallet(selectedWallet);
+      return;
+    }
+
+    getWalletDetail(dashboardWalletId, currentUser).then(setDashboardWallet).catch(() => setDashboardWallet(null));
+  }, [currentUser, dashboardViewMode, dashboardWalletId, selectedWallet]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
@@ -1742,15 +1823,25 @@ export default function App() {
     }
   }
 
+  function startWalletSubmit(action: string) {
+    setIsWalletSubmitting(true);
+    setWalletSubmittingAction(action);
+    setWalletErrorMessage("");
+    setWalletStatusMessage("");
+  }
+
+  function endWalletSubmit() {
+    setIsWalletSubmitting(false);
+    setWalletSubmittingAction("");
+  }
+
   async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to create a shared wallet.");
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("create-wallet");
 
     try {
       const wallet = await createWallet(input, currentUser);
@@ -1763,7 +1854,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create wallet.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1773,9 +1864,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("member");
 
     try {
       const wallet = await addWalletMember(inputWalletId, input, currentUser);
@@ -1787,7 +1876,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to add wallet member.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1797,9 +1886,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("member");
 
     try {
       const wallet = await removeWalletMember(inputWalletId, memberId, currentUser);
@@ -1811,7 +1898,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to remove wallet member.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1821,8 +1908,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
+    startWalletSubmit("budget");
 
     try {
       const wallet = await createWalletBudget(inputWalletId, input, currentUser);
@@ -1832,7 +1918,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create wallet budget.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1842,8 +1928,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
+    startWalletSubmit("budget");
 
     try {
       const wallet = await updateWalletBudget(inputWalletId, walletBudgetId, input, currentUser);
@@ -1853,7 +1938,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update wallet budget.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1863,8 +1948,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
+    startWalletSubmit("budget");
 
     try {
       const wallet = await deleteWalletBudget(inputWalletId, walletBudgetId, currentUser);
@@ -1874,7 +1958,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete wallet budget.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1884,9 +1968,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("delete-wallet");
 
     try {
       await deleteWalletGroup(inputWalletId, currentUser);
@@ -1900,7 +1982,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete group.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1910,9 +1992,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("leave-wallet");
 
     try {
       await leaveWalletGroup(inputWalletId, currentUser);
@@ -1926,7 +2006,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to exit group.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1936,9 +2016,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("expense");
 
     try {
       const wallet = await createSharedWalletExpense(inputWalletId, input, currentUser);
@@ -1950,7 +2028,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create shared expense.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1960,9 +2038,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("expense");
 
     try {
       const wallet = await updateSharedWalletExpense(inputWalletId, walletExpenseId, input, currentUser);
@@ -1973,7 +2049,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update shared expense.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -1983,9 +2059,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("expense");
 
     try {
       const wallet = await deleteSharedWalletExpense(inputWalletId, walletExpenseId, currentUser);
@@ -1996,7 +2070,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete shared expense.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -2006,9 +2080,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("settlement");
 
     try {
       const wallet = await createWalletSettlement(inputWalletId, input, currentUser);
@@ -2019,7 +2091,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record settlement.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -2029,9 +2101,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("settlement");
 
     try {
       const wallet = await updateWalletSettlementEntry(inputWalletId, settlementId, input, currentUser);
@@ -2042,7 +2112,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update settlement.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -2052,9 +2122,7 @@ export default function App() {
       return false;
     }
 
-    setIsWalletSubmitting(true);
-    setWalletErrorMessage("");
-    setWalletStatusMessage("");
+    startWalletSubmit("settlement");
 
     try {
       const wallet = await deleteWalletSettlementEntry(inputWalletId, settlementId, currentUser);
@@ -2065,7 +2133,7 @@ export default function App() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete settlement.");
       return false;
     } finally {
-      setIsWalletSubmitting(false);
+      endWalletSubmit();
     }
   }
 
@@ -2528,14 +2596,19 @@ export default function App() {
       >
         {page === "dashboard" ? (
           <DashboardPage
-            categories={categories}
+            categories={dashboardViewMode === "wallet" ? dashboardCategories : categories}
             dashboardInsights={dashboardInsights}
+            wallets={wallets}
+            dashboardViewMode={dashboardViewMode}
+            dashboardWalletId={dashboardWalletId}
+            onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
+            onDashboardWalletIdChange={setDashboardWalletId}
             budgetForm={budgetForm}
             budgetCategoryOptions={budgetCategoryOptions}
             currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
-            currentMonthBudgetSummaries={currentMonthBudgetSummaries}
-            currentMonthBudgetOverview={currentMonthBudgetOverview}
-            budgetHistoryGroups={budgetHistoryGroups}
+            currentMonthBudgetSummaries={dashboardCurrentMonthBudgetSummaries}
+            currentMonthBudgetOverview={dashboardCurrentMonthBudgetOverview}
+            budgetHistoryGroups={dashboardBudgetHistoryGroups}
             budgetHistoryRange={budgetHistoryRange}
             chartDisplayType={chartDisplayType}
             selectedCategory={selectedCategory}
@@ -2625,6 +2698,7 @@ export default function App() {
               budgetCategoryOptions={budgetCategoryOptions}
               isLoading={isWalletLoading}
               isSubmitting={isWalletSubmitting}
+              submittingAction={walletSubmittingAction}
               statusMessage={walletStatusMessage}
               errorMessage={walletErrorMessage}
               formatCurrency={formatCurrency}

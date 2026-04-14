@@ -15,11 +15,17 @@ import type {
   DashboardStats,
   TimeRangeFilter,
   TrendDetailItem,
-  TrendPoint
+  TrendPoint,
+  Wallet
 } from "../types";
 
 type DashboardPageProps = {
   categories: string[];
+  wallets: Wallet[];
+  dashboardViewMode: "personal" | "wallet";
+  dashboardWalletId: string | null;
+  onDashboardViewModeChange: (mode: "personal" | "wallet") => void;
+  onDashboardWalletIdChange: (walletId: string) => void;
   dashboardInsights: DashboardInsight[];
   budgetForm: BudgetForm;
   budgetCategoryOptions: CategoryOption[];
@@ -73,6 +79,11 @@ const statMeta = [
 
 export function DashboardPage({
   categories,
+  wallets,
+  dashboardViewMode,
+  dashboardWalletId,
+  onDashboardViewModeChange,
+  onDashboardWalletIdChange,
   dashboardInsights,
   budgetForm,
   budgetCategoryOptions,
@@ -211,29 +222,71 @@ export function DashboardPage({
       />
 
       <SurfaceCard className="space-y-5 p-5 sm:p-6">
-        <SectionHeader title="Data view" description="Refine the dashboard by category and time range without leaving the overview." />
+        <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Category
-            <select value={selectedCategory} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid gap-2 text-sm font-medium text-secondary">
+            Source
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={cn(
+                  "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
+                  dashboardViewMode === "personal"
+                    ? "border-primary/25 bg-success-tint text-ink"
+                    : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
+                )}
+                onClick={() => onDashboardViewModeChange("personal")}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="inline-block h-4 w-4 -mt-0.5 mr-1.5"><path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" /></svg>
+                Personal
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
+                  dashboardViewMode === "wallet"
+                    ? "border-primary/25 bg-success-tint text-ink"
+                    : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
+                )}
+                onClick={() => onDashboardViewModeChange("wallet")}
+                disabled={wallets.length === 0}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="inline-block h-4 w-4 -mt-0.5 mr-1.5"><path fillRule="evenodd" d="M1 4.75C1 3.784 1.784 3 2.75 3h14.5c.966 0 1.75.784 1.75 1.75v10.515a1.75 1.75 0 0 1-1.75 1.75h-1.5c-.078 0-.155-.005-.23-.015H2.75A1.75 1.75 0 0 1 1 15.25V4.75Zm16.5 7.385V11.5a1.252 1.252 0 0 1-.355-.14l-.004-.002A1.25 1.25 0 0 1 16.5 10.5V8.25a1.25 1.25 0 0 1 0-2.5V4.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h14.5a.25.25 0 0 0 .25-.25v-3.115ZM14 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z" clipRule="evenodd" /></svg>
+                Wallet
+              </button>
+            </div>
+            {dashboardViewMode === "wallet" && wallets.length > 0 ? (
+              <select className="mt-1" value={dashboardWalletId ?? ""} onChange={(e) => onDashboardWalletIdChange(e.target.value)}>
+                {wallets.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            ) : null}
+          </div>
 
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Range
-            <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
-              <option value="all">All time</option>
-              <option value="week">This week</option>
-              <option value="month">This month</option>
-              <option value="year">This year</option>
-            </select>
-          </label>
+          <div className="grid gap-4">
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Category
+              <select value={selectedCategory} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
+                <option value="">All categories</option>
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Range
+              <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
+                <option value="all">All time</option>
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+                <option value="year">This year</option>
+              </select>
+            </label>
+          </div>
         </div>
       </SurfaceCard>
 

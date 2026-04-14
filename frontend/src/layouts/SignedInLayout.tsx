@@ -55,7 +55,7 @@ const mainNavItems = [
   { to: "/dashboard", label: "Dashboard", icon: false },
   { to: "/expenses", label: "Expenses", icon: false },
   { to: "/wallets", label: "Wallets", icon: false },
-  { to: "/alerts", label: "Alerts", icon: true }
+  { to: "/alerts", label: "Alerts", icon: false }
 ] as const;
 
 export function SignedInLayout({
