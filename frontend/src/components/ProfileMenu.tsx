@@ -43,7 +43,7 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
                 Sign out
               </button>
               <button type="button" className="ui-button-danger justify-center" disabled={isDeletingAccount} onClick={onDeleteAccount}>
-                Delete account
+                {isDeletingAccount ? "Deleting..." : "Delete account"}
               </button>
             </div>
           </div>

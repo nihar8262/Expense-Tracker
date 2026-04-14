@@ -2538,6 +2538,107 @@ export default function App() {
     }
   }
 
+  const dashboardBudgetCategoryOptions = useMemo(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return budgetCategoryOptions;
+    }
+
+    const optionsByLabel = new Map<string, CategoryOption>();
+
+    for (const option of budgetCategoryOptions) {
+      optionsByLabel.set(option.label.toLowerCase(), option);
+    }
+
+    for (const expense of dashboardWallet.expenses) {
+      const key = expense.category.toLowerCase();
+      if (!optionsByLabel.has(key)) {
+        optionsByLabel.set(key, {
+          id: key.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "wallet-category",
+          label: expense.category,
+          icon: "other"
+        });
+      }
+    }
+
+    return [...optionsByLabel.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [budgetCategoryOptions, dashboardViewMode, dashboardWallet]);
+
+  async function handleDashboardBudgetSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (dashboardViewMode === "wallet" && dashboardWalletId) {
+      event.preventDefault();
+
+      if (!currentUser) {
+        setBudgetErrorMessage("Sign in to save group budgets.");
+        return;
+      }
+
+      setBudgetErrorMessage("");
+      setBudgetStatusMessage("");
+      setIsBudgetSubmitting(true);
+
+      try {
+        if (editingBudgetId) {
+          const wallet = await updateWalletBudget(dashboardWalletId, editingBudgetId, budgetForm, currentUser);
+          setSelectedWallet(wallet);
+          setBudgetStatusMessage("Group budget updated.");
+        } else {
+          const wallet = await createWalletBudget(dashboardWalletId, budgetForm, currentUser);
+          setSelectedWallet(wallet);
+          setBudgetStatusMessage("Group budget saved.");
+        }
+
+        setEditingBudgetId(null);
+        setBudgetForm(initialBudgetFormState);
+      } catch (error) {
+        setBudgetErrorMessage(error instanceof Error ? error.message : editingBudgetId ? "Failed to update group budget." : "Failed to save group budget.");
+      } finally {
+        setIsBudgetSubmitting(false);
+      }
+
+      return;
+    }
+
+    return handleBudgetSubmit(event);
+  }
+
+  async function handleDashboardBudgetDelete(budgetId: string) {
+    if (dashboardViewMode === "wallet" && dashboardWalletId) {
+      if (!currentUser) {
+        return;
+      }
+
+      const confirmed = window.confirm("Delete this group budget permanently?");
+
+      if (!confirmed) {
+        return;
+      }
+
+      setDeletingBudgetIds((current) => [...new Set([...current, budgetId])]);
+      setBudgetErrorMessage("");
+      setBudgetStatusMessage("");
+
+      try {
+        const wallet = await deleteWalletBudget(dashboardWalletId, budgetId, currentUser);
+        setSelectedWallet(wallet);
+
+        if (editingBudgetId === budgetId) {
+          setEditingBudgetId(null);
+          setBudgetForm(initialBudgetFormState);
+        }
+
+        setBudgetStatusMessage("Group budget deleted.");
+      } catch (error) {
+        setBudgetErrorMessage(error instanceof Error ? error.message : "Failed to delete group budget.");
+      } finally {
+        setDeletingBudgetIds((current) => current.filter((id) => id !== budgetId));
+      }
+
+      return;
+    }
+
+    return handleBudgetDelete(budgetId);
+  }
+
   function handleClearExpenseFilters() {
     setSelectedCategory("");
     setSelectedTimeRange("all");
@@ -2604,7 +2705,7 @@ export default function App() {
             onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
             onDashboardWalletIdChange={setDashboardWalletId}
             budgetForm={budgetForm}
-            budgetCategoryOptions={budgetCategoryOptions}
+            budgetCategoryOptions={dashboardBudgetCategoryOptions}
             currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
             currentMonthBudgetSummaries={dashboardCurrentMonthBudgetSummaries}
             currentMonthBudgetOverview={dashboardCurrentMonthBudgetOverview}
@@ -2628,10 +2729,10 @@ export default function App() {
             budgetErrorMessage={budgetErrorMessage}
             formatCurrency={formatCurrency}
             onBudgetFormChange={handleBudgetFormChange}
-            onBudgetSubmit={handleBudgetSubmit}
+            onBudgetSubmit={handleDashboardBudgetSubmit}
             onBudgetEditCancel={handleBudgetEditCancel}
             onBudgetEditStart={handleBudgetEditStart}
-            onBudgetDelete={handleBudgetDelete}
+            onBudgetDelete={handleDashboardBudgetDelete}
             onBudgetHistoryRangeChange={setBudgetHistoryRange}
             onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
             onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}

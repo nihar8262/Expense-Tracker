@@ -163,6 +163,11 @@ export function WalletsPage({
   const [settlementDate, setSettlementDate] = useState(getTodayIsoDate());
   const [settlementNote, setSettlementNote] = useState("");
   const [editingSettlementId, setEditingSettlementId] = useState<string | null>(null);
+  const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
+  const [deletingSettlementIds, setDeletingSettlementIds] = useState<string[]>([]);
+  const [isDeletingWallet, setIsDeletingWallet] = useState(false);
+  const [isLeavingWallet, setIsLeavingWallet] = useState(false);
+  const [removingMemberIds, setRemovingMemberIds] = useState<string[]>([]);
   const [walletBudgetForm, setWalletBudgetForm] = useState<BudgetForm>(initialWalletBudgetForm);
   const [editingWalletBudgetId, setEditingWalletBudgetId] = useState<string | null>(null);
   const [deletingWalletBudgetIds, setDeletingWalletBudgetIds] = useState<string[]>([]);
@@ -674,16 +679,22 @@ export function WalletsPage({
       return;
     }
 
-    const deleted = await onDeleteWalletExpense(selectedWallet.wallet.id, walletExpenseId);
+    setDeletingExpenseIds((current) => [...new Set([...current, walletExpenseId])]);
 
-    if (deleted && editingWalletExpenseId === walletExpenseId) {
-      setEditingWalletExpenseId(null);
-      setAlreadySettledMemberIds([]);
-      setExpenseAmount("");
-      setExpenseCategory("");
-      setExpenseDescription("");
-      setExpenseDate(getTodayIsoDate());
-      setSplitValues({});
+    try {
+      const deleted = await onDeleteWalletExpense(selectedWallet.wallet.id, walletExpenseId);
+
+      if (deleted && editingWalletExpenseId === walletExpenseId) {
+        setEditingWalletExpenseId(null);
+        setAlreadySettledMemberIds([]);
+        setExpenseAmount("");
+        setExpenseCategory("");
+        setExpenseDescription("");
+        setExpenseDate(getTodayIsoDate());
+        setSplitValues({});
+      }
+    } finally {
+      setDeletingExpenseIds((current) => current.filter((id) => id !== walletExpenseId));
     }
   }
 
@@ -707,13 +718,19 @@ export function WalletsPage({
       return;
     }
 
-    const deleted = await onDeleteWalletSettlement(selectedWallet.wallet.id, settlementId);
+    setDeletingSettlementIds((current) => [...new Set([...current, settlementId])]);
 
-    if (deleted && editingSettlementId === settlementId) {
-      setEditingSettlementId(null);
-      setSettlementAmount("");
-      setSettlementDate(getTodayIsoDate());
-      setSettlementNote("");
+    try {
+      const deleted = await onDeleteWalletSettlement(selectedWallet.wallet.id, settlementId);
+
+      if (deleted && editingSettlementId === settlementId) {
+        setEditingSettlementId(null);
+        setSettlementAmount("");
+        setSettlementDate(getTodayIsoDate());
+        setSettlementNote("");
+      }
+    } finally {
+      setDeletingSettlementIds((current) => current.filter((id) => id !== settlementId));
     }
   }
 
@@ -722,7 +739,12 @@ export function WalletsPage({
       return;
     }
 
-    await onDeleteWallet(selectedWallet.wallet.id);
+    setIsDeletingWallet(true);
+    try {
+      await onDeleteWallet(selectedWallet.wallet.id);
+    } finally {
+      setIsDeletingWallet(false);
+    }
   }
 
   async function handleLeaveWalletClick() {
@@ -730,7 +752,12 @@ export function WalletsPage({
       return;
     }
 
-    await onLeaveWallet(selectedWallet.wallet.id);
+    setIsLeavingWallet(true);
+    try {
+      await onLeaveWallet(selectedWallet.wallet.id);
+    } finally {
+      setIsLeavingWallet(false);
+    }
   }
 
   return (
@@ -820,12 +847,12 @@ export function WalletsPage({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="data-pill">{selectedWallet.wallet.default_split_rule} split by default</span>
                       {isWalletOwner ? (
-                        <button type="button" className="ui-button-danger" onClick={() => void handleDeleteWalletClick()} disabled={isSubmitting}>
-                          Delete group
+                        <button type="button" className="ui-button-danger" onClick={() => void handleDeleteWalletClick()} disabled={isSubmitting || isDeletingWallet}>
+                          {isDeletingWallet ? "Deleting..." : "Delete group"}
                         </button>
                       ) : currentWalletMember ? (
-                        <button type="button" className="ui-button-danger" onClick={() => void handleLeaveWalletClick()} disabled={isSubmitting}>
-                          Exit group
+                        <button type="button" className="ui-button-danger" onClick={() => void handleLeaveWalletClick()} disabled={isSubmitting || isLeavingWallet}>
+                          {isLeavingWallet ? "Leaving..." : "Exit group"}
                         </button>
                       ) : null}
                     </div>
@@ -844,13 +871,20 @@ export function WalletsPage({
                           <button
                             type="button"
                             className="ui-button-danger !p-1.5"
-                            disabled={isSubmitting}
-                            onClick={() => { if (confirm(`Remove ${member.display_name} from this group?`)) { void onRemoveWalletMember(selectedWallet.wallet.id, member.id); } }}
+                            disabled={isSubmitting || removingMemberIds.includes(member.id)}
+                            onClick={() => { if (confirm(`Remove ${member.display_name} from this group?`)) { setRemovingMemberIds((c) => [...new Set([...c, member.id])]); onRemoveWalletMember(selectedWallet.wallet.id, member.id).finally(() => setRemovingMemberIds((c) => c.filter((id) => id !== member.id))); } }}
                             title="Remove member"
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                              <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
-                            </svg>
+                            {removingMemberIds.includes(member.id) ? (
+                              <svg className="size-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                                <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                              </svg>
+                            )}
                           </button>
                         ) : null}
                       </div>
@@ -1119,7 +1153,7 @@ export function WalletsPage({
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" className="ui-button-ghost" onClick={() => handleStartExpenseEdit(expense.id)}>Edit</button>
-                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteExpenseClick(expense.id)}>Delete</button>
+                              <button type="button" className="ui-button-danger" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void handleDeleteExpenseClick(expense.id)}>{deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}</button>
                             </div>
                           </article>
                         ))}
@@ -1151,7 +1185,7 @@ export function WalletsPage({
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" className="ui-button-ghost" onClick={() => handleStartSettlementEdit(settlement.id)}>Edit</button>
-                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteSettlementClick(settlement.id)}>Delete</button>
+                              <button type="button" className="ui-button-danger" disabled={deletingSettlementIds.includes(settlement.id)} onClick={() => void handleDeleteSettlementClick(settlement.id)}>{deletingSettlementIds.includes(settlement.id) ? "Deleting..." : "Delete"}</button>
                             </div>
                           </article>
                         ))}
@@ -1221,7 +1255,7 @@ export function WalletsPage({
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" className="ui-button-ghost" onClick={() => { handleStartExpenseEdit(expense.id); setIsExpenseModalOpen(false); }}>Edit</button>
-                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteExpenseClick(expense.id)}>Delete</button>
+                              <button type="button" className="ui-button-danger" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void handleDeleteExpenseClick(expense.id)}>{deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}</button>
                             </div>
                           </article>
                         ))}
@@ -1276,7 +1310,7 @@ export function WalletsPage({
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
                               <button type="button" className="ui-button-ghost" onClick={() => { handleStartSettlementEdit(settlement.id); setIsSettlementModalOpen(false); }}>Edit</button>
-                              <button type="button" className="ui-button-danger" onClick={() => void handleDeleteSettlementClick(settlement.id)}>Delete</button>
+                              <button type="button" className="ui-button-danger" disabled={deletingSettlementIds.includes(settlement.id)} onClick={() => void handleDeleteSettlementClick(settlement.id)}>{deletingSettlementIds.includes(settlement.id) ? "Deleting..." : "Delete"}</button>
                             </div>
                           </article>
                         ))}

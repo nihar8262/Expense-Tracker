@@ -78,6 +78,51 @@ function isValidIsoDate(value) {
   return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
 }
 
+function isValidIsoMonth(value) {
+  if (!/^\d{4}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const [year, month] = value.split("-").map(Number);
+  return Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12;
+}
+
+const createBudgetSchema = z
+  .object({
+    amount: z.union([z.string(), z.number()]).transform((value, context) => {
+      try {
+        return parseAmountToMinorUnits(value);
+      } catch (error) {
+        context.issues.push({
+          code: z.ZodIssueCode.custom,
+          input: value,
+          message: error instanceof Error ? error.message : "Invalid amount."
+        });
+        return z.NEVER;
+      }
+    }),
+    scope: z.enum(["monthly", "category"]),
+    category: z.string().trim().max(64, "Category is too long.").optional(),
+    month: z.string().trim().refine(isValidIsoMonth, "Month must be a valid YYYY-MM value.")
+  })
+  .superRefine((value, context) => {
+    if (value.scope === "category" && !value.category?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["category"],
+        message: "Category is required for a category budget."
+      });
+    }
+
+    if (value.scope === "monthly" && value.category?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["category"],
+        message: "Monthly budgets cannot target a specific category."
+      });
+    }
+  });
+
 const createWalletSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(280).optional(),

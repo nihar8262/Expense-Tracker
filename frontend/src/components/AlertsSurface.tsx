@@ -41,6 +41,9 @@ export function AlertsSurface({
 }: AlertsSurfaceProps) {
   const isPopoverLayout = layout === "popover";
   const [editingBillReminderId, setEditingBillReminderId] = useState<string | null>(null);
+  const [deletingNotificationIds, setDeletingNotificationIds] = useState<string[]>([]);
+  const [respondingInviteIds, setRespondingInviteIds] = useState<string[]>([]);
+  const [deletingBillReminderIds, setDeletingBillReminderIds] = useState<string[]>([]);
   const [billTitle, setBillTitle] = useState("");
   const [billAmount, setBillAmount] = useState("");
   const [billCategory, setBillCategory] = useState("");
@@ -76,6 +79,33 @@ export function AlertsSurface({
     setBillReminderDaysBefore(3);
     setBillIsActive(true);
     setShowBillValidation(false);
+  }
+
+  async function handleDeleteNotification(notificationId: string) {
+    setDeletingNotificationIds((current) => [...new Set([...current, notificationId])]);
+    try {
+      await onDeleteNotification(notificationId);
+    } finally {
+      setDeletingNotificationIds((current) => current.filter((id) => id !== notificationId));
+    }
+  }
+
+  async function handleRespondToInvite(walletMemberId: string, action: "accept" | "decline") {
+    setRespondingInviteIds((current) => [...new Set([...current, walletMemberId])]);
+    try {
+      await onRespondToWalletInvite(walletMemberId, action);
+    } finally {
+      setRespondingInviteIds((current) => current.filter((id) => id !== walletMemberId));
+    }
+  }
+
+  async function handleDeleteBillReminder(billReminderId: string) {
+    setDeletingBillReminderIds((current) => [...new Set([...current, billReminderId])]);
+    try {
+      await onDeleteBillReminder(billReminderId);
+    } finally {
+      setDeletingBillReminderIds((current) => current.filter((id) => id !== billReminderId));
+    }
   }
 
   async function handleBillReminderSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -175,14 +205,14 @@ export function AlertsSurface({
                   <div className="flex flex-wrap items-center gap-2 sm:max-w-[240px] sm:justify-end">
                     {notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
                       <>
-                        <button type="button" className="ui-button-danger" onClick={() => void onDeleteNotification(notification.id)}>
-                          Delete
+                        <button type="button" className="ui-button-danger" disabled={deletingNotificationIds.includes(notification.id) || respondingInviteIds.includes(notification.metadata!.walletMemberId)} onClick={() => void handleDeleteNotification(notification.id)}>
+                          {deletingNotificationIds.includes(notification.id) ? "Deleting..." : "Delete"}
                         </button>
-                        <button type="button" className="ui-button-secondary" onClick={() => void onRespondToWalletInvite(notification.metadata!.walletMemberId, "decline")}>
-                          Decline
+                        <button type="button" className="ui-button-secondary" disabled={respondingInviteIds.includes(notification.metadata!.walletMemberId) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "decline")}>
+                          {respondingInviteIds.includes(notification.metadata!.walletMemberId) ? "Declining..." : "Decline"}
                         </button>
-                        <button type="button" className="ui-button-primary" onClick={() => void onRespondToWalletInvite(notification.metadata!.walletMemberId, "accept")}>
-                          Accept
+                        <button type="button" className="ui-button-primary" disabled={respondingInviteIds.includes(notification.metadata!.walletMemberId) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "accept")}>
+                          {respondingInviteIds.includes(notification.metadata!.walletMemberId) ? "Accepting..." : "Accept"}
                         </button>
                       </>
                     ) : (
@@ -192,8 +222,8 @@ export function AlertsSurface({
                             Mark read
                           </button>
                         ) : null}
-                        <button type="button" className="ui-button-danger" onClick={() => void onDeleteNotification(notification.id)}>
-                          Delete
+                        <button type="button" className="ui-button-danger" disabled={deletingNotificationIds.includes(notification.id)} onClick={() => void handleDeleteNotification(notification.id)}>
+                          {deletingNotificationIds.includes(notification.id) ? "Deleting..." : "Delete"}
                         </button>
                       </>
                     )}
@@ -230,8 +260,8 @@ export function AlertsSurface({
                       <button type="button" className="ui-button-ghost" onClick={() => startEditingBillReminder(billReminder.id)}>
                         Edit
                       </button>
-                      <button type="button" className="ui-button-danger" onClick={() => void onDeleteBillReminder(billReminder.id)} disabled={isSavingBillReminder}>
-                        Delete
+                      <button type="button" className="ui-button-danger" onClick={() => void handleDeleteBillReminder(billReminder.id)} disabled={isSavingBillReminder || deletingBillReminderIds.includes(billReminder.id)}>
+                        {deletingBillReminderIds.includes(billReminder.id) ? "Deleting..." : "Delete"}
                       </button>
                     </div>
                   </div>

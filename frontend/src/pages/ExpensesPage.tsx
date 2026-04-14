@@ -371,7 +371,7 @@ export function ExpensesPage({
               disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
               onClick={() => void onDeleteSelectedExpenses()}
             >
-              Delete selected
+              {selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId)) ? "Deleting..." : "Delete selected"}
             </button>
           </div>
         </div>
