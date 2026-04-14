@@ -291,6 +291,10 @@ function formatAuthError(error: unknown): string {
     return "Browser storage or cookies blocked the sign-in flow. Try again with cookie blocking disabled for localhost.";
   }
 
+  if (message.includes("account-exists-with-different-credential")) {
+    return "An account already exists with the same email address but a different sign-in method. Sign in using the original provider (e.g. Google) linked to that email, then link additional providers from your profile.";
+  }
+
   return error.message;
 }
 
