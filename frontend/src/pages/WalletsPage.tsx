@@ -168,6 +168,8 @@ export function WalletsPage({
   const [isDeletingWallet, setIsDeletingWallet] = useState(false);
   const [isLeavingWallet, setIsLeavingWallet] = useState(false);
   const [removingMemberIds, setRemovingMemberIds] = useState<string[]>([]);
+  const [isMobileExpenseModalOpen, setIsMobileExpenseModalOpen] = useState(false);
+  const [isMobileSettlementModalOpen, setIsMobileSettlementModalOpen] = useState(false);
   const [walletBudgetForm, setWalletBudgetForm] = useState<BudgetForm>(initialWalletBudgetForm);
   const [editingWalletBudgetId, setEditingWalletBudgetId] = useState<string | null>(null);
   const [deletingWalletBudgetIds, setDeletingWalletBudgetIds] = useState<string[]>([]);
@@ -549,6 +551,7 @@ export function WalletsPage({
       setAlreadySettledMemberIds([]);
       setEditingWalletExpenseId(null);
       setShowExpenseValidation(false);
+      setIsMobileExpenseModalOpen(false);
     }
   }
 
@@ -580,6 +583,7 @@ export function WalletsPage({
       setSettlementNote("");
       setEditingSettlementId(null);
       setShowSettlementValidation(false);
+      setIsMobileSettlementModalOpen(false);
     }
   }
 
@@ -672,6 +676,10 @@ export function WalletsPage({
     setSelectedSplitMemberIds(walletExpense.splits.map((split) => split.member_id));
     setSplitValues(Object.fromEntries(walletExpense.splits.map((split) => [split.member_id, split.percentage === null ? split.amount : split.percentage.toString()])));
     setAlreadySettledMemberIds([]);
+
+    if (window.innerWidth < 1536) {
+      setIsMobileExpenseModalOpen(true);
+    }
   }
 
   async function handleDeleteExpenseClick(walletExpenseId: string) {
@@ -711,6 +719,10 @@ export function WalletsPage({
     setSettlementAmount(settlement.amount);
     setSettlementDate(settlement.date);
     setSettlementNote(settlement.note ?? "");
+
+    if (window.innerWidth < 1536) {
+      setIsMobileSettlementModalOpen(true);
+    }
   }
 
   async function handleDeleteSettlementClick(settlementId: string) {
@@ -758,6 +770,170 @@ export function WalletsPage({
     } finally {
       setIsLeavingWallet(false);
     }
+  }
+
+  function renderWalletExpenseForm() {
+    return (
+      <form className="grid gap-4" onSubmit={handleCreateWalletExpenseSubmit} noValidate>
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          Paid by
+          <select value={expensePayerId} onChange={(event) => setExpensePayerId(event.target.value)}>
+            {selectedWallet!.members.map((member) => (
+              <option key={member.id} value={member.id}>{member.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            <span className="required-mark">Amount</span>
+            <input value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0.00" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.amount)} />
+            {showExpenseValidation && expenseErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.amount}</span> : null}
+          </label>
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            <span className="required-mark">Date</span>
+            <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} required aria-invalid={showExpenseValidation && Boolean(expenseErrors.date)} />
+            {showExpenseValidation && expenseErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.date}</span> : null}
+          </label>
+        </div>
+
+        <div className="grid gap-2 text-sm font-medium text-secondary">
+          <span className="required-mark">Category</span>
+          <div className="flex items-center gap-3">
+            {expenseCategory ? (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
+                <CategoryIcon iconId={walletBudgetCategoryChoices.find((option) => option.label === expenseCategory)?.icon ?? "other"} />
+              </span>
+            ) : null}
+            <select
+              value={expenseCategory}
+              onChange={(event) => setExpenseCategory(event.target.value)}
+              required
+              aria-invalid={showExpenseValidation && Boolean(expenseErrors.category)}
+            >
+              <option value="">Select a category</option>
+              {walletBudgetCategoryChoices.map((option) => (
+                <option key={option.id} value={option.label}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {showExpenseValidation && expenseErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.category}</span> : null}
+        </div>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          <span className="required-mark">Description</span>
+          <input value={expenseDescription} onChange={(event) => setExpenseDescription(event.target.value)} placeholder="Hotel, groceries, tickets" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.description)} />
+          {showExpenseValidation && expenseErrors.description ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.description}</span> : null}
+        </label>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          Split rule
+          <select value={expenseSplitRule} onChange={(event) => setExpenseSplitRule(event.target.value as SplitRule)}>
+            <option value="equal">Equal</option>
+            <option value="fixed">Fixed amounts</option>
+            <option value="percentage">Percentages</option>
+          </select>
+        </label>
+
+        <div className="space-y-3 rounded-[24px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+          <p className="section-eyebrow">Split members</p>
+          <div className="grid gap-3">
+            {selectedWallet!.members.map((member) => {
+              const isSelected = selectedSplitMemberIds.includes(member.id);
+              const needsValue = expenseSplitRule !== "equal" && isSelected;
+              const canMarkSettled = isSelected && member.id !== expensePayerId && !editingWalletExpenseId;
+              const isSettled = alreadySettledMemberIds.includes(member.id);
+
+              return (
+                <div key={member.id} className={cn("rounded-[18px] border p-3 transition-colors", isSettled ? "border-primary/20 bg-success-tint" : "border-[color:var(--border)] bg-white/85")}>
+                  <label className="grid cursor-pointer gap-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(110px,140px)] sm:items-center">
+                    <input type="checkbox" checked={isSelected} onChange={() => handleToggleSplitMember(member.id)} />
+                    <span className="text-sm font-semibold text-ink">{member.display_name}</span>
+                    {needsValue ? (
+                      <input
+                        value={splitValues[member.id] ?? ""}
+                        onChange={(event) => setSplitValues((current) => ({ ...current, [member.id]: event.target.value }))}
+                        placeholder={expenseSplitRule === "fixed" ? "0.00" : "%"}
+                      />
+                    ) : <span className="text-sm text-muted">{isSelected ? "Included" : "Excluded"}</span>}
+                  </label>
+                  {canMarkSettled ? (
+                    <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-[color:var(--border)] pt-3 text-xs font-medium text-secondary">
+                      <input type="checkbox" checked={isSettled} onChange={() => handleToggleAlreadySettled(member.id)} />
+                      <span className={isSettled ? "text-ink" : "text-muted"}>
+                        {isSettled ? "✓ Already settled their share" : "Already settled their share?"}
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          {editingWalletExpenseId ? (
+            <button type="button" className="ui-button-secondary" onClick={() => { setEditingWalletExpenseId(null); setIsMobileExpenseModalOpen(false); }}>Cancel edit</button>
+          ) : null}
+          <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
+            {submittingAction === "expense" ? "Saving..." : editingWalletExpenseId ? "Update shared expense" : "Add shared expense"}
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  function renderSettlementForm() {
+    return (
+      <form className="grid gap-4" onSubmit={handleCreateSettlementSubmit} noValidate>
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          From member
+          <select value={settlementFromMemberId} onChange={(event) => setSettlementFromMemberId(event.target.value)}>
+            {selectedWallet!.members.map((member) => (
+              <option key={member.id} value={member.id}>{member.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          To member
+          <select value={settlementToMemberId} onChange={(event) => setSettlementToMemberId(event.target.value)}>
+            {selectedWallet!.members.map((member) => (
+              <option key={member.id} value={member.id}>{member.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            <span className="required-mark">Amount</span>
+            <input value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)} placeholder="0.00" required aria-invalid={showSettlementValidation && Boolean(settlementErrors.amount)} />
+            {showSettlementValidation && settlementErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.amount}</span> : null}
+          </label>
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            <span className="required-mark">Date</span>
+            <input type="date" value={settlementDate} onChange={(event) => setSettlementDate(event.target.value)} required aria-invalid={showSettlementValidation && Boolean(settlementErrors.date)} />
+            {showSettlementValidation && settlementErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.date}</span> : null}
+          </label>
+        </div>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          Note
+          <input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} placeholder="Optional note" />
+        </label>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          {editingSettlementId ? (
+            <button type="button" className="ui-button-secondary" onClick={() => { setEditingSettlementId(null); setIsMobileSettlementModalOpen(false); }}>Cancel edit</button>
+          ) : null}
+          <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
+            {submittingAction === "settlement" ? "Saving..." : editingSettlementId ? "Update settlement" : "Record settlement"}
+          </button>
+        </div>
+      </form>
+    );
   }
 
   return (
@@ -972,162 +1148,12 @@ export function WalletsPage({
               <section className="grid gap-5 2xl:grid-cols-2">
                 <SurfaceCard className="space-y-5 p-5 sm:p-6">
                   <SectionHeader eyebrow="Shared expense" title={editingWalletExpenseId ? "Edit group transaction" : "Add a group transaction"} description="Capture a shared purchase, choose the payer, and define how the split should be distributed across members." />
-
-                  <form className="grid gap-4" onSubmit={handleCreateWalletExpenseSubmit} noValidate>
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      Paid by
-                      <select value={expensePayerId} onChange={(event) => setExpensePayerId(event.target.value)}>
-                        {selectedWallet.members.map((member) => (
-                          <option key={member.id} value={member.id}>{member.display_name}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="grid gap-2 text-sm font-medium text-secondary">
-                        <span className="required-mark">Amount</span>
-                        <input value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0.00" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.amount)} />
-                        {showExpenseValidation && expenseErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.amount}</span> : null}
-                      </label>
-                      <label className="grid gap-2 text-sm font-medium text-secondary">
-                        <span className="required-mark">Date</span>
-                        <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} required aria-invalid={showExpenseValidation && Boolean(expenseErrors.date)} />
-                        {showExpenseValidation && expenseErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.date}</span> : null}
-                      </label>
-                    </div>
-
-                    <div className="grid gap-2 text-sm font-medium text-secondary">
-                      <span className="required-mark">Category</span>
-                      <div className="flex items-center gap-3">
-                        {expenseCategory ? (
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
-                            <CategoryIcon iconId={walletBudgetCategoryChoices.find((option) => option.label === expenseCategory)?.icon ?? "other"} />
-                          </span>
-                        ) : null}
-                        <select
-                          value={expenseCategory}
-                          onChange={(event) => setExpenseCategory(event.target.value)}
-                          required
-                          aria-invalid={showExpenseValidation && Boolean(expenseErrors.category)}
-                        >
-                          <option value="">Select a category</option>
-                          {walletBudgetCategoryChoices.map((option) => (
-                            <option key={option.id} value={option.label}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      {showExpenseValidation && expenseErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.category}</span> : null}
-                    </div>
-
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      <span className="required-mark">Description</span>
-                      <input value={expenseDescription} onChange={(event) => setExpenseDescription(event.target.value)} placeholder="Hotel, groceries, tickets" required aria-invalid={showExpenseValidation && Boolean(expenseErrors.description)} />
-                      {showExpenseValidation && expenseErrors.description ? <span className="text-sm text-[color:var(--danger-text)]">{expenseErrors.description}</span> : null}
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      Split rule
-                      <select value={expenseSplitRule} onChange={(event) => setExpenseSplitRule(event.target.value as SplitRule)}>
-                        <option value="equal">Equal</option>
-                        <option value="fixed">Fixed amounts</option>
-                        <option value="percentage">Percentages</option>
-                      </select>
-                    </label>
-
-                    <div className="space-y-3 rounded-[24px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-                      <p className="section-eyebrow">Split members</p>
-                      <div className="grid gap-3">
-                        {selectedWallet.members.map((member) => {
-                          const isSelected = selectedSplitMemberIds.includes(member.id);
-                          const needsValue = expenseSplitRule !== "equal" && isSelected;
-                          const canMarkSettled = isSelected && member.id !== expensePayerId && !editingWalletExpenseId;
-                          const isSettled = alreadySettledMemberIds.includes(member.id);
-
-                          return (
-                            <div key={member.id} className={cn("rounded-[18px] border p-3 transition-colors", isSettled ? "border-primary/20 bg-success-tint" : "border-[color:var(--border)] bg-white/85")}>
-                              <label className="grid cursor-pointer gap-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(110px,140px)] sm:items-center">
-                                <input type="checkbox" checked={isSelected} onChange={() => handleToggleSplitMember(member.id)} />
-                                <span className="text-sm font-semibold text-ink">{member.display_name}</span>
-                                {needsValue ? (
-                                  <input
-                                    value={splitValues[member.id] ?? ""}
-                                    onChange={(event) => setSplitValues((current) => ({ ...current, [member.id]: event.target.value }))}
-                                    placeholder={expenseSplitRule === "fixed" ? "0.00" : "%"}
-                                  />
-                                ) : <span className="text-sm text-muted">{isSelected ? "Included" : "Excluded"}</span>}
-                              </label>
-                              {canMarkSettled ? (
-                                <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-[color:var(--border)] pt-3 text-xs font-medium text-secondary">
-                                  <input type="checkbox" checked={isSettled} onChange={() => handleToggleAlreadySettled(member.id)} />
-                                  <span className={isSettled ? "text-ink" : "text-muted"}>
-                                    {isSettled ? "✓ Already settled their share" : "Already settled their share?"}
-                                  </span>
-                                </label>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {editingWalletExpenseId ? <button type="button" className="ui-button-secondary" onClick={() => setEditingWalletExpenseId(null)}>Cancel edit</button> : null}
-                      <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
-                        {submittingAction === "expense" ? "Saving..." : editingWalletExpenseId ? "Update shared expense" : "Add shared expense"}
-                      </button>
-                    </div>
-                  </form>
+                  {renderWalletExpenseForm()}
                 </SurfaceCard>
 
                 <SurfaceCard className="space-y-5 p-5 sm:p-6">
                   <SectionHeader eyebrow="Settlement" title={editingSettlementId ? "Edit payback" : "Record a payback"} description="Log repayments to keep group balances current and the shared ledger easy to reconcile." />
-
-                  <form className="grid gap-4" onSubmit={handleCreateSettlementSubmit} noValidate>
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      From member
-                      <select value={settlementFromMemberId} onChange={(event) => setSettlementFromMemberId(event.target.value)}>
-                        {selectedWallet.members.map((member) => (
-                          <option key={member.id} value={member.id}>{member.display_name}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      To member
-                      <select value={settlementToMemberId} onChange={(event) => setSettlementToMemberId(event.target.value)}>
-                        {selectedWallet.members.map((member) => (
-                          <option key={member.id} value={member.id}>{member.display_name}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="grid gap-2 text-sm font-medium text-secondary">
-                        <span className="required-mark">Amount</span>
-                        <input value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)} placeholder="0.00" required aria-invalid={showSettlementValidation && Boolean(settlementErrors.amount)} />
-                        {showSettlementValidation && settlementErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.amount}</span> : null}
-                      </label>
-                      <label className="grid gap-2 text-sm font-medium text-secondary">
-                        <span className="required-mark">Date</span>
-                        <input type="date" value={settlementDate} onChange={(event) => setSettlementDate(event.target.value)} required aria-invalid={showSettlementValidation && Boolean(settlementErrors.date)} />
-                        {showSettlementValidation && settlementErrors.date ? <span className="text-sm text-[color:var(--danger-text)]">{settlementErrors.date}</span> : null}
-                      </label>
-                    </div>
-
-                    <label className="grid gap-2 text-sm font-medium text-secondary">
-                      Note
-                      <input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} placeholder="Optional note" />
-                    </label>
-
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {editingSettlementId ? <button type="button" className="ui-button-secondary" onClick={() => setEditingSettlementId(null)}>Cancel edit</button> : null}
-                      <button type="submit" className="ui-button-primary" disabled={isSubmitting}>
-                        {submittingAction === "settlement" ? "Saving..." : editingSettlementId ? "Update settlement" : "Record settlement"}
-                      </button>
-                    </div>
-                  </form>
+                  {renderSettlementForm()}
                 </SurfaceCard>
               </section>
 
@@ -1323,6 +1349,30 @@ export function WalletsPage({
           ) : null}
         </section>
       </section>
+
+      {isMobileExpenseModalOpen ? (
+        <ModalFrame onClose={() => { setEditingWalletExpenseId(null); setIsMobileExpenseModalOpen(false); }} className="flex max-h-[92vh] flex-col p-0">
+          <div className="border-b border-[color:var(--border)] px-5 py-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl font-semibold text-ink">Edit group transaction</h2>
+              <button type="button" className="ui-button-secondary" onClick={() => { setEditingWalletExpenseId(null); setIsMobileExpenseModalOpen(false); }}>Cancel</button>
+            </div>
+          </div>
+          <div className="overflow-y-auto px-5 py-5">{renderWalletExpenseForm()}</div>
+        </ModalFrame>
+      ) : null}
+
+      {isMobileSettlementModalOpen ? (
+        <ModalFrame onClose={() => { setEditingSettlementId(null); setIsMobileSettlementModalOpen(false); }} className="flex max-h-[92vh] flex-col p-0">
+          <div className="border-b border-[color:var(--border)] px-5 py-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl font-semibold text-ink">Edit payback</h2>
+              <button type="button" className="ui-button-secondary" onClick={() => { setEditingSettlementId(null); setIsMobileSettlementModalOpen(false); }}>Cancel</button>
+            </div>
+          </div>
+          <div className="overflow-y-auto px-5 py-5">{renderSettlementForm()}</div>
+        </ModalFrame>
+      ) : null}
     </>
   );
 }

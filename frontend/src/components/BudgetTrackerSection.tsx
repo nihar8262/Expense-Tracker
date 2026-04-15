@@ -87,6 +87,7 @@ export function BudgetTrackerSection({
   onCloseBudgetHistory
 }: BudgetTrackerSectionProps) {
   const [showBudgetValidation, setShowBudgetValidation] = useState(false);
+  const [isMobileEditOpen, setIsMobileEditOpen] = useState(false);
 
   const budgetErrors = useMemo(
     () => ({
@@ -107,11 +108,73 @@ export function BudgetTrackerSection({
 
     await onBudgetSubmit(event);
     setShowBudgetValidation(false);
+    setIsMobileEditOpen(false);
   }
 
   function handleValidatedBudgetEditCancel() {
     setShowBudgetValidation(false);
+    setIsMobileEditOpen(false);
     onBudgetEditCancel();
+  }
+
+  function handleEditStart(budget: BudgetSummary) {
+    onBudgetEditStart(budget);
+    // Open mobile modal on small screens (< xl breakpoint = 1280px)
+    if (window.innerWidth < 1280) {
+      setIsMobileEditOpen(true);
+    }
+  }
+
+  function renderBudgetForm() {
+    return (
+      <form className="grid gap-4" onSubmit={(event) => void handleValidatedBudgetSubmit(event)} noValidate>
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          Budget type
+          <select value={budgetForm.scope} onChange={(event) => onBudgetFormChange((current) => ({ ...current, scope: event.target.value as BudgetForm["scope"] }))}>
+            <option value="monthly">Monthly budget</option>
+            <option value="category">Category budget</option>
+          </select>
+        </label>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          <span className="required-mark">Amount</span>
+          <input type="number" min="0.01" step="0.01" required value={budgetForm.amount} onChange={(event) => onBudgetFormChange((current) => ({ ...current, amount: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.amount)} />
+          {showBudgetValidation && budgetErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.amount}</span> : null}
+        </label>
+
+        <label className="grid gap-2 text-sm font-medium text-secondary">
+          <span className="required-mark">Month</span>
+          <input type="month" required value={budgetForm.month} onChange={(event) => onBudgetFormChange((current) => ({ ...current, month: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.month)} />
+          {showBudgetValidation && budgetErrors.month ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.month}</span> : null}
+        </label>
+
+        {budgetForm.scope === "category" ? (
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            <span className="required-mark">Category</span>
+            <select value={budgetForm.category} onChange={(event) => onBudgetFormChange((current) => ({ ...current, category: event.target.value }))} required aria-invalid={showBudgetValidation && Boolean(budgetErrors.category)}>
+              <option value="">Select category</option>
+              {budgetCategoryOptions.map((option) => (
+                <option key={option.id} value={option.label}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {showBudgetValidation && budgetErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.category}</span> : null}
+          </label>
+        ) : null}
+
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
+          {editingBudgetId ? (
+            <button type="button" className="ui-button-secondary" onClick={handleValidatedBudgetEditCancel}>
+              Cancel edit
+            </button>
+          ) : null}
+          <button type="submit" className="ui-button-primary" disabled={isBudgetSubmitting}>
+            {isBudgetSubmitting ? (editingBudgetId ? "Updating..." : "Saving...") : editingBudgetId ? "Update budget" : "Save budget"}
+          </button>
+        </div>
+      </form>
+    );
   }
 
   return (
@@ -162,7 +225,7 @@ export function BudgetTrackerSection({
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" className="ui-button-ghost" onClick={() => onBudgetEditStart(budget)}>
+                      <button type="button" className="ui-button-ghost" onClick={() => handleEditStart(budget)}>
                         Edit
                       </button>
                       <button type="button" className="ui-button-danger" disabled={deletingBudgetIds.includes(budget.id)} onClick={() => void onBudgetDelete(budget.id)}>
@@ -201,53 +264,7 @@ export function BudgetTrackerSection({
         <SurfaceCard className="space-y-5 p-5 sm:p-6">
           <SectionHeader title={editingBudgetId ? "Edit budget" : "Set a budget"} description={formDescription} />
 
-          <form className="grid gap-4" onSubmit={(event) => void handleValidatedBudgetSubmit(event)} noValidate>
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Budget type
-              <select value={budgetForm.scope} onChange={(event) => onBudgetFormChange((current) => ({ ...current, scope: event.target.value as BudgetForm["scope"] }))}>
-                <option value="monthly">Monthly budget</option>
-                <option value="category">Category budget</option>
-              </select>
-            </label>
-
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              <span className="required-mark">Amount</span>
-              <input type="number" min="0.01" step="0.01" required value={budgetForm.amount} onChange={(event) => onBudgetFormChange((current) => ({ ...current, amount: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.amount)} />
-              {showBudgetValidation && budgetErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.amount}</span> : null}
-            </label>
-
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              <span className="required-mark">Month</span>
-              <input type="month" required value={budgetForm.month} onChange={(event) => onBudgetFormChange((current) => ({ ...current, month: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.month)} />
-              {showBudgetValidation && budgetErrors.month ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.month}</span> : null}
-            </label>
-
-            {budgetForm.scope === "category" ? (
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                <span className="required-mark">Category</span>
-                <select value={budgetForm.category} onChange={(event) => onBudgetFormChange((current) => ({ ...current, category: event.target.value }))} required aria-invalid={showBudgetValidation && Boolean(budgetErrors.category)}>
-                  <option value="">Select category</option>
-                  {budgetCategoryOptions.map((option) => (
-                    <option key={option.id} value={option.label}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {showBudgetValidation && budgetErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.category}</span> : null}
-              </label>
-            ) : null}
-
-            <div className="flex flex-wrap justify-end gap-2 pt-2">
-              {editingBudgetId ? (
-                <button type="button" className="ui-button-secondary" onClick={handleValidatedBudgetEditCancel}>
-                  Cancel edit
-                </button>
-              ) : null}
-              <button type="submit" className="ui-button-primary" disabled={isBudgetSubmitting}>
-                {isBudgetSubmitting ? (editingBudgetId ? "Updating..." : "Saving...") : editingBudgetId ? "Update budget" : "Save budget"}
-              </button>
-            </div>
-          </form>
+          {renderBudgetForm()}
 
           {budgetStatusMessage ? <StatusNotice tone="success">{budgetStatusMessage}</StatusNotice> : null}
           {budgetErrorMessage ? <StatusNotice tone="error">{budgetErrorMessage}</StatusNotice> : null}
@@ -313,7 +330,7 @@ export function BudgetTrackerSection({
                               type="button"
                               className="ui-button-ghost"
                               onClick={() => {
-                                onBudgetEditStart(budget);
+                                handleEditStart(budget);
                                 onCloseBudgetHistory();
                               }}
                             >
@@ -330,6 +347,26 @@ export function BudgetTrackerSection({
                 </section>
               ))}
             </div>
+          </div>
+        </ModalFrame>
+      ) : null}
+
+      {isMobileEditOpen ? (
+        <ModalFrame onClose={handleValidatedBudgetEditCancel} className="flex max-h-[92vh] flex-col p-0">
+          <div className="border-b border-[color:var(--border)] px-5 py-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink">
+                {editingBudgetId ? "Edit budget" : "Set a budget"}
+              </h2>
+              <button type="button" className="ui-button-secondary shrink-0" onClick={handleValidatedBudgetEditCancel}>
+                Cancel
+              </button>
+            </div>
+          </div>
+          <div className="overflow-y-auto px-5 py-5">
+            {renderBudgetForm()}
+            {budgetStatusMessage ? <StatusNotice tone="success">{budgetStatusMessage}</StatusNotice> : null}
+            {budgetErrorMessage ? <StatusNotice tone="error">{budgetErrorMessage}</StatusNotice> : null}
           </div>
         </ModalFrame>
       ) : null}

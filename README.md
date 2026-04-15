@@ -286,7 +286,7 @@ Vercel
 ### Expenses
 
 - Full CRUD with category filtering and date sorting (server-driven).
-- Category selector with icons and a custom "Others" option for free-form categories.
+- Category selector with Font Awesome icons. Built-in categories use curated icons; custom categories have icons auto-assigned at creation time by matching the category name against a keyword map (60+ patterns, powered by `@fortawesome/free-solid-svg-icons`). Custom categories persist in `localStorage` per user.
 - Inline form validation with per-field error messages.
 - Pagination on the expenses list.
 - Idempotent creation with `localStorage` retry on page refresh.

@@ -65,29 +65,84 @@ const PENDING_SUBMISSION_STORAGE_KEY = "expense-tracker.pending-submission";
 const CUSTOM_CATEGORY_STORAGE_KEY_PREFIX = "expense-tracker.custom-categories";
 const EXPENSES_PAGE_SIZE = 50;
 
-const iconOptions: Array<{ id: CategoryIconId; label: string }> = [
-  { id: "groceries", label: "Groceries" },
-  { id: "food", label: "Food" },
-  { id: "travel", label: "Travel" },
-  { id: "shopping", label: "Shopping" },
-  { id: "bills", label: "Bills" },
-  { id: "health", label: "Health" },
-  { id: "entertainment", label: "Entertainment" },
-  { id: "work", label: "Work" },
-  { id: "other", label: "Other" }
+const defaultCategoryOptions: CategoryOption[] = [
+  { id: "groceries", label: "Groceries", icon: "cart-shopping" },
+  { id: "food", label: "Food", icon: "utensils" },
+  { id: "travel", label: "Travel", icon: "plane" },
+  { id: "shopping", label: "Shopping", icon: "bag-shopping" },
+  { id: "bills", label: "Bills", icon: "file-invoice-dollar" },
+  { id: "health", label: "Health", icon: "heart-pulse" },
+  { id: "entertainment", label: "Entertainment", icon: "film" },
+  { id: "work", label: "Work", icon: "briefcase" },
+  { id: "others", label: "Others", icon: "tag" }
 ];
 
-const defaultCategoryOptions: CategoryOption[] = [
-  { id: "groceries", label: "Groceries", icon: "groceries" },
-  { id: "food", label: "Food", icon: "food" },
-  { id: "travel", label: "Travel", icon: "travel" },
-  { id: "shopping", label: "Shopping", icon: "shopping" },
-  { id: "bills", label: "Bills", icon: "bills" },
-  { id: "health", label: "Health", icon: "health" },
-  { id: "entertainment", label: "Entertainment", icon: "entertainment" },
-  { id: "work", label: "Work", icon: "work" },
-  { id: "others", label: "Others", icon: "other" }
+const ICON_KEYWORD_MAP: Array<{ keywords: RegExp; icon: string }> = [
+  { keywords: /grocer|supermarket|market|produce|vegetable|fruit/i, icon: "cart-shopping" },
+  { keywords: /food|eat|restaur|dining|lunch|dinner|breakfast|cafe|snack|pizza|burger|meal|cook|kitchen/i, icon: "utensils" },
+  { keywords: /coffee|cafe|latte|espresso|cappuccino/i, icon: "coffee" },
+  { keywords: /drink|wine|beer|alcohol|bar|pub|cocktail/i, icon: "wine-glass" },
+  { keywords: /travel|trip|vacation|holiday|tour|abroad/i, icon: "suitcase" },
+  { keywords: /flight|airline|airfare|airport|fly/i, icon: "plane" },
+  { keywords: /hotel|motel|hostel|accommodation|lodg/i, icon: "hotel" },
+  { keywords: /train|rail|metro|subway/i, icon: "train" },
+  { keywords: /bus|coach|transit/i, icon: "bus" },
+  { keywords: /car|auto|vehicle|taxi|uber|lyft|ride/i, icon: "car" },
+  { keywords: /fuel|petrol|gas pump|gasoline/i, icon: "gas-pump" },
+  { keywords: /motorcycle|bike scoot/i, icon: "motorcycle" },
+  { keywords: /bicycle|cycling/i, icon: "bicycle" },
+  { keywords: /shop|cloth|fashion|apparel|boutique|wear|outfit/i, icon: "bag-shopping" },
+  { keywords: /shirt|tshirt|dress|pants|shoes/i, icon: "shirt" },
+  { keywords: /bill|utilit|electric|water|gas|internet|phone|subscription|rent|mortgage|insurance|emi/i, icon: "file-invoice-dollar" },
+  { keywords: /wifi|broadband|data plan/i, icon: "wifi" },
+  { keywords: /health|medical|doctor|hospital|clinic|pharmac|medicine|dental|prescription/i, icon: "heart-pulse" },
+  { keywords: /gym|fitness|workout|exercise/i, icon: "dumbbell" },
+  { keywords: /spa|salon|massage|beauty|cosmetic|hair|nail/i, icon: "spa" },
+  { keywords: /surgery|syringe|inject|vaccine/i, icon: "syringe" },
+  { keywords: /pills?|tablet|vitamin|supplement/i, icon: "pills" },
+  { keywords: /stethoscope|checkup|physio/i, icon: "stethoscope" },
+  { keywords: /entertain|movie|cinema|film|stream|netflix|hulu|disney|spotify/i, icon: "film" },
+  { keywords: /music|concert|gig|band/i, icon: "music" },
+  { keywords: /game|gaming|esport|playstation|xbox/i, icon: "gamepad" },
+  { keywords: /sport|football|soccer|basketball|tennis|cricket|rugby|swim/i, icon: "basketball" },
+  { keywords: /work|office|business|professional|career|salary|freelance/i, icon: "briefcase" },
+  { keywords: /laptop|computer|pc|mac|desktop/i, icon: "laptop" },
+  { keywords: /phone|mobile|iphone|android|smartphone/i, icon: "mobile-screen" },
+  { keywords: /tv|television|monitor/i, icon: "tv" },
+  { keywords: /headphone|earphone|airpod|audio/i, icon: "headphones" },
+  { keywords: /camera|photo|photography/i, icon: "camera" },
+  { keywords: /education|school|college|university|course|tuition|class|learn/i, icon: "graduation-cap" },
+  { keywords: /book|reading|library|novel/i, icon: "book" },
+  { keywords: /pet|vet|animal/i, icon: "paw" },
+  { keywords: /dog/i, icon: "dog" },
+  { keywords: /cat|kitten/i, icon: "cat" },
+  { keywords: /gift|present|birthday|anniversary|celebration/i, icon: "gift" },
+  { keywords: /charity|donation|donate|ngo|volunteer/i, icon: "hand-holding-heart" },
+  { keywords: /home|house|furniture|decor|appliance|interior|flat/i, icon: "house" },
+  { keywords: /couch|sofa|chair|table|desk/i, icon: "couch" },
+  { keywords: /repair|fix|tool|hardware|maintenance/i, icon: "tools" },
+  { keywords: /paint|repaint|wall/i, icon: "paint-roller" },
+  { keywords: /hammer|construct|build/i, icon: "hammer" },
+  { keywords: /child|kid|baby|infant|toddler|daycare|school fee/i, icon: "child" },
+  { keywords: /tax|government|fine|penalty|fee|legal/i, icon: "landmark" },
+  { keywords: /invest|stock|mutual|crypto|finance|saving|portfolio/i, icon: "chart-line" },
+  { keywords: /credit card|debit card/i, icon: "credit-card" },
+  { keywords: /cash|money|wallet|withdrawal/i, icon: "money-bill" },
+  { keywords: /garden|plant|farm|nature|organic/i, icon: "seedling" },
+  { keywords: /leaf|eco|green|environment/i, icon: "leaf" },
+  { keywords: /store|shop|market|mall/i, icon: "store" },
+  { keywords: /pizza/i, icon: "pizza-slice" },
+  { keywords: /running|jog|marathon/i, icon: "running" },
 ];
+
+function suggestFaIcon(label: string): string {
+  for (const entry of ICON_KEYWORD_MAP) {
+    if (entry.keywords.test(label)) {
+      return entry.icon;
+    }
+  }
+  return "tag";
+}
 
 function getTodayIsoDate(baseDate = new Date()): string {
   return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}-${String(baseDate.getDate()).padStart(2, "0")}`;
@@ -968,7 +1023,6 @@ export default function App() {
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
-  const [customCategoryIcon, setCustomCategoryIcon] = useState<CategoryIconId>("other");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("all");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
@@ -1475,7 +1529,6 @@ export default function App() {
         setReminderPreferences(null);
         setCustomCategories([]);
         setCustomCategoryName("");
-        setCustomCategoryIcon("other");
         setForm(initialFormState);
         setBudgetForm(initialBudgetFormState);
         setSelectedCategory("");
@@ -2373,7 +2426,6 @@ export default function App() {
     if (existingCategory) {
       handleCategorySelect(existingCategory);
       setCustomCategoryName("");
-      setCustomCategoryIcon(existingCategory.icon);
       setErrorMessage("");
       setStatusMessage("Category selected.");
       return;
@@ -2382,7 +2434,7 @@ export default function App() {
     const nextCategory: CategoryOption = {
       id: `${slugifyCategoryLabel(trimmedName)}-${Date.now()}`,
       label: trimmedName,
-      icon: customCategoryIcon,
+      icon: suggestFaIcon(trimmedName),
       isCustom: true
     };
 
@@ -2391,7 +2443,6 @@ export default function App() {
     writeCustomCategories(currentUser.uid, nextCategories);
     setForm((current) => ({ ...current, category: nextCategory.label }));
     setCustomCategoryName("");
-    setCustomCategoryIcon("other");
     setErrorMessage("");
     setStatusMessage("Custom category added.");
   }
@@ -2755,7 +2806,6 @@ export default function App() {
               statusMessage={statusMessage}
               errorMessage={errorMessage}
               customCategoryName={customCategoryName}
-              customCategoryIcon={customCategoryIcon}
               selectedCategory={selectedCategory}
               selectedTimeRange={selectedTimeRange}
               sortNewestFirst={sortNewestFirst}
@@ -2768,7 +2818,6 @@ export default function App() {
               availableCategoryOptions={availableCategoryOptions}
               selectedCategoryOption={selectedCategoryOption}
               isOtherCategorySelected={isOtherCategorySelected}
-              iconOptions={iconOptions}
               selectedExpenseIds={selectedExpenseIds}
               selectedVisibleExpenseIds={selectedVisibleExpenseIds}
               areAllVisibleExpensesSelected={areAllVisibleExpensesSelected}
@@ -2779,7 +2828,6 @@ export default function App() {
               onFormChange={setForm}
               onCategorySelect={handleCategorySelect}
               onCustomCategoryNameChange={setCustomCategoryName}
-              onCustomCategoryIconChange={setCustomCategoryIcon}
               onCreateCustomCategory={handleCreateCustomCategory}
               onSubmit={handleSubmit}
               onEditCancel={handleEditCancel}

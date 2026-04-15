@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
-import type { CategoryIconId, CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
+import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 
 type ExpensesPageProps = {
   currentUserPresent: boolean;
@@ -13,7 +13,6 @@ type ExpensesPageProps = {
   statusMessage: string;
   errorMessage: string;
   customCategoryName: string;
-  customCategoryIcon: CategoryIconId;
   selectedCategory: string;
   selectedTimeRange: TimeRangeFilter;
   sortNewestFirst: boolean;
@@ -26,18 +25,16 @@ type ExpensesPageProps = {
   availableCategoryOptions: CategoryOption[];
   selectedCategoryOption: CategoryOption | null;
   isOtherCategorySelected: boolean;
-  iconOptions: Array<{ id: CategoryIconId; label: string }>;
   selectedExpenseIds: string[];
   selectedVisibleExpenseIds: string[];
   areAllVisibleExpensesSelected: boolean;
   deletingExpenseIds: string[];
   isLoading: boolean;
   formatCurrency: (amount: string) => string;
-  resolveCategoryIcon: (categoryLabel: string, categoryOptions: CategoryOption[]) => CategoryIconId;
+  resolveCategoryIcon: (categoryLabel: string, categoryOptions: CategoryOption[]) => string;
   onFormChange: (updater: (current: ExpenseForm) => ExpenseForm) => void;
   onCategorySelect: (category: CategoryOption) => void;
   onCustomCategoryNameChange: (value: string) => void;
-  onCustomCategoryIconChange: (icon: CategoryIconId) => void;
   onCreateCustomCategory: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onEditCancel: () => void;
@@ -72,7 +69,6 @@ export function ExpensesPage({
   statusMessage,
   errorMessage,
   customCategoryName,
-  customCategoryIcon,
   selectedCategory,
   selectedTimeRange,
   sortNewestFirst,
@@ -85,7 +81,6 @@ export function ExpensesPage({
   availableCategoryOptions,
   selectedCategoryOption,
   isOtherCategorySelected,
-  iconOptions,
   selectedExpenseIds,
   selectedVisibleExpenseIds,
   areAllVisibleExpensesSelected,
@@ -96,7 +91,6 @@ export function ExpensesPage({
   onFormChange,
   onCategorySelect,
   onCustomCategoryNameChange,
-  onCustomCategoryIconChange,
   onCreateCustomCategory,
   onSubmit,
   onEditCancel,
@@ -113,6 +107,19 @@ export function ExpensesPage({
 }: ExpensesPageProps) {
   const [showValidation, setShowValidation] = useState(false);
   const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false);
+
+  function handleEditStart(expense: Parameters<typeof onEditStart>[0]) {
+    onEditStart(expense);
+    // On mobile (below lg = 1024px), auto-open the sheet so the form is visible
+    if (window.innerWidth < 1024) {
+      setIsExpenseSheetOpen(true);
+    }
+  }
+
+  function handleEditCancel() {
+    onEditCancel();
+    setIsExpenseSheetOpen(false);
+  }
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const pageStart = totalVisibleExpenses === 0 ? 0 : (currentExpensesPage - 1) * expensesPageSize + 1;
@@ -213,26 +220,8 @@ export function ExpensesPage({
             <SurfaceCard className="space-y-4 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(248,243,232,0.8))] p-4 shadow-sm">
               <div>
                 <strong className="text-base text-ink">Need another category?</strong>
-                <p className="mt-1 text-sm leading-6 text-secondary">Write a category name and choose the icon you want to save with it.</p>
+                <p className="mt-1 text-sm leading-6 text-secondary">Type a category name and we'll pick a matching icon for you automatically.</p>
               </div>
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Icon
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
-                    <CategoryIcon iconId={customCategoryIcon} />
-                  </span>
-                  <select
-                    value={customCategoryIcon}
-                    onChange={(event) => onCustomCategoryIconChange(event.target.value as CategoryIconId)}
-                  >
-                    {iconOptions.map((iconOption) => (
-                      <option key={iconOption.id} value={iconOption.id}>
-                        {iconOption.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </label>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <input type="text" placeholder="Write your category name" disabled={!currentUserPresent} value={customCategoryName} onChange={(event) => onCustomCategoryNameChange(event.target.value)} />
                 <button type="button" className="ui-button-secondary" onClick={onCreateCustomCategory}>
@@ -281,7 +270,7 @@ export function ExpensesPage({
 
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             {editingExpenseId ? (
-              <button type="button" className="ui-button-secondary" onClick={onEditCancel}>
+              <button type="button" className="ui-button-secondary" onClick={handleEditCancel}>
                 Cancel edit
               </button>
             ) : null}
@@ -398,7 +387,7 @@ export function ExpensesPage({
                 </thead>
                 <tbody>
                   {visibleExpenses.map((expense) => (
-                    <tr key={expense.id} className="cursor-pointer hover:bg-white" onClick={() => onEditStart(expense)}>
+                    <tr key={expense.id} className="cursor-pointer hover:bg-white" onClick={() => handleEditStart(expense)}>
                       <td>
                         <input
                           type="checkbox"
@@ -424,7 +413,7 @@ export function ExpensesPage({
                       <td className="text-right text-lg font-semibold text-ink">{formatCurrency(expense.amount)}</td>
                       <td>
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" className="ui-button-ghost" onClick={(event) => { event.stopPropagation(); onEditStart(expense); }}>
+                          <button type="button" className="ui-button-ghost" onClick={(event) => { event.stopPropagation(); handleEditStart(expense); }}>
                             Edit
                           </button>
                           <button
@@ -474,7 +463,7 @@ export function ExpensesPage({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" className="ui-button-secondary" onClick={() => onEditStart(expense)}>
+                    <button type="button" className="ui-button-secondary" onClick={() => handleEditStart(expense)}>
                       Edit
                     </button>
                     <button type="button" className="ui-button-danger" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void onDeleteExpense(expense.id)}>
@@ -512,7 +501,7 @@ export function ExpensesPage({
       </button>
 
       {isExpenseSheetOpen ? (
-        <ModalFrame onClose={() => setIsExpenseSheetOpen(false)} className="max-w-[760px] overflow-y-auto p-5 sm:p-6">
+        <ModalFrame onClose={() => { if (editingExpenseId) { handleEditCancel(); } else { setIsExpenseSheetOpen(false); } }} className="max-w-[760px] overflow-y-auto p-5 sm:p-6">
           {renderExpenseForm(true)}
         </ModalFrame>
       ) : null}
