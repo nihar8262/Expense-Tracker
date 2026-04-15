@@ -131,15 +131,15 @@ export function BudgetTrackerSection({
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
               <p className="section-eyebrow">Budgeted</p>
-              <strong className="mt-2 block text-2xl text-ink">{currentMonthBudgetOverview.totalBudget}</strong>
+              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalBudget}</strong>
             </div>
             <div className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
               <p className="section-eyebrow">Spent</p>
-              <strong className="mt-2 block text-2xl text-ink">{currentMonthBudgetOverview.totalSpent}</strong>
+              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalSpent}</strong>
             </div>
             <div className={cn("rounded-[22px] border p-4 shadow-sm", currentMonthBudgetOverview.isOverspent ? "border-[color:rgba(154,63,56,0.16)] bg-danger-tint" : "border-primary/10 bg-success-tint")}>
               <p className="section-eyebrow">Remaining</p>
-              <strong className="mt-2 block text-2xl text-ink">{currentMonthBudgetOverview.totalRemaining}</strong>
+              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalRemaining}</strong>
             </div>
           </div>
 
