@@ -1478,6 +1478,15 @@ export default function App() {
     }
   }
 
+  async function runChecksAndReloadNotifications(user: User) {
+    try {
+      await runNotificationChecks(user);
+    } catch {
+      // silently ignore check errors; still reload existing notifications
+    }
+    await loadNotifications(user);
+  }
+
   async function loadReminderPreferences(user: User) {
     try {
       const response = await fetch(buildReminderPreferencesUrl(), {
@@ -1590,7 +1599,7 @@ export default function App() {
     }
 
     void loadWallets(currentUser);
-    void loadNotifications(currentUser);
+    void runChecksAndReloadNotifications(currentUser);
     void loadBillReminders(currentUser);
     void loadReminderPreferences(currentUser);
   }, [authLoading, currentUser]);
@@ -2080,6 +2089,7 @@ export default function App() {
       await loadWallets(currentUser);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Shared expense added.");
+      void runChecksAndReloadNotifications(currentUser);
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create shared expense.");
@@ -2485,6 +2495,7 @@ export default function App() {
       setForm(initialFormState);
       setStatusMessage("Expense saved.");
       await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+      void runChecksAndReloadNotifications(currentUser);
     } catch (error) {
       if (error instanceof ApiError && !error.retryable) {
         writePendingSubmission(null);

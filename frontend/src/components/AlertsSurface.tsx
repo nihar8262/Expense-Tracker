@@ -161,8 +161,8 @@ export function AlertsSurface({
           title="In-app reminders"
           description={
             isPopoverLayout
-              ? "Review unread updates and wallet invites without opening the full alerts workspace."
-              : "Run checks, clear unread items, and respond to wallet invites without leaving the current flow."
+              ? "Review unread updates for both personal budgets and shared wallets without opening the full alerts workspace."
+              : "Run checks, clear unread items, and respond to personal budget nudges and wallet invites without leaving the current flow."
           }
           actions={
             <>
@@ -179,7 +179,7 @@ export function AlertsSurface({
         />
 
         {notifications.length === 0 ? (
-          <EmptyState title="No notifications yet" description="Budget nudges, due reminders, and wallet invites will appear here as they happen." />
+          <EmptyState title="No notifications yet" description="Personal budget nudges, bill due reminders, and shared wallet invites will appear here as they happen." />
         ) : (
           <div className="grid gap-3">
             {notifications.map((notification) => (
