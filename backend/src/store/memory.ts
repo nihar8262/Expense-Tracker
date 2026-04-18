@@ -573,6 +573,28 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
   }
 
+  function pruneExpiredBudgetNotifications(now = new Date(), userId?: string) {
+    const cutoff = now.getTime() - 24 * 60 * 60 * 1000;
+
+    for (const [notificationId, notification] of notifications.entries()) {
+      if (userId && notification.userId !== userId) {
+        continue;
+      }
+
+      if (notification.type !== "budget-threshold" && notification.type !== "budget-overspent") {
+        continue;
+      }
+
+      const createdAt = Date.parse(notification.createdAt);
+
+      if (Number.isNaN(createdAt) || createdAt >= cutoff) {
+        continue;
+      }
+
+      notifications.delete(notificationId);
+    }
+  }
+
   function deleteWalletGraph(walletId: string) {
     wallets.delete(walletId);
 
@@ -1264,6 +1286,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
   }
 
   async function listNotifications(userId: string): Promise<NotificationRecord[]> {
+    pruneExpiredBudgetNotifications(new Date(), userId);
+
     return [...notifications.values()]
       .filter((notification) => notification.userId === userId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
@@ -1319,6 +1343,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
   }
 
   async function runNotificationChecks(userId?: string, now = new Date()): Promise<NotificationCheckResult> {
+    pruneExpiredBudgetNotifications(now, userId);
+
     const targetUserIds = userId
       ? [userId]
       : [...new Set([...[...expenses.values()].map((expense) => expense.userId), ...[...budgets.values()].map((budget) => budget.userId), ...reminderPreferences.keys()])];

@@ -2,7 +2,6 @@ const {
   createWalletBudgetForUser,
   createWalletExpenseForUser,
   createWalletForUser,
-  runReminderChecksForUser,
   createWalletMemberForUser,
   removeWalletMemberForUser,
   createWalletSettlementForUser,
@@ -169,9 +168,6 @@ module.exports = async function handler(request, response) {
       if (request.method === "POST") {
         try {
           const result = await createWalletExpenseForUser(user.id, walletId, request.body);
-          if (result.status === 201) {
-            runReminderChecksForUser(user.id).catch((error) => console.error("Background budget check failed.", error));
-          }
           return sendResult(response, result);
         } catch (error) {
           return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to create shared expense." });

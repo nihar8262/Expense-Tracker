@@ -1172,6 +1172,7 @@ async function deleteBillReminderForUser(userId, billReminderId) {
 async function listNotificationsForUser(userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await pruneExpiredBudgetNotifications(sql, userId);
   const rows = await sql`SELECT id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key FROM notifications WHERE user_id = ${userId} ORDER BY created_at DESC`;
   return { status: 200, body: { notifications: rows.map(mapNotification) } };
 }
@@ -1229,6 +1230,26 @@ async function updateReminderPreferencesForUser(userId, rawBody) {
 async function upsertNotification(sql, input) {
   const rows = await sql`INSERT INTO notifications (id, user_id, notification_type, title, message, notification_status, scheduled_for, metadata_json, dedupe_key, created_at) VALUES (${randomUUID()}, ${input.userId}, ${input.type}, ${input.title}, ${input.message}, ${"unread"}, ${input.scheduledFor}, ${input.metadata ? JSON.stringify(input.metadata) : null}, ${input.dedupeKey}, ${new Date().toISOString()}) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key`;
   return rows[0] ? mapNotification(rows[0]) : null;
+}
+
+async function pruneExpiredBudgetNotifications(sql, userId = null, now = new Date()) {
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+  if (userId) {
+    await sql`
+      DELETE FROM notifications
+      WHERE user_id = ${userId}
+        AND (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
+        AND created_at < ${cutoff}
+    `;
+    return;
+  }
+
+  await sql`
+    DELETE FROM notifications
+    WHERE (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
+      AND created_at < ${cutoff}
+  `;
 }
 
 function getTodayIsoDate(baseDate = new Date()) {
@@ -1297,6 +1318,7 @@ async function runReminderChecks(targetUserId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
   const now = new Date();
+  await pruneExpiredBudgetNotifications(sql, targetUserId ?? null, now);
   const users = targetUserId ? [targetUserId] : (await sql`SELECT DISTINCT user_id FROM (SELECT user_id FROM expenses UNION SELECT user_id FROM budgets UNION SELECT user_id FROM bill_reminders UNION SELECT user_id FROM reminder_preferences) AS users WHERE user_id IS NOT NULL`).map((row) => row.user_id);
   const createdNotifications = [];
   const currentDate = getTodayIsoDate(now);

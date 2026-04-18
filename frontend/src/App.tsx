@@ -2089,7 +2089,7 @@ export default function App() {
       await loadWallets(currentUser);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Shared expense added.");
-      void runChecksAndReloadNotifications(currentUser);
+      void loadNotifications(currentUser);
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create shared expense.");
