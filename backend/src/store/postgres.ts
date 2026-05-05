@@ -728,6 +728,26 @@ async function upsertNotification(
   return rows[0] ? mapNotification(rows[0]) : null;
 }
 
+async function pruneExpiredBudgetNotifications(db: DbClient, userId?: string, now = new Date()): Promise<void> {
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+  if (userId) {
+    await db`
+      DELETE FROM notifications
+      WHERE user_id = ${userId}
+        AND (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
+        AND created_at < ${cutoff}
+    `;
+    return;
+  }
+
+  await db`
+    DELETE FROM notifications
+    WHERE (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
+      AND created_at < ${cutoff}
+  `;
+}
+
 async function loadWalletDetail(db: DbClient, walletId: string, pagination = getDefaultWalletHistoryPagination()): Promise<WalletDetailRecord> {
   const walletRows = await db<WalletRow[]>`
     SELECT id, name, description, default_split_rule, created_at
@@ -1752,6 +1772,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
     async listNotifications(userId: string): Promise<NotificationRecord[]> {
       await ensureSchema(sql);
+      await pruneExpiredBudgetNotifications(sql, userId);
 
       const rows = await sql<NotificationRow[]>`
         SELECT id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key
@@ -1838,6 +1859,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
     async runNotificationChecks(userId?: string, now = new Date()): Promise<NotificationCheckResult> {
       await ensureSchema(sql);
+      await pruneExpiredBudgetNotifications(sql, userId, now);
 
       const targetUserIds = userId
         ? [userId]

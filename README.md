@@ -37,7 +37,7 @@ A full-stack personal finance application for tracking daily spending, managing 
 - **Budgets** — Set monthly or category-specific spending caps. Track remaining budget with overspend warnings.
 - **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements.
 - **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources.
-- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, and wallet invite notifications.
+- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, and wallet invite notifications. Stale budget alerts are pruned automatically, and notification checks run on expense creation and page load so reminders stay current.
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
 - **Account management** — Profile menu with sign-out and full account deletion (removes all data and the Firebase account).

@@ -1,4 +1,5 @@
 const { createExpense, deleteExpense, listExpenses, updateExpense } = require("./_lib/personal-expenses");
+const { runReminderChecksForUser } = require("./_lib/finance");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
@@ -20,6 +21,9 @@ module.exports = async function handler(request, response) {
       const headerValue = request.headers["idempotency-key"];
       const idempotencyKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
       const result = await createExpense(request.body, idempotencyKey, user.id);
+      if (result.status === 201) {
+        runReminderChecksForUser(user.id).catch((error) => console.error("Background budget check failed.", error));
+      }
       return sendResult(response, result);
     }
 
