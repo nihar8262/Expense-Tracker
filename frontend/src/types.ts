@@ -107,6 +107,15 @@ export type WalletDetail = {
 	expenses: WalletExpense[];
 	balances: WalletBalance[];
 	settlements: WalletSettlement[];
+	expensePagination?: WalletHistoryPagination;
+	settlementPagination?: WalletHistoryPagination;
+};
+
+export type WalletHistoryPagination = {
+	limit: number;
+	offset: number;
+	total: number;
+	hasMore: boolean;
 };
 
 export type Notification = {

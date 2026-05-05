@@ -104,6 +104,15 @@ export type WalletDetailRecord = {
   expenses: WalletExpenseRecord[];
   balances: WalletBalanceRecord[];
   settlements: WalletSettlementRecord[];
+  expensePagination?: WalletHistoryPaginationRecord;
+  settlementPagination?: WalletHistoryPaginationRecord;
+};
+
+export type WalletHistoryPaginationRecord = {
+  limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
 };
 
 export type BillReminderRecurrence = "once" | "weekly" | "monthly" | "yearly";

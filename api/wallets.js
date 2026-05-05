@@ -57,12 +57,7 @@ module.exports = async function handler(request, response) {
   if (segments.length === 1) {
     if (request.method === "GET") {
       try {
-        try {
-          await linkWalletInvitesForUser(user);
-        } catch (error) {
-          console.error("Failed to sync wallet invite notifications.", error);
-        }
-        const result = await getWalletForUser(user.id, walletId);
+        const result = await getWalletForUser(user.id, walletId, request.query || {});
         return sendResult(response, result);
       } catch (error) {
         return response.status(404).json({ error: error instanceof Error ? error.message : "Wallet not found." });

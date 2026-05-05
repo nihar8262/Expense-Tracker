@@ -604,7 +604,17 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         const result = await handleDeleteAccount(user.id, store);
 
         if (result.body === null) {
-          await deleteUserAccount(user.id);
+          try {
+            await deleteUserAccount(user.id);
+          } catch (error) {
+            console.error("Account data was deleted, but Firebase Auth user deletion failed.", error);
+            return response.status(200).json({
+              deleted: true,
+              authDeleted: false,
+              warning: "Account data was deleted, but Firebase Auth user deletion failed."
+            });
+          }
+
           return response.sendStatus(result.status);
         }
 

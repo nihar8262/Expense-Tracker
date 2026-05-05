@@ -56,10 +56,21 @@ module.exports = async function handler(request, response) {
   if (request.method === "DELETE") {
     try {
       await deleteUserData(user.id);
-      await deleteAuthenticatedUser(user.id);
+      try {
+        await deleteAuthenticatedUser(user.id);
+      } catch (error) {
+        console.error("Account data was deleted, but Firebase Auth user deletion failed.", error);
+        return response.status(200).json({
+          deleted: true,
+          authDeleted: false,
+          warning: "Account data was deleted, but Firebase Auth user deletion failed."
+        });
+      }
+
       return response.status(204).end();
-    } catch {
-      return response.status(500).json({ error: "Failed to delete account." });
+    } catch (error) {
+      console.error("Failed to delete account.", error);
+      return response.status(500).json({ error: error instanceof Error ? error.message : "Failed to delete account." });
     }
   }
 

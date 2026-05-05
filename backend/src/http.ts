@@ -494,7 +494,6 @@ export async function handleDeleteWalletBudget(walletId: string, walletBudgetId:
 
 export async function handleGetWalletForUser(walletId: string, user: { id: string; name?: string | null; email?: string | null }, store: ExpenseStore): Promise<HandlerResponse> {
   try {
-    await store.linkWalletInvites(user.id, { email: user.email ?? null, name: user.name ?? null });
     const wallet = await store.getWallet(user.id, walletId);
     return {
       status: 200,

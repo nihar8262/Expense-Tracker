@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AuthProvider, User } from "firebase/auth";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import type { User } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "./auth";
+import { useAuth, providerOptions } from "./hooks/useAuth";
+import { useBudgets } from "./hooks/useBudgets";
+import { useExpenses } from "./hooks/useExpenses";
+import { useNotifications } from "./hooks/useNotifications";
+import { useWallets } from "./hooks/useWallets";
 import { SignedInLayout } from "./layouts/SignedInLayout";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AuthPage } from "./pages/AuthPage";
@@ -28,7 +31,6 @@ import type {
   ExpenseForm,
   Notification,
   PendingSubmission,
-  ProviderOption,
   ReminderPreferences,
   SplitRule,
   TimeRangeFilter,
@@ -38,29 +40,8 @@ import type {
   WalletDetail
 } from "./types";
 import { ApiError } from "./types";
+import { deleteAccountData } from "./services/api";
 
-const providerOptions: ProviderOption[] = [
-  {
-    id: "google",
-    label: "Continue with Google",
-    blurb: "Fast sign-in with your Google account.",
-    provider: googleProvider
-  },
-  {
-    id: "github",
-    label: "Continue with GitHub",
-    blurb: "Great if you already live in developer tools.",
-    provider: githubProvider
-  },
-  {
-    id: "facebook",
-    label: "Continue with Facebook",
-    blurb: "Useful for a lighter consumer-style onboarding.",
-    provider: facebookProvider
-  }
-];
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const PENDING_SUBMISSION_STORAGE_KEY = "expense-tracker.pending-submission";
 const CUSTOM_CATEGORY_STORAGE_KEY_PREFIX = "expense-tracker.custom-categories";
 const EXPENSES_PAGE_SIZE = 50;
@@ -202,40 +183,6 @@ function clearCustomCategories(userId: string) {
   window.localStorage.removeItem(getCustomCategoryStorageKey(userId));
 }
 
-function buildExpensesUrl(category: string, sortNewestFirst: boolean): string {
-  const url = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL) : new URL("/api/expenses", window.location.origin);
-
-  if (category) {
-    url.searchParams.set("category", category);
-  }
-
-  if (sortNewestFirst) {
-    url.searchParams.set("sort", "date_desc");
-  }
-
-  return url.toString();
-}
-
-function buildBudgetsUrl(): string {
-  return API_BASE_URL ? new URL("/api/budgets", API_BASE_URL).toString() : "/api/budgets";
-}
-
-function buildWalletsUrl(): string {
-  return API_BASE_URL ? new URL("/api/wallets", API_BASE_URL).toString() : "/api/wallets";
-}
-
-function buildNotificationsUrl(): string {
-  return API_BASE_URL ? new URL("/api/notifications", API_BASE_URL).toString() : "/api/notifications";
-}
-
-function buildReminderPreferencesUrl(): string {
-  return API_BASE_URL ? new URL("/api/reminder-preferences", API_BASE_URL).toString() : "/api/reminder-preferences";
-}
-
-function buildBillRemindersUrl(): string {
-  return API_BASE_URL ? new URL("/api/bill-reminders", API_BASE_URL).toString() : "/api/bill-reminders";
-}
-
 function getCurrentMonthValue(baseDate = new Date()): string {
   return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -313,44 +260,6 @@ function writePendingSubmission(submission: PendingSubmission | null) {
   }
 
   window.localStorage.setItem(PENDING_SUBMISSION_STORAGE_KEY, JSON.stringify(submission));
-}
-
-function formatAuthError(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return "Failed to sign in.";
-  }
-
-  const message = error.message.toLowerCase();
-
-  if (message.includes("popup_closed_by_user") || message.includes("cancelled-popup-request")) {
-    return "The sign-in window was closed before authentication completed.";
-  }
-
-  if (message.includes("popup-blocked")) {
-    return "The browser blocked the sign-in popup. Allow popups for localhost and try again.";
-  }
-
-  if (message.includes("unauthorized-domain")) {
-    return "This domain is not authorized in Firebase Authentication. Add your current localhost or deployed URL to Firebase authorized domains.";
-  }
-
-  if (message.includes("operation-not-allowed")) {
-    return "This sign-in provider is not enabled in Firebase Authentication.";
-  }
-
-  if (message.includes("redirect_uri_mismatch") || message.includes("redirect uri")) {
-    return "The OAuth redirect URL is misconfigured for this provider. Check the provider callback URL in Firebase and the provider console.";
-  }
-
-  if (message.includes("access blocked") || message.includes("cookie") || message.includes("storage")) {
-    return "Browser storage or cookies blocked the sign-in flow. Try again with cookie blocking disabled for localhost.";
-  }
-
-  if (message.includes("account-exists-with-different-credential")) {
-    return "An account already exists with the same email address but a different sign-in method. Sign in using the original provider (e.g. Google) linked to that email, then link additional providers from your profile.";
-  }
-
-  return error.message;
 }
 
 function formatCurrency(amount: string): string {
@@ -518,499 +427,42 @@ function resolveCategoryIcon(categoryLabel: string, categoryOptions: CategoryOpt
   return categoryOptions.find((option) => option.label.toLowerCase() === categoryLabel.trim().toLowerCase())?.icon ?? "other";
 }
 
-async function buildAuthorizedHeaders(user: User, extraHeaders: Record<string, string> = {}) {
-  const token = await user.getIdToken();
-
-  return {
-    Authorization: `Bearer ${token}`,
-    ...extraHeaders
-  };
-}
-
-async function parseApiResponseError(response: Response, fallbackMessage: string): Promise<ApiError> {
-  const body = (await response.json().catch(() => null)) as { error?: string } | null;
-  return new ApiError(body?.error ?? fallbackMessage, response.status);
-}
-
-async function createExpense(payload: ExpenseForm, idempotencyKey: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL).toString() : "/api/expenses";
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to save expense.", response.status);
-  }
-}
-
-async function updateExpense(expenseId: string, payload: ExpenseForm, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/expenses/${expenseId}`, API_BASE_URL).toString() : `/api/expenses/${expenseId}`;
-  const response = await fetch(endpoint, {
-    method: "PUT",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to update expense.", response.status);
-  }
-}
-
-async function deleteExpense(expenseId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/expenses/${expenseId}`, API_BASE_URL).toString() : `/api/expenses/${expenseId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to delete expense.", response.status);
-  }
-}
-
-async function createBudget(payload: BudgetForm, user: User): Promise<void> {
-  const response = await fetch(buildBudgetsUrl(), {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify({
-      amount: payload.amount,
-      scope: payload.scope,
-      category: payload.scope === "category" ? payload.category : undefined,
-      month: payload.month
-    })
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to save budget.", response.status);
-  }
-}
-
-async function updateBudget(budgetId: string, payload: BudgetForm, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/budgets/${budgetId}`, API_BASE_URL).toString() : `/api/budgets/${budgetId}`;
-  const response = await fetch(endpoint, {
-    method: "PUT",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify({
-      amount: payload.amount,
-      scope: payload.scope,
-      category: payload.scope === "category" ? payload.category : undefined,
-      month: payload.month
-    })
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to update budget.", response.status);
-  }
-}
-
-async function deleteBudget(budgetId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/budgets/${budgetId}`, API_BASE_URL).toString() : `/api/budgets/${budgetId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? "Failed to delete budget.", response.status);
-  }
-}
-
-async function deleteAccountData(user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL("/api/account", API_BASE_URL).toString() : "/api/account";
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete account.");
-  }
-}
-
-async function createWallet(
-  payload: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> },
-  user: User
-): Promise<WalletDetail> {
-  const response = await fetch(buildWalletsUrl(), {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to create wallet.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function addWalletMember(walletId: string, payload: { displayName: string; email?: string }, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/members`, API_BASE_URL).toString() : `/api/wallets/${walletId}/members`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to add wallet member.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function removeWalletMember(walletId: string, memberId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL
-    ? new URL(`/api/wallets/${walletId}/members/${memberId}`, API_BASE_URL).toString()
-    : `/api/wallets/${walletId}/members/${memberId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to remove wallet member.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function getWalletDetail(walletId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
-  const response = await fetch(endpoint, {
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to load wallet.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function deleteWalletGroup(walletId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete group.");
-  }
-}
-
-async function leaveWalletGroup(walletId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/leave`, API_BASE_URL).toString() : `/api/wallets/${walletId}/leave`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to exit group.");
-  }
-}
-
-async function createWalletBudget(walletId: string, payload: BudgetForm, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify({
-      amount: payload.amount,
-      scope: payload.scope,
-      category: payload.scope === "category" ? payload.category : undefined,
-      month: payload.month
-    })
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to create wallet budget.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function updateWalletBudget(walletId: string, walletBudgetId: string, payload: BudgetForm, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets/${walletBudgetId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets/${walletBudgetId}`;
-  const response = await fetch(endpoint, {
-    method: "PUT",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify({
-      amount: payload.amount,
-      scope: payload.scope,
-      category: payload.scope === "category" ? payload.category : undefined,
-      month: payload.month
-    })
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to update wallet budget.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function deleteWalletBudget(walletId: string, walletBudgetId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/budgets/${walletBudgetId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/budgets/${walletBudgetId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete wallet budget.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function createSharedWalletExpense(
-  walletId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
-  user: User
-): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to create shared expense.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function updateSharedWalletExpense(
-  walletId: string,
-  walletExpenseId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
-  user: User
-): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;
-  const response = await fetch(endpoint, {
-    method: "PUT",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to update shared expense.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function deleteSharedWalletExpense(walletId: string, walletExpenseId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete shared expense.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function createWalletSettlement(
-  walletId: string,
-  payload: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string },
-  user: User
-): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to record settlement.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function updateWalletSettlementEntry(
-  walletId: string,
-  settlementId: string,
-  payload: { fromMemberId: string; toMemberId: string; amount: string; date: string; note: string },
-  user: User
-): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements/${settlementId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements/${settlementId}`;
-  const response = await fetch(endpoint, {
-    method: "PUT",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to update settlement.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function deleteWalletSettlementEntry(walletId: string, settlementId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements/${settlementId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements/${settlementId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete settlement.");
-  }
-
-  const body = (await response.json()) as { wallet: WalletDetail };
-  return body.wallet;
-}
-
-async function listBillReminders(user: User): Promise<BillReminder[]> {
-  const response = await fetch(buildBillRemindersUrl(), {
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to load bill reminders.");
-  }
-
-  const body = (await response.json()) as { billReminders: BillReminder[] };
-  return body.billReminders;
-}
-
-async function saveBillReminder(
-  payload: { title: string; amount: string; category: string; dueDate: string; recurrence: BillReminderRecurrence; intervalCount: number; reminderDaysBefore: number; isActive: boolean },
-  user: User,
-  billReminderId?: string
-): Promise<BillReminder> {
-  const endpoint = billReminderId
-    ? API_BASE_URL ? new URL(`/api/bill-reminders/${billReminderId}`, API_BASE_URL).toString() : `/api/bill-reminders/${billReminderId}`
-    : buildBillRemindersUrl();
-  const response = await fetch(endpoint, {
-    method: billReminderId ? "PUT" : "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, billReminderId ? "Failed to update bill reminder." : "Failed to create bill reminder.");
-  }
-
-  const body = (await response.json()) as { billReminder: BillReminder };
-  return body.billReminder;
-}
-
-async function deleteBillReminderEntry(billReminderId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/bill-reminders/${billReminderId}`, API_BASE_URL).toString() : `/api/bill-reminders/${billReminderId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete bill reminder.");
-  }
-}
-
-async function respondToWalletInvite(walletMemberId: string, action: "accept" | "decline", user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallet-invites/${walletMemberId}/respond`, API_BASE_URL).toString() : `/api/wallet-invites/${walletMemberId}/respond`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user, {
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify({ action })
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to respond to wallet invite.");
-  }
-}
-
-async function deleteNotification(notificationId: string, user: User): Promise<void> {
-  const endpoint = API_BASE_URL ? new URL(`/api/notifications/${notificationId}`, API_BASE_URL).toString() : `/api/notifications/${notificationId}`;
-  const response = await fetch(endpoint, {
-    method: "DELETE",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to delete notification.");
-  }
-}
-
-async function runNotificationChecks(user: User): Promise<Notification[]> {
-  const endpoint = API_BASE_URL ? new URL("/api/notifications/run-checks", API_BASE_URL).toString() : "/api/notifications/run-checks";
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await buildAuthorizedHeaders(user)
-  });
-
-  if (!response.ok) {
-    throw await parseApiResponseError(response, "Failed to run reminder checks.");
-  }
-
-  const body = (await response.json()) as { created_notifications: Notification[] };
-  return body.created_notifications;
-}
-
 export default function App() {
   const navigate = useNavigate();
+  const { authLoading, currentUser, authMessage, setAuthMessage, signIn, signOutCurrentUser } = useAuth();
+  const { listExpenses, createExpense, updateExpense, deleteExpense } = useExpenses();
+  const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
+  const {
+    listWallets,
+    getWalletDetail,
+    createWallet,
+    deleteWalletGroup,
+    leaveWalletGroup,
+    addWalletMember,
+    removeWalletMember,
+    createWalletBudget,
+    updateWalletBudget,
+    deleteWalletBudget,
+    createSharedWalletExpense,
+    updateSharedWalletExpense,
+    deleteSharedWalletExpense,
+    createWalletSettlement,
+    updateWalletSettlementEntry,
+    deleteWalletSettlementEntry
+  } = useWallets();
+  const {
+    listNotifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    deleteNotification,
+    runNotificationChecks,
+    respondToWalletInvite,
+    listBillReminders,
+    saveBillReminder,
+    deleteBillReminderEntry,
+    getReminderPreferences,
+    updateReminderPreferences
+  } = useNotifications();
   const [form, setForm] = useState<ExpenseForm>(initialFormState);
   const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -1053,15 +505,12 @@ export default function App() {
   const [isSavingBillReminder, setIsSavingBillReminder] = useState(false);
   const [isRunningNotificationChecks, setIsRunningNotificationChecks] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [budgetErrorMessage, setBudgetErrorMessage] = useState("");
   const [budgetStatusMessage, setBudgetStatusMessage] = useState("");
   const [walletErrorMessage, setWalletErrorMessage] = useState("");
   const [walletStatusMessage, setWalletStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -1377,17 +826,7 @@ export default function App() {
     setErrorMessage("");
 
     try {
-      const response = await fetch(buildExpensesUrl(activeCategory, activeSort), {
-        headers: await buildAuthorizedHeaders(user)
-      });
-
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to load expenses.");
-      }
-
-      const body = (await response.json()) as { expenses: Expense[] };
-      setExpenses(body.expenses);
+      setExpenses(await listExpenses(user, activeCategory, activeSort));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load expenses.");
     } finally {
@@ -1400,17 +839,7 @@ export default function App() {
     setBudgetErrorMessage("");
 
     try {
-      const response = await fetch(buildBudgetsUrl(), {
-        headers: await buildAuthorizedHeaders(user)
-      });
-
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to load budgets.");
-      }
-
-      const body = (await response.json()) as { budgets: Budget[] };
-      setBudgets(body.budgets);
+      setBudgets(await listBudgets(user));
     } catch (error) {
       setBudgetErrorMessage(error instanceof Error ? error.message : "Failed to load budgets.");
     } finally {
@@ -1423,22 +852,14 @@ export default function App() {
     setWalletErrorMessage("");
 
     try {
-      const response = await fetch(buildWalletsUrl(), {
-        headers: await buildAuthorizedHeaders(user)
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to load wallets.");
-      }
-
-      const body = (await response.json()) as { wallets: Wallet[] };
-      setWallets(body.wallets);
+      const walletEntries = await listWallets(user);
+      setWallets(walletEntries);
       setSelectedWalletId((current) => {
-        if (current && body.wallets.some((wallet) => wallet.id === current)) {
+        if (current && walletEntries.some((wallet) => wallet.id === current)) {
           return current;
         }
 
-        return body.wallets[0]?.id ?? null;
+        return walletEntries[0]?.id ?? null;
       });
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallets.");
@@ -1463,16 +884,7 @@ export default function App() {
 
   async function loadNotifications(user: User) {
     try {
-      const response = await fetch(buildNotificationsUrl(), {
-        headers: await buildAuthorizedHeaders(user)
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to load notifications.");
-      }
-
-      const body = (await response.json()) as { notifications: Notification[] };
-      setNotifications(body.notifications);
+      setNotifications(await listNotifications(user));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to load notifications.");
     }
@@ -1480,16 +892,7 @@ export default function App() {
 
   async function loadReminderPreferences(user: User) {
     try {
-      const response = await fetch(buildReminderPreferencesUrl(), {
-        headers: await buildAuthorizedHeaders(user)
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to load reminder preferences.");
-      }
-
-      const body = (await response.json()) as { preferences: ReminderPreferences };
-      setReminderPreferences(body.preferences);
+      setReminderPreferences(await getReminderPreferences(user));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to load reminder preferences.");
     }
@@ -1505,45 +908,34 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !auth) {
-      setAuthLoading(false);
-      setAuthMessage("Firebase web auth is not configured yet. Add the Firebase env values to enable sign-in.");
+    setIsProfileMenuOpen(false);
+    setIsNotificationPanelOpen(false);
+    setIsDeleteAccountModalOpen(false);
+
+    if (!currentUser) {
+      setExpenses([]);
+      setBudgets([]);
+      setWallets([]);
+      setSelectedWalletId(null);
+      setSelectedWallet(null);
+      setNotifications([]);
+      setBillReminders([]);
+      setReminderPreferences(null);
+      setCustomCategories([]);
+      setCustomCategoryName("");
+      setForm(initialFormState);
+      setBudgetForm(initialBudgetFormState);
+      setSelectedCategory("");
+      setCurrentExpensesPage(1);
+      setSelectedExpenseIds([]);
+      setEditingExpenseId(null);
+      setEditingBudgetId(null);
+      setIsBudgetHistoryOpen(false);
       return;
     }
 
-    return onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setAuthLoading(false);
-      setIsProfileMenuOpen(false);
-      setIsNotificationPanelOpen(false);
-      setIsDeleteAccountModalOpen(false);
-
-      if (!user) {
-        setExpenses([]);
-        setBudgets([]);
-        setWallets([]);
-        setSelectedWalletId(null);
-        setSelectedWallet(null);
-        setNotifications([]);
-        setBillReminders([]);
-        setReminderPreferences(null);
-        setCustomCategories([]);
-        setCustomCategoryName("");
-        setForm(initialFormState);
-        setBudgetForm(initialBudgetFormState);
-        setSelectedCategory("");
-        setCurrentExpensesPage(1);
-        setSelectedExpenseIds([]);
-        setEditingExpenseId(null);
-        setEditingBudgetId(null);
-        setIsBudgetHistoryOpen(false);
-        return;
-      }
-
-      setAuthMessage("");
-      setCustomCategories(readCustomCategories(user.uid));
-    });
-  }, []);
+    setCustomCategories(readCustomCategories(currentUser.uid));
+  }, [currentUser]);
 
   useEffect(() => {
     if (authLoading) {
@@ -1679,29 +1071,8 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
-  async function handleSignIn(provider: AuthProvider) {
-    if (!auth) {
-      return;
-    }
-
-    setAuthMessage("");
-
-    try {
-      await authPersistenceReady;
-
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Firebase popup sign-in failed.", error);
-      setAuthMessage(formatAuthError(error));
-    }
-  }
-
   async function handleSignOut() {
-    if (!auth) {
-      return;
-    }
-
-    await signOut(auth);
+    await signOutCurrentUser();
     writePendingSubmission(null);
     setStatusMessage("");
     setErrorMessage("");
@@ -1864,10 +1235,7 @@ export default function App() {
       setEditingExpenseId(null);
       setEditingBudgetId(null);
       setIsBudgetHistoryOpen(false);
-      if (auth) {
-        await signOut(auth);
-      }
-      setCurrentUser(null);
+      await signOutCurrentUser();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete your account.";
       if (message.includes("requires-recent-login")) {
@@ -2199,20 +1567,9 @@ export default function App() {
       return;
     }
 
-    const endpoint = API_BASE_URL ? new URL(`/api/notifications/${notificationId}/read`, API_BASE_URL).toString() : `/api/notifications/${notificationId}/read`;
-
     try {
-      const response = await fetch(endpoint, {
-        method: "PATCH",
-        headers: await buildAuthorizedHeaders(currentUser)
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to update notification.");
-      }
-
-      const body = (await response.json()) as { notification: Notification };
-      setNotifications((current) => current.map((notification) => (notification.id === notificationId ? body.notification : notification)));
+      const updatedNotification = await markNotificationRead(notificationId, currentUser);
+      setNotifications((current) => current.map((notification) => (notification.id === notificationId ? updatedNotification : notification)));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to update notification.");
     }
@@ -2223,18 +1580,8 @@ export default function App() {
       return;
     }
 
-    const endpoint = API_BASE_URL ? new URL("/api/notifications/read-all", API_BASE_URL).toString() : "/api/notifications/read-all";
-
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: await buildAuthorizedHeaders(currentUser)
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to update notifications.");
-      }
-
+      await markAllNotificationsRead(currentUser);
       setNotifications((current) => current.map((notification) => ({ ...notification, status: "read" })));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to update notifications.");
@@ -2311,25 +1658,7 @@ export default function App() {
     setIsSavingReminderPreferences(true);
 
     try {
-      const response = await fetch(buildReminderPreferencesUrl(), {
-        method: "PUT",
-        headers: await buildAuthorizedHeaders(currentUser, {
-          "Content-Type": "application/json"
-        }),
-        body: JSON.stringify({
-          dailyLoggingEnabled: reminderPreferences.daily_logging_enabled,
-          dailyLoggingHour: reminderPreferences.daily_logging_hour,
-          budgetAlertsEnabled: reminderPreferences.budget_alerts_enabled,
-          budgetAlertThreshold: reminderPreferences.budget_alert_threshold
-        })
-      });
-
-      if (!response.ok) {
-        throw await parseApiResponseError(response, "Failed to update reminder preferences.");
-      }
-
-      const body = (await response.json()) as { preferences: ReminderPreferences };
-      setReminderPreferences(body.preferences);
+      setReminderPreferences(await updateReminderPreferences(currentUser, reminderPreferences));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to update reminder preferences.");
     } finally {
@@ -2922,8 +2251,8 @@ export default function App() {
       ) : (
         <>
           <Route path="/" element={<LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
-          <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={handleSignIn} />} />
-          <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={handleSignIn} />} />
+          <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
+          <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
           <Route path="/dashboard" element={<Navigate to="/" replace />} />
           <Route path="/expenses" element={<Navigate to="/" replace />} />
           <Route path="/wallets" element={<Navigate to="/" replace />} />
