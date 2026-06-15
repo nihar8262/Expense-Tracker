@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { EmptyState, PageHero, SectionHeader, SurfaceCard, cn } from "../components/ui";
+import { TrendChart } from "../components/TrendChart";
 import { useNavigate } from "react-router-dom";
 import type {
   BudgetForm,
@@ -124,21 +125,11 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const navigate = useNavigate();
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
-  const [activeChartPointKey, setActiveChartPointKey] = useState<string | null>(null);
   const [isSmallScreen, setIsSmallScreen] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 640 : false));
   const trendSectionRef = useRef<HTMLElement | null>(null);
   const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const activeTrendPoint = spendTrend.find((point) => point.key === activeTrendDetailKey) ?? null;
   const activeTrendItems = activeTrendPoint ? trendDetailLookup[activeTrendPoint.key] ?? [] : [];
-  const chartBarWidth = chartSummary.points.length > 0 ? 100 / chartSummary.points.length : 0;
-  const activeChartPoint = chartSummary.points.find((point) => point.key === activeChartPointKey) ?? null;
-  const chartMinWidth = Math.max(
-    chartSummary.points.length * (chartGranularity === "daily" ? 46 : chartGranularity === "weekly" ? 56 : chartGranularity === "monthly" ? 62 : 70),
-    300
-  );
-  const chartScaleTicks = [chartSummary.peakValue, chartSummary.peakValue * 0.66, chartSummary.peakValue * 0.33, 0].map((value) =>
-    Math.max(0, Number(value.toFixed(2)))
-  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -158,27 +149,6 @@ export function DashboardPage({
     mediaQuery.addListener(handleChange);
     return () => mediaQuery.removeListener(handleChange);
   }, []);
-
-  function getChartLabel(amount: number): string {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      notation: "compact",
-      maximumFractionDigits: 1
-    }).format(amount);
-  }
-
-  function getTooltipAlignment(x: number): string {
-    if (x < 20) {
-      return "-translate-x-[5%]";
-    }
-
-    if (x > 80) {
-      return "-translate-x-[95%]";
-    }
-
-    return "-translate-x-1/2";
-  }
 
   function getTrendTooltipAlignment(index: number, totalPoints: number): string {
     if (totalPoints <= 1) {
@@ -232,7 +202,7 @@ export function DashboardPage({
                 className={cn(
                   "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
                   dashboardViewMode === "personal"
-                    ? "border-primary/25 bg-success-tint text-ink"
+                    ? "border-primary/25 bg-success-tint text-green-400"
                     : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
                 )}
                 onClick={() => onDashboardViewModeChange("personal")}
@@ -245,7 +215,7 @@ export function DashboardPage({
                 className={cn(
                   "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
                   dashboardViewMode === "wallet"
-                    ? "border-primary/25 bg-success-tint text-ink"
+                    ? "border-primary/25 bg-success-tint text-green-400"
                     : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
                 )}
                 onClick={() => onDashboardViewModeChange("wallet")}
@@ -422,7 +392,6 @@ export function DashboardPage({
                 <label className="grid gap-2 text-sm font-medium text-secondary">
                   Graph by
                   <select value={chartGranularity} onChange={(event) => onChartGranularityChange(event.target.value as ChartGranularity)}>
-                    <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
                     <option value="quarterly">Quarterly</option>
@@ -445,124 +414,13 @@ export function DashboardPage({
             <EmptyState title="No spend trend yet" description="Add expenses inside the selected filters to render the spending graph." />
           ) : (
             <>
-              <div className="rounded-[28px] border border-[color:var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,243,232,0.74))] p-3 sm:p-4 lg:p-5">
-                <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 sm:gap-4">
-                  <div className="flex h-[260px] flex-col justify-between pb-7 pr-2 pt-1 text-[10px] font-semibold text-ink sm:h-[320px] sm:text-xs lg:h-[430px] xl:h-[480px]">
-                    {chartScaleTicks.map((tick, index) => (
-                      <span key={`${tick}-${index}`} className="whitespace-nowrap leading-none">
-                        {getChartLabel(tick)}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="overflow-x-auto pb-2">
-                    <div style={{ minWidth: `${chartMinWidth}px` }}>
-                      <div className="relative h-[360px] sm:h-[580px] lg:h-[720px] xl:h-[800px]" onMouseLeave={() => setActiveChartPointKey(null)}>
-                        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-label="Expense trend graph">
-                          <defs>
-                            <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
-                              <stop offset="0%" stopColor="rgba(30,122,83,0.22)" />
-                              <stop offset="100%" stopColor="rgba(30,122,83,0.03)" />
-                            </linearGradient>
-                            <linearGradient id="trendBarFill" x1="0" x2="0" y1="0" y2="1">
-                              <stop offset="0%" stopColor="#1e7a53" />
-                              <stop offset="100%" stopColor="#d4a857" />
-                            </linearGradient>
-                          </defs>
-                          <line x1="0" y1="100" x2="100" y2="100" stroke="rgba(29,42,34,0.14)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                          <line x1="0" y1="66" x2="100" y2="66" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                          <line x1="0" y1="33" x2="100" y2="33" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                          <line x1="0" y1="0" x2="100" y2="0" stroke="rgba(29,42,34,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-
-                          {chartDisplayType === "area" ? (
-                            <>
-                              <path d={chartSummary.areaPath} fill="url(#trendFill)" />
-                              <path d={chartSummary.linePath} fill="none" stroke="#1e7a53" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                              {chartSummary.points.map((point) => (
-                                <g key={point.key}>
-                                  <circle
-                                    cx={point.x}
-                                    cy={point.y}
-                                    r="4.4"
-                                    fill="transparent"
-                                    className="cursor-pointer"
-                                    onMouseEnter={() => setActiveChartPointKey(point.key)}
-                                    onFocus={() => setActiveChartPointKey(point.key)}
-                                    onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
-                                    onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
-                                    tabIndex={0}
-                                  />
-                                  <circle cx={point.x} cy={point.y} r="1.8" fill="#1e7a53" stroke="#ffffff" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />
-                                </g>
-                              ))}
-                            </>
-                          ) : (
-                            chartSummary.points.map((point, index) => {
-                              const barWidth = Math.max(chartBarWidth * 0.66, 4.8);
-                              const x = chartSummary.points.length === 1 ? 50 - barWidth / 2 : index * chartBarWidth + (chartBarWidth - barWidth) / 2;
-                              const height = chartSummary.peakValue === 0 ? 0 : (point.total / chartSummary.peakValue) * 100;
-                              const y = 100 - height;
-
-                              return (
-                                <g key={point.key}>
-                                  <rect
-                                    x={x}
-                                    y={y}
-                                    width={barWidth}
-                                    height={height}
-                                    rx="1.9"
-                                    fill="url(#trendBarFill)"
-                                    className="cursor-pointer"
-                                    onMouseEnter={() => setActiveChartPointKey(point.key)}
-                                    onFocus={() => setActiveChartPointKey(point.key)}
-                                    onBlur={() => setActiveChartPointKey((current) => (current === point.key ? null : current))}
-                                    onClick={() => setActiveChartPointKey((current) => (current === point.key ? null : point.key))}
-                                    tabIndex={0}
-                                  />
-                                  <text x={x + barWidth / 2} y={Math.max(y - 2.8, 6)} fill="#26342d" fontWeight="700" fontSize="2.2" textAnchor="middle">
-                                    {getChartLabel(point.total)}
-                                  </text>
-                                </g>
-                              );
-                            })
-                          )}
-                        </svg>
-
-                        {activeChartPoint ? (
-                      <div
-                        className={cn(
-                          "absolute hidden min-w-[150px] rounded-2xl border border-white/70 bg-white/96 px-4 py-3 text-sm text-ink shadow-[0_18px_40px_rgba(40,44,35,0.14)] backdrop-blur-md sm:block",
-                          getTooltipAlignment(activeChartPoint.x)
-                        )}
-                        role="status"
-                        style={{ left: `${activeChartPoint.x}%`, top: `${Math.max(activeChartPoint.y - 8, 8)}%` }}
-                      >
-                        <strong className="block">{activeChartPoint.label}</strong>
-                        <span className="mt-1 block font-semibold text-primary">{formatCurrency(activeChartPoint.total.toFixed(2))}</span>
-                        <small className="mt-1 block text-muted">{activeChartPoint.count === 1 ? "1 expense" : `${activeChartPoint.count} expenses`}</small>
-                      </div>
-                    ) : null}
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(48px,1fr))] gap-1.5 text-[11px] font-medium text-muted sm:mt-4 sm:grid-cols-[repeat(auto-fit,minmax(72px,1fr))] sm:gap-2 sm:text-xs">
-                        {chartSummary.points.map((point) => (
-                          <span key={point.key} className="truncate text-center">
-                            {point.shortLabel}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="rounded-[28px] border border-[color:var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,243,232,0.74))] p-5 sm:p-6">
+                <TrendChart
+                  points={chartSummary.points}
+                  displayType={chartDisplayType}
+                  formatCurrency={formatCurrency}
+                />
               </div>
-
-              {activeChartPoint ? (
-                <div className="rounded-[22px] border border-[color:var(--border)] bg-[#faf8f1] px-4 py-3 sm:hidden">
-                  <strong className="block text-sm text-ink">{activeChartPoint.label}</strong>
-                  <span className="mt-1 block text-base font-semibold text-primary">{formatCurrency(activeChartPoint.total.toFixed(2))}</span>
-                  <small className="mt-1 block text-muted">{activeChartPoint.count === 1 ? "1 expense" : `${activeChartPoint.count} expenses`}</small>
-                </div>
-              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {spendTrend.map((point, index) => (
