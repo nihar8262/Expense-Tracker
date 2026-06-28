@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { PLATFORMS } from "../lib/platforms";
 
 // Simple class merger
@@ -220,8 +221,8 @@ export function PlatformPicker({
         )}
       </button>
 
-      {/* Mobile Bottom Sheet */}
-      {isOpen && (
+      {/* Mobile Bottom Sheet (Portal to document.body to avoid clipping & stacking context bugs) */}
+      {isOpen && typeof document !== "undefined" && createPortal(
         <div className="sm:hidden fixed inset-0 z-50 flex items-end justify-center">
           {/* Backdrop */}
           <div
@@ -238,7 +239,7 @@ export function PlatformPicker({
             aria-modal="true"
             aria-label="Select source platform"
             className={cn(
-              "relative w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out",
+              "fixed bottom-0 left-0 right-0 w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out z-50",
               animate ? "translate-y-0" : "translate-y-full"
             )}
           >
@@ -249,7 +250,7 @@ export function PlatformPicker({
             </h3>
 
             {/* Grid options */}
-            <div className="grid grid-cols-3 gap-y-5 gap-x-3 justify-items-center">
+            <div className="grid grid-cols-4 gap-y-4 gap-x-2 justify-items-center">
               {/* None cell */}
               <button
                 ref={(el) => {
@@ -259,16 +260,16 @@ export function PlatformPicker({
                 onClick={() => handleSelect(null)}
                 onKeyDown={(e) => handleOptionKeyDown(e, 0)}
                 aria-pressed={value === null}
-                className="flex flex-col items-center gap-1.5 focus-visible:outline-none"
+                className="flex flex-col items-center gap-1.5 focus-visible:outline-none group"
               >
                 <div
                   className={cn(
-                    "w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 transition-all",
-                    value === null ? "ring-2 ring-primary border-primary" : "hover:border-zinc-300 dark:hover:border-zinc-600"
+                    "w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 transition-all",
+                    value === null ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
                   )}
                 >
                   <svg
-                    className="w-5 h-5 text-zinc-500 dark:text-zinc-400"
+                    className="w-4 h-4 text-zinc-500 dark:text-zinc-400"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2.5"
@@ -277,7 +278,7 @@ export function PlatformPicker({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </div>
-                <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">None</span>
+                <span className="text-[10px] font-medium text-zinc-500 dark:text-zinc-400">None</span>
               </button>
 
               {/* Platform cells */}
@@ -293,17 +294,17 @@ export function PlatformPicker({
                     onClick={() => handleSelect(platform.id)}
                     onKeyDown={(e) => handleOptionKeyDown(e, idx + 1)}
                     aria-pressed={isSelected}
-                    className="flex flex-col items-center gap-1.5 focus-visible:outline-none"
+                    className="flex flex-col items-center gap-1.5 focus-visible:outline-none group"
                   >
                     <PlatformLogo
                       logo={platform.logo}
                       name={platform.name}
                       className={cn(
-                        "w-12 h-12 border border-zinc-200 dark:border-zinc-700 transition-all",
-                        isSelected ? "ring-2 ring-primary border-primary" : "hover:border-zinc-300 dark:hover:border-zinc-600"
+                        "w-10 h-10 border border-zinc-200 dark:border-zinc-700 transition-all",
+                        isSelected ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
                       )}
                     />
-                    <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300 text-center truncate max-w-[80px]">
+                    <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300 text-center truncate max-w-[56px]">
                       {platform.name}
                     </span>
                   </button>
@@ -311,17 +312,18 @@ export function PlatformPicker({
               })}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Desktop Popover */}
+      {/* Desktop Popover (Absolute Positioned Dropdown) */}
       {isOpen && (
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Select source platform"
           className={cn(
-            "hidden sm:block absolute top-full left-0 mt-2 w-72 rounded-[24px] border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-xl z-50 transition-all duration-150 ease-out origin-top-left",
+            "hidden sm:block absolute top-full left-0 mt-2 w-64 rounded-[24px] border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-xl z-50 transition-all duration-150 ease-out origin-top-left",
             animate ? "opacity-100 scale-100" : "opacity-0 scale-95"
           )}
         >
@@ -379,7 +381,7 @@ export function PlatformPicker({
                       isSelected ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
                     )}
                   />
-                  <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300 text-center truncate max-w-[64px]">
+                  <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300 text-center truncate max-w-[56px]">
                     {platform.name}
                   </span>
                 </button>

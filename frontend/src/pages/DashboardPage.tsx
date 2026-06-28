@@ -415,9 +415,18 @@ export function DashboardPage({
           {dashboardStats.latestExpense ? (
             <div className="space-y-4 rounded-[26px] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-5">
               <span className="data-pill">{dashboardStats.latestExpense.date}</span>
-              <div>
-                <strong className="block text-2xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.latestExpense.description}</strong>
-                <p className="mt-2 text-sm leading-6 text-secondary">{dashboardStats.latestExpense.category}</p>
+              <div className="flex items-center gap-3">
+                {dashboardStats.latestExpense.platform ? (
+                  <PlatformLogo
+                    logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo}
+                    name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? dashboardStats.latestExpense?.platform}
+                    className="w-10 h-10 ring-2 ring-primary/10 shrink-0"
+                  />
+                ) : null}
+                <div>
+                  <strong className="block text-2xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.latestExpense.description}</strong>
+                  <p className="mt-1.5 text-sm leading-6 text-secondary">{dashboardStats.latestExpense.category}</p>
+                </div>
               </div>
               <div className="rounded-[22px] bg-white/85 px-4 py-4 text-right shadow-sm">
                 <span className="section-eyebrow">Amount</span>
