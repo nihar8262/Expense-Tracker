@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { CategoryIcon } from "../components/CategoryIcon";
+import { PlatformPicker } from "../components/PlatformPicker";
+import { PLATFORMS } from "../lib/platforms";
 import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
 import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 
@@ -15,6 +17,7 @@ type ExpensesPageProps = {
   customCategoryName: string;
   selectedCategory: string;
   selectedTimeRange: TimeRangeFilter;
+  selectedPlatform: string;
   sortNewestFirst: boolean;
   categories: string[];
   visibleExpenses: Expense[];
@@ -41,6 +44,7 @@ type ExpensesPageProps = {
   onSelectedCategoryChange: (value: string) => void;
   onSortNewestFirstChange: (value: boolean) => void;
   onSelectedTimeRangeChange: (range: TimeRangeFilter) => void;
+  onSelectedPlatformChange: (platform: string) => void;
   onExpensesPageChange: (page: number) => void;
   onDeleteSelectedExpenses: () => Promise<void>;
   onToggleSelectAllVisibleExpenses: () => void;
@@ -71,6 +75,7 @@ export function ExpensesPage({
   customCategoryName,
   selectedCategory,
   selectedTimeRange,
+  selectedPlatform,
   sortNewestFirst,
   categories,
   visibleExpenses,
@@ -97,6 +102,7 @@ export function ExpensesPage({
   onSelectedCategoryChange,
   onSortNewestFirstChange,
   onSelectedTimeRangeChange,
+  onSelectedPlatformChange,
   onExpensesPageChange,
   onDeleteSelectedExpenses,
   onToggleSelectAllVisibleExpenses,
@@ -110,10 +116,7 @@ export function ExpensesPage({
 
   function handleEditStart(expense: Parameters<typeof onEditStart>[0]) {
     onEditStart(expense);
-    // On mobile (below lg = 1024px), auto-open the sheet so the form is visible
-    if (window.innerWidth < 1024) {
-      setIsExpenseSheetOpen(true);
-    }
+    setIsExpenseSheetOpen(true);
   }
 
   function handleEditCancel() {
@@ -134,7 +137,12 @@ export function ExpensesPage({
     [form.amount, form.category, form.date, form.description]
   );
   const hasValidationErrors = Object.values(validationErrors).some(Boolean);
-  const activeFilters = [selectedCategory ? `Category: ${selectedCategory}` : null, selectedTimeRange !== "all" ? `Range: ${selectedTimeRange}` : null, !sortNewestFirst ? "Sort: created order" : null].filter(Boolean) as string[];
+  const activeFilters = [
+    selectedCategory ? `Category: ${selectedCategory}` : null,
+    selectedTimeRange !== "all" ? `Range: ${selectedTimeRange}` : null,
+    selectedPlatform ? `Platform: ${selectedPlatform === "none" ? "None" : (PLATFORMS.find(p => p.id === selectedPlatform)?.name ?? selectedPlatform)}` : null,
+    !sortNewestFirst ? "Sort: created order" : null
+  ].filter(Boolean) as string[];
 
   async function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
     setShowValidation(true);
@@ -231,6 +239,17 @@ export function ExpensesPage({
             </SurfaceCard>
           ) : null}
 
+          <div className="grid gap-3">
+            <span className="text-sm font-medium text-secondary">Platform / Source</span>
+            <div className="flex items-center gap-3">
+              <PlatformPicker
+                value={form.platform ?? null}
+                onChange={(platform) => onFormChange((current) => ({ ...current, platform }))}
+                disabled={!currentUserPresent}
+              />
+            </div>
+          </div>
+
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Description</span>
             <textarea
@@ -303,7 +322,7 @@ export function ExpensesPage({
 
       <SurfaceCard className="space-y-5 p-5 sm:p-6">
         <SectionHeader title="Expense view" description="Filter by category, sort order, and time range without losing context." />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <label className="grid gap-2 text-sm font-medium text-secondary">
             Category
             <select value={selectedCategory} disabled={!currentUserPresent} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
@@ -313,6 +332,20 @@ export function ExpensesPage({
                   {category}
                 </option>
               ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            Platform / Source
+            <select value={selectedPlatform} disabled={!currentUserPresent} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
+              <option value="">All platforms</option>
+              <option value="none">No platform</option>
+              {PLATFORMS.filter(p => p.id !== "others").map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              <option value="others">Others</option>
             </select>
           </label>
 
@@ -404,6 +437,9 @@ export function ExpensesPage({
                           <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
                             <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
                           </span>
+                          {expense.platform ? (
+                            <PlatformPicker value={expense.platform} onChange={null} className="shrink-0" />
+                          ) : null}
                           <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
                         </div>
                       </td>
@@ -450,6 +486,9 @@ export function ExpensesPage({
                       <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
                         <CategoryIcon iconId={resolveCategoryIcon(expense.category, availableCategoryOptions)} />
                       </span>
+                      {expense.platform ? (
+                        <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                      ) : null}
                     </div>
                     <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
                   </div>

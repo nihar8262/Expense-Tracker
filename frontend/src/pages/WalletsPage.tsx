@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
+import { PlatformPicker } from "../components/PlatformPicker";
+import { PLATFORMS } from "../lib/platforms";
 import {
   EmptyState,
   ModalFrame,
@@ -41,6 +43,15 @@ type WalletsPageProps = {
     defaultSplitRule: SplitRule;
     members: Array<{ displayName: string; email?: string }>;
   }) => Promise<boolean>;
+  onUpdateWallet: (
+    walletId: string,
+    input: {
+      name: string;
+      description: string;
+      defaultSplitRule: SplitRule;
+      members: Array<{ displayName: string; email?: string }>;
+    },
+  ) => Promise<boolean>;
   onDeleteWallet: (walletId: string) => Promise<boolean>;
   onLeaveWallet: (walletId: string) => Promise<boolean>;
   onAddWalletMember: (
@@ -61,6 +72,7 @@ type WalletsPageProps = {
       date: string;
       splitRule: SplitRule;
       splits: Array<{ memberId: string; value?: string }>;
+      platform?: string | null;
     },
   ) => Promise<boolean>;
   onUpdateWalletExpense: (
@@ -74,6 +86,7 @@ type WalletsPageProps = {
       date: string;
       splitRule: SplitRule;
       splits: Array<{ memberId: string; value?: string }>;
+      platform?: string | null;
     },
   ) => Promise<boolean>;
   onDeleteWalletExpense: (
@@ -188,6 +201,25 @@ const initialWalletBudgetForm: BudgetForm = {
   month: getCurrentMonthValue(),
 };
 
+function getMemberAvatarUrl(displayName: string, email?: string | null) {
+  const hashStr = displayName || email || "User";
+  let hash = 0;
+  for (let i = 0; i < hashStr.length; i++) {
+    hash = hashStr.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = [
+    { bg: "e8f5e9", text: "1b5e20" }, // Green
+    { bg: "e3f2fd", text: "0d47a1" }, // Blue
+    { bg: "f3e5f5", text: "4a148c" }, // Purple
+    { bg: "fff3e0", text: "e65100" }, // Orange
+    { bg: "ffebee", text: "b71c1c" }, // Red
+    { bg: "f1f8e9", text: "33691e" }, // Light Green
+    { bg: "e0f7fa", text: "006064" }, // Cyan
+  ];
+  const color = colors[Math.abs(hash) % colors.length]!;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=${color.bg}&color=${color.text}&bold=true&size=128`;
+}
+
 function parseMemberEntries(
   rawValue: string,
 ): Array<{ displayName: string; email?: string }> {
@@ -225,6 +257,7 @@ export function WalletsPage({
   formatCurrency,
   onSelectWallet,
   onCreateWallet,
+  onUpdateWallet,
   onDeleteWallet,
   onLeaveWallet,
   onAddWalletMember,
@@ -243,6 +276,12 @@ export function WalletsPage({
   const [walletDescription, setWalletDescription] = useState("");
   const [walletMembersText, setWalletMembersText] = useState("");
   const [walletSplitRule, setWalletSplitRule] = useState<SplitRule>("equal");
+  const [isWalletEditModalOpen, setIsWalletEditModalOpen] = useState(false);
+  const [editWalletName, setEditWalletName] = useState("");
+  const [editWalletDescription, setEditWalletDescription] = useState("");
+  const [editWalletMembersText, setEditWalletMembersText] = useState("");
+  const [editWalletSplitRule, setEditWalletSplitRule] = useState<SplitRule>("equal");
+  const [showEditWalletValidation, setShowEditWalletValidation] = useState(false);
   const [inviteDisplayName, setInviteDisplayName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
 
@@ -262,6 +301,7 @@ export function WalletsPage({
   const [editingWalletExpenseId, setEditingWalletExpenseId] = useState<
     string | null
   >(null);
+  const [expensePlatform, setExpensePlatform] = useState<string | null>(null);
 
   const [settlementFromMemberId, setSettlementFromMemberId] = useState("");
   const [settlementToMemberId, setSettlementToMemberId] = useState("");
@@ -310,6 +350,8 @@ export function WalletsPage({
   const [expenseFilterMonth, setExpenseFilterMonth] = useState("all");
   const [expenseFilterCategory, setExpenseFilterCategory] = useState("all");
   const [expenseFilterAmount, setExpenseFilterAmount] = useState("all");
+  const [expenseFilterPlatform, setExpenseFilterPlatform] = useState("all");
+  const [currentWalletExpensesPage, setCurrentWalletExpensesPage] = useState(1);
 
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
   const [settlementFilterMonth, setSettlementFilterMonth] = useState("all");
@@ -320,6 +362,13 @@ export function WalletsPage({
       name: walletName.trim() ? "" : "Wallet name is required.",
     }),
     [walletName],
+  );
+
+  const editWalletErrors = useMemo(
+    () => ({
+      name: editWalletName.trim() ? "" : "Wallet name is required.",
+    }),
+    [editWalletName],
   );
 
   const expenseErrors = useMemo(
@@ -525,12 +574,44 @@ export function WalletsPage({
       items = items.filter((e) => e.date.slice(0, 7) === expenseFilterMonth);
     if (expenseFilterCategory !== "all")
       items = items.filter((e) => e.category === expenseFilterCategory);
+    if (expenseFilterPlatform !== "all") {
+      if (expenseFilterPlatform === "none") {
+        items = items.filter((e) => !e.platform);
+      } else {
+        items = items.filter((e) => e.platform === expenseFilterPlatform);
+      }
+    }
     return filterByAmount(items, expenseFilterAmount);
   }, [
     selectedWallet,
     expenseFilterMonth,
     expenseFilterCategory,
+    expenseFilterPlatform,
     expenseFilterAmount,
+  ]);
+
+  const WALLET_EXPENSES_PAGE_SIZE = 20;
+  const totalWalletExpensePages = Math.max(
+    1,
+    Math.ceil(filteredExpenses.length / WALLET_EXPENSES_PAGE_SIZE),
+  );
+  const paginatedWalletExpenses = useMemo(() => {
+    const startIndex =
+      (currentWalletExpensesPage - 1) * WALLET_EXPENSES_PAGE_SIZE;
+    return filteredExpenses.slice(
+      startIndex,
+      startIndex + WALLET_EXPENSES_PAGE_SIZE,
+    );
+  }, [currentWalletExpensesPage, filteredExpenses]);
+
+  useEffect(() => {
+    setCurrentWalletExpensesPage(1);
+  }, [
+    expenseFilterMonth,
+    expenseFilterCategory,
+    expenseFilterPlatform,
+    expenseFilterAmount,
+    selectedWallet,
   ]);
 
   const filteredSettlements = useMemo(() => {
@@ -539,6 +620,39 @@ export function WalletsPage({
       items = items.filter((s) => s.date.slice(0, 7) === settlementFilterMonth);
     return filterByAmount(items, settlementFilterAmount);
   }, [selectedWallet, settlementFilterMonth, settlementFilterAmount]);
+
+  const activeExpenseFilters = useMemo(() => {
+    return [
+      expenseFilterMonth !== "all"
+        ? `Month: ${formatBudgetMonth(expenseFilterMonth)}`
+        : null,
+      expenseFilterCategory !== "all"
+        ? `Category: ${expenseFilterCategory}`
+        : null,
+      expenseFilterAmount !== "all"
+        ? `Amount: ${
+            expenseFilterAmount === "lt100"
+              ? "Under 100"
+              : expenseFilterAmount === "100to500"
+                ? "100 - 500"
+                : "Over 500"
+          }`
+        : null,
+      expenseFilterPlatform !== "all"
+        ? `Platform: ${
+            expenseFilterPlatform === "none"
+              ? "None"
+              : (PLATFORMS.find((p) => p.id === expenseFilterPlatform)?.name ??
+                expenseFilterPlatform)
+          }`
+        : null,
+    ].filter(Boolean) as string[];
+  }, [
+    expenseFilterMonth,
+    expenseFilterCategory,
+    expenseFilterAmount,
+    expenseFilterPlatform,
+  ]);
 
   useEffect(() => {
     if (!selectedWallet) {
@@ -647,6 +761,57 @@ export function WalletsPage({
     }
   }
 
+  function handleStartWalletEdit() {
+    if (!selectedWallet) return;
+    setEditWalletName(selectedWallet.wallet.name);
+    setEditWalletDescription(selectedWallet.wallet.description ?? "");
+    setEditWalletSplitRule(selectedWallet.wallet.default_split_rule);
+
+    const otherMembers = selectedWallet.members.filter((m) => m.role !== "owner");
+    const membersText = otherMembers
+      .map((m) => {
+        if (m.email) {
+          return `${m.display_name} <${m.email}>`;
+        }
+        return m.display_name;
+      })
+      .join("\n");
+    setEditWalletMembersText(membersText);
+
+    setShowEditWalletValidation(false);
+    setIsWalletEditModalOpen(true);
+  }
+
+  function handleCancelWalletEdit() {
+    setIsWalletEditModalOpen(false);
+    setShowEditWalletValidation(false);
+  }
+
+  async function handleUpdateWalletSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setShowEditWalletValidation(true);
+
+    if (Object.values(editWalletErrors).some(Boolean)) {
+      return;
+    }
+
+    if (!selectedWallet) return;
+
+    const members = parseMemberEntries(editWalletMembersText);
+
+    const updated = await onUpdateWallet(selectedWallet.wallet.id, {
+      name: editWalletName,
+      description: editWalletDescription,
+      defaultSplitRule: editWalletSplitRule,
+      members,
+    });
+
+    if (updated) {
+      setIsWalletEditModalOpen(false);
+      setShowEditWalletValidation(false);
+    }
+  }
+
   async function handleAddWalletMemberSubmit(
     event: FormEvent<HTMLFormElement>,
   ) {
@@ -706,6 +871,7 @@ export function WalletsPage({
       date: expenseDate,
       splitRule: expenseSplitRule,
       splits,
+      platform: expensePlatform,
     };
 
     const created = editingWalletExpenseId
@@ -759,6 +925,7 @@ export function WalletsPage({
       setSplitValues({});
       setAlreadySettledMemberIds([]);
       setEditingWalletExpenseId(null);
+      setExpensePlatform(null);
       setShowExpenseValidation(false);
       setIsMobileExpenseModalOpen(false);
     }
@@ -937,10 +1104,9 @@ export function WalletsPage({
       ),
     );
     setAlreadySettledMemberIds([]);
+    setExpensePlatform(walletExpense.platform ?? null);
 
-    if (window.innerWidth < 1536) {
-      setIsMobileExpenseModalOpen(true);
-    }
+    setIsMobileExpenseModalOpen(true);
   }
 
   async function handleDeleteExpenseClick(walletExpenseId: string) {
@@ -966,6 +1132,7 @@ export function WalletsPage({
         setExpenseDescription("");
         setExpenseDate(getTodayIsoDate());
         setSplitValues({});
+        setExpensePlatform(null);
       }
     } finally {
       setDeletingExpenseIds((current) =>
@@ -1154,6 +1321,16 @@ export function WalletsPage({
           ) : null}
         </div>
 
+        <div className="grid gap-3">
+          <span className="text-sm font-medium text-secondary">Platform / Source</span>
+          <div className="flex items-center gap-3">
+            <PlatformPicker
+              value={expensePlatform}
+              onChange={setExpensePlatform}
+            />
+          </div>
+        </div>
+
         <label className="grid gap-2 text-sm font-medium text-secondary">
           <span className="required-mark">Description</span>
           <input
@@ -1263,7 +1440,13 @@ export function WalletsPage({
               className="ui-button-secondary"
               onClick={() => {
                 setEditingWalletExpenseId(null);
+                setExpensePlatform(null);
                 setIsMobileExpenseModalOpen(false);
+                setExpenseAmount("");
+                setExpenseCategory("");
+                setExpenseDescription("");
+                setExpenseDate(getTodayIsoDate());
+                setSplitValues({});
               }}
             >
               Cancel edit
@@ -1554,14 +1737,23 @@ export function WalletsPage({
                         default
                       </span>
                       {isWalletOwner ? (
-                        <button
-                          type="button"
-                          className="ui-button-danger"
-                          onClick={() => void handleDeleteWalletClick()}
-                          disabled={isSubmitting || isDeletingWallet}
-                        >
-                          {isDeletingWallet ? "Deleting..." : "Delete group"}
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="ui-button-secondary"
+                            onClick={handleStartWalletEdit}
+                          >
+                            Edit group
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-button-danger"
+                            onClick={() => void handleDeleteWalletClick()}
+                            disabled={isSubmitting || isDeletingWallet}
+                          >
+                            {isDeletingWallet ? "Deleting..." : "Delete group"}
+                          </button>
+                        </>
                       ) : currentWalletMember ? (
                         <button
                           type="button"
@@ -1583,16 +1775,23 @@ export function WalletsPage({
                       className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <strong className="block text-base text-ink">
-                            {member.display_name}
-                          </strong>
-                          <p className="mt-1 text-sm text-secondary">
-                            {member.role}
-                            {member.invite_status === "pending"
-                              ? " • invite pending"
-                              : ""}
-                          </p>
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={getMemberAvatarUrl(member.display_name, member.email)}
+                            alt={member.display_name}
+                            className="h-10 w-10 shrink-0 rounded-full object-cover border border-[color:var(--border)]"
+                          />
+                          <div>
+                            <strong className="block text-base text-ink">
+                              {member.display_name}
+                            </strong>
+                            <p className="mt-1 text-sm text-secondary">
+                              {member.role}
+                              {member.invite_status === "pending"
+                                ? " • invite pending"
+                                : ""}
+                            </p>
+                          </div>
                         </div>
                         {isWalletOwner && member.role !== "owner" ? (
                           <button
@@ -1814,32 +2013,86 @@ export function WalletsPage({
                       editingSettlementId ? "Edit payback" : "Record a payback"
                     }
                     description="Log repayments to keep group balances current and the shared ledger easy to reconcile."
+                    actions={
+                      <button
+                        type="button"
+                        className="ui-button-secondary"
+                        onClick={() => setIsSettlementModalOpen(true)}
+                      >
+                        Payback history
+                      </button>
+                    }
                   />
                   {renderSettlementForm()}
                 </SurfaceCard>
               </section>
 
-              <section className="grid gap-5 2xl:grid-cols-2">
-                <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                  <SectionHeader
-                    eyebrow="Shared expenses"
-                    title="Recent group activity"
-                    description="The latest shared purchases inside this wallet."
+              <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                <SectionHeader
+                  eyebrow="Shared expenses"
+                  title="Recent group activity"
+                  description="The latest shared purchases inside this wallet."
+                  actions={
+                    <button
+                      type="button"
+                      className="ui-button-secondary"
+                      onClick={() => setIsExpenseModalOpen(true)}
+                    >
+                      Filter expenses
+                    </button>
+                  }
+                />
+                {activeExpenseFilters.length > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3">
+                    <p className="text-sm text-secondary">
+                      Showing: {activeExpenseFilters.join(" • ")}
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-primary hover:underline"
+                      onClick={() => {
+                        setExpenseFilterMonth("all");
+                        setExpenseFilterCategory("all");
+                        setExpenseFilterAmount("all");
+                        setExpenseFilterPlatform("all");
+                      }}
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : null}
+                {selectedWallet.expenses.length === 0 ? (
+                  <EmptyState
+                    title="No shared expenses yet"
+                    description="Add the first group transaction to start tracking how this wallet is being used."
                   />
-                  {selectedWallet.expenses.length === 0 ? (
-                    <EmptyState
-                      title="No shared expenses yet"
-                      description="Add the first group transaction to start tracking how this wallet is being used."
-                    />
-                  ) : (
-                    <>
-                      <div className="grid gap-3">
-                        {selectedWallet.expenses.slice(0, 5).map((expense) => (
-                          <article
-                            key={expense.id}
-                            className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
-                          >
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                ) : filteredExpenses.length === 0 ? (
+                  <EmptyState
+                    title="No expenses match the current filters"
+                    description="Adjust the platform, category, or date filters to find what you're looking for."
+                  />
+                ) : (
+                  <>
+                    <div className="grid gap-3">
+                      {paginatedWalletExpenses.map((expense) => (
+                        <article
+                          key={expense.id}
+                          className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                        >
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                <CategoryIcon
+                                  iconId={
+                                    budgetCategoryOptions.find(
+                                      (option) => option.label === expense.category,
+                                    )?.icon ?? "other"
+                                  }
+                                />
+                              </span>
+                              {expense.platform ? (
+                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0" />
+                              ) : null}
                               <div className="space-y-1.5">
                                 <strong className="block text-base text-ink">
                                   {expense.description}
@@ -1849,147 +2102,83 @@ export function WalletsPage({
                                   {expense.paid_by_member_name} · {expense.date}
                                 </p>
                               </div>
-                              <div className="text-left lg:text-right">
-                                <strong className="block text-xl text-ink">
-                                  {formatCurrency(expense.amount)}
-                                </strong>
-                                <span className="text-sm text-secondary">
-                                  {expense.split_rule} split
-                                </span>
-                              </div>
                             </div>
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                className="ui-button-ghost"
-                                onClick={() =>
-                                  handleStartExpenseEdit(expense.id)
-                                }
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="ui-button-danger"
-                                disabled={deletingExpenseIds.includes(
-                                  expense.id,
-                                )}
-                                onClick={() =>
-                                  void handleDeleteExpenseClick(expense.id)
-                                }
-                              >
-                                {deletingExpenseIds.includes(expense.id)
-                                  ? "Deleting..."
-                                  : "Delete"}
-                              </button>
+                            <div className="text-left lg:text-right">
+                              <strong className="block text-xl text-ink">
+                                {formatCurrency(expense.amount)}
+                              </strong>
+                              <span className="text-sm text-secondary">
+                                {expense.split_rule} split
+                              </span>
                             </div>
-                          </article>
-                        ))}
-                      </div>
-                      {selectedWallet.expenses.length > 5 ? (
-                        <button
-                          type="button"
-                          className="ui-button-secondary w-full justify-center"
-                          onClick={() => {
-                            setExpenseFilterMonth("all");
-                            setExpenseFilterCategory("all");
-                            setExpenseFilterAmount("all");
-                            setIsExpenseModalOpen(true);
-                          }}
-                        >
-                          Show all {selectedWallet.expenses.length} expenses
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </SurfaceCard>
-
-                <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                  <SectionHeader
-                    eyebrow="Settlements"
-                    title="Payback history"
-                    description="See who repaid whom and keep the group record clean."
-                  />
-                  {selectedWallet.settlements.length === 0 ? (
-                    <EmptyState
-                      title="No settlements yet"
-                      description="Record a payback once members start settling balances inside this wallet."
-                    />
-                  ) : (
-                    <>
-                      <div className="grid gap-3">
-                        {selectedWallet.settlements
-                          .slice(0, 5)
-                          .map((settlement) => (
-                            <article
-                              key={settlement.id}
-                              className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="ui-button-ghost"
+                              onClick={() =>
+                                handleStartExpenseEdit(expense.id)
+                              }
                             >
-                              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                                <div className="space-y-1.5">
-                                  <strong className="block text-base text-ink">
-                                    {settlement.from_member_name} paid{" "}
-                                    {settlement.to_member_name}
-                                  </strong>
-                                  <p className="text-sm leading-6 text-secondary">
-                                    {settlement.date}
-                                    {settlement.note
-                                      ? ` · ${settlement.note}`
-                                      : ""}
-                                  </p>
-                                </div>
-                                <strong className="text-xl text-ink">
-                                  {formatCurrency(settlement.amount)}
-                                </strong>
-                              </div>
-                              <div className="mt-4 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className="ui-button-ghost"
-                                  onClick={() =>
-                                    handleStartSettlementEdit(settlement.id)
-                                  }
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ui-button-danger"
-                                  disabled={deletingSettlementIds.includes(
-                                    settlement.id,
-                                  )}
-                                  onClick={() =>
-                                    void handleDeleteSettlementClick(
-                                      settlement.id,
-                                    )
-                                  }
-                                >
-                                  {deletingSettlementIds.includes(settlement.id)
-                                    ? "Deleting..."
-                                    : "Delete"}
-                                </button>
-                              </div>
-                            </article>
-                          ))}
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger"
+                              disabled={deletingExpenseIds.includes(
+                                expense.id,
+                              )}
+                              onClick={() =>
+                                void handleDeleteExpenseClick(expense.id)
+                              }
+                            >
+                              {deletingExpenseIds.includes(expense.id)
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    {totalWalletExpensePages > 1 ? (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4">
+                        <p className="text-sm text-secondary">
+                          Page {currentWalletExpensesPage} of {totalWalletExpensePages}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="ui-button-secondary"
+                            disabled={currentWalletExpensesPage === 1}
+                            onClick={() =>
+                              setCurrentWalletExpensesPage(
+                                currentWalletExpensesPage - 1,
+                              )
+                            }
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            className="ui-button-secondary"
+                            disabled={
+                              currentWalletExpensesPage ===
+                              totalWalletExpensePages
+                            }
+                            onClick={() =>
+                              setCurrentWalletExpensesPage(
+                                currentWalletExpensesPage + 1,
+                              )
+                            }
+                          >
+                            Next
+                          </button>
+                        </div>
                       </div>
-                      {selectedWallet.settlements.length > 5 ? (
-                        <button
-                          type="button"
-                          className="ui-button-secondary w-full justify-center"
-                          onClick={() => {
-                            setSettlementFilterMonth("all");
-                            setSettlementFilterAmount("all");
-                            setIsSettlementModalOpen(true);
-                          }}
-                        >
-                          Show all {selectedWallet.settlements.length}{" "}
-                          settlements
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </SurfaceCard>
-              </section>
+                    ) : null}
+                  </>
+                ) }
+              </SurfaceCard>
 
               {isExpenseModalOpen ? (
                 <ModalFrame
@@ -2015,10 +2204,11 @@ export function WalletsPage({
                         Close
                       </button>
                     </div>
-                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                      <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                    <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
                         Month
                         <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
                           value={expenseFilterMonth}
                           onChange={(e) =>
                             setExpenseFilterMonth(e.target.value)
@@ -2032,38 +2222,57 @@ export function WalletsPage({
                           ))}
                         </select>
                       </label>
-                      <div className="flex gap-2 sm:flex-row">
-                        <label className="grid gap-1.5 text-xs w-full font-medium text-secondary">
-                          Category
-                          <select
-                            value={expenseFilterCategory}
-                            onChange={(e) =>
-                              setExpenseFilterCategory(e.target.value)
-                            }
-                          >
-                            <option value="all">All categories</option>
-                            {expenseCategoryOptions.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="grid gap-1.5 text-xs w-full font-medium text-secondary">
-                          Amount
-                          <select
-                            value={expenseFilterAmount}
-                            onChange={(e) =>
-                              setExpenseFilterAmount(e.target.value)
-                            }
-                          >
-                            <option value="all">Any amount</option>
-                            <option value="lt100">Under 100</option>
-                            <option value="100to500">100 – 500</option>
-                            <option value="gt500">Over 500</option>
-                          </select>
-                        </label>
-                      </div>
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                        Category
+                        <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
+                          value={expenseFilterCategory}
+                          onChange={(e) =>
+                            setExpenseFilterCategory(e.target.value)
+                          }
+                        >
+                          <option value="all">All categories</option>
+                          {expenseCategoryOptions.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                        Amount
+                        <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
+                          value={expenseFilterAmount}
+                          onChange={(e) =>
+                            setExpenseFilterAmount(e.target.value)
+                          }
+                        >
+                          <option value="all">Any amount</option>
+                          <option value="lt100">Under 100</option>
+                          <option value="100to500">100 – 500</option>
+                          <option value="gt500">Over 500</option>
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                        Platform / Source
+                        <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
+                          value={expenseFilterPlatform}
+                          onChange={(e) =>
+                            setExpenseFilterPlatform(e.target.value)
+                          }
+                        >
+                          <option value="all">All platforms</option>
+                          <option value="none">No platform</option>
+                          {PLATFORMS.filter(p => p.id !== "others").map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                          <option value="others">Others</option>
+                        </select>
+                      </label>
                     </div>
                   </div>
                   <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
@@ -2079,14 +2288,28 @@ export function WalletsPage({
                             className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 space-y-1.5">
-                                <strong className="block truncate text-base text-ink">
-                                  {expense.description}
-                                </strong>
-                                <p className="text-sm leading-6 text-secondary">
-                                  {expense.category} · paid by{" "}
-                                  {expense.paid_by_member_name} · {expense.date}
-                                </p>
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                  <CategoryIcon
+                                    iconId={
+                                      budgetCategoryOptions.find(
+                                        (option) => option.label === expense.category,
+                                      )?.icon ?? "other"
+                                    }
+                                  />
+                                </span>
+                                {expense.platform ? (
+                                  <PlatformPicker value={expense.platform} onChange={null} className="shrink-0" />
+                                ) : null}
+                                <div className="min-w-0 space-y-1.5">
+                                  <strong className="block truncate text-base text-ink">
+                                    {expense.description}
+                                  </strong>
+                                  <p className="text-sm leading-6 text-secondary">
+                                    {expense.category} · paid by{" "}
+                                    {expense.paid_by_member_name} · {expense.date}
+                                  </p>
+                                </div>
                               </div>
                               <div className="shrink-0 text-left sm:text-right">
                                 <strong className="block text-xl text-ink">
@@ -2155,10 +2378,11 @@ export function WalletsPage({
                         Close
                       </button>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <label className="grid gap-1.5 text-xs w-full font-medium text-secondary">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
                         Month
                         <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
                           value={settlementFilterMonth}
                           onChange={(e) =>
                             setSettlementFilterMonth(e.target.value)
@@ -2172,9 +2396,10 @@ export function WalletsPage({
                           ))}
                         </select>
                       </label>
-                      <label className="grid gap-1.5 text-xs w-full font-medium text-secondary">
+                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
                         Amount
                         <select
+                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
                           value={settlementFilterAmount}
                           onChange={(e) =>
                             setSettlementFilterAmount(e.target.value)
@@ -2316,6 +2541,96 @@ export function WalletsPage({
           <div className="overflow-y-auto px-5 py-5">
             {renderSettlementForm()}
           </div>
+        </ModalFrame>
+      ) : null}
+
+      {isWalletEditModalOpen ? (
+        <ModalFrame
+          onClose={() => handleCancelWalletEdit()}
+          className="max-w-[520px] overflow-y-auto p-5 sm:p-6"
+        >
+          <SectionHeader
+            eyebrow="Edit wallet"
+            title="Edit group details"
+            description="Update the name, description, default split rule, and members of this shared group."
+          />
+          <form
+            className="mt-5 grid gap-4"
+            onSubmit={handleUpdateWalletSubmit}
+            noValidate
+          >
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">Wallet name</span>
+              <input
+                value={editWalletName}
+                onChange={(event) => setEditWalletName(event.target.value)}
+                placeholder="Apartment essentials"
+                required
+                aria-invalid={
+                  showEditWalletValidation &&
+                  Boolean(editWalletErrors.name)
+                }
+              />
+              {showEditWalletValidation && editWalletErrors.name ? (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  {editWalletErrors.name}
+                </span>
+              ) : null}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Description
+              <textarea
+                value={editWalletDescription}
+                onChange={(event) => setEditWalletDescription(event.target.value)}
+                rows={3}
+                placeholder="What this wallet is for"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Default split rule
+              <select
+                value={editWalletSplitRule}
+                onChange={(event) =>
+                  setEditWalletSplitRule(event.target.value as SplitRule)
+                }
+              >
+                <option value="equal">Equal</option>
+                <option value="fixed">Fixed amounts</option>
+                <option value="percentage">Percentages</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Members
+              <textarea
+                value={editWalletMembersText}
+                onChange={(event) => setEditWalletMembersText(event.target.value)}
+                rows={4}
+                placeholder="One name per line or comma separated"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => handleCancelWalletEdit()}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button-primary"
+                disabled={isSubmitting}
+              >
+                {submittingAction === "update-wallet"
+                  ? "Saving..."
+                  : "Save changes"}
+              </button>
+            </div>
+          </form>
         </ModalFrame>
       ) : null}
     </>

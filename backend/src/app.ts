@@ -39,6 +39,7 @@ import {
   handleUpdateWalletBudget,
   handleUpdateWalletExpense,
   handleUpdateWalletSettlement,
+  handleUpdateWallet,
   handleUpsertReminderPreferences
 } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
@@ -160,6 +161,18 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to load wallet."
+    );
+  });
+
+  app.put("/api/wallets/:walletId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateWallet(request.body, request.params.walletId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update wallet."
     );
   });
 

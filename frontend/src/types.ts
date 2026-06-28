@@ -8,6 +8,7 @@ export type Expense = {
 	description: string;
 	date: string;
 	created_at: string;
+	platform?: string | null;
 };
 
 export type ExpenseForm = {
@@ -15,6 +16,7 @@ export type ExpenseForm = {
 	category: string;
 	description: string;
 	date: string;
+	platform?: string | null;
 };
 
 export type BudgetScope = "monthly" | "category";
@@ -78,6 +80,7 @@ export type WalletExpense = {
 	date: string;
 	split_rule: SplitRule;
 	created_at: string;
+	platform?: string | null;
 	splits: WalletExpenseSplit[];
 };
 
@@ -217,12 +220,19 @@ export type CategoryBreakdownItem = {
 	share: number;
 };
 
+export type TopPlatformItem = {
+	platform: string;
+	amount: number;
+	formattedAmount: string;
+};
+
 export type DashboardStats = {
 	expenseCount: number;
 	average: string;
 	topCategory: CategoryBreakdownItem | null;
 	latestExpense: Expense | null;
 	categoryBreakdown: CategoryBreakdownItem[];
+	topPlatform: TopPlatformItem | null;
 };
 
 export type DashboardInsight = {

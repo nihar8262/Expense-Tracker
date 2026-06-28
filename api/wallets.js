@@ -2,6 +2,7 @@ const {
   createWalletBudgetForUser,
   createWalletExpenseForUser,
   createWalletForUser,
+  updateWalletForUser,
   createWalletMemberForUser,
   removeWalletMemberForUser,
   createWalletSettlementForUser,
@@ -64,6 +65,15 @@ module.exports = async function handler(request, response) {
       }
     }
 
+    if (request.method === "PUT") {
+      try {
+        const result = await updateWalletForUser(user.id, walletId, request.body);
+        return sendResult(response, result);
+      } catch (error) {
+        return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to update wallet." });
+      }
+    }
+
     if (request.method === "DELETE") {
       try {
         const result = await deleteWalletForUser(user.id, walletId);
@@ -73,7 +83,7 @@ module.exports = async function handler(request, response) {
       }
     }
 
-    return methodNotAllowed(response, "GET, DELETE");
+    return methodNotAllowed(response, "GET, PUT, DELETE");
   }
 
   const [resource, resourceId] = segments.slice(1);

@@ -57,7 +57,8 @@ const createExpenseSchema = z.object({
   }),
   category: z.string().trim().min(1, "Category is required.").max(64, "Category is too long."),
   description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
-  date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value.")
+  date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
+  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
 });
 
 const expensesQuerySchema = z.object({
@@ -72,7 +73,8 @@ function createExpenseRequestHash(input) {
         amount: input.amount,
         category: input.category.trim(),
         description: input.description.trim(),
-        date: input.date
+        date: input.date,
+        platform: input.platform ?? null
       })
     )
     .digest("hex");
@@ -93,7 +95,8 @@ function mapExpense(row) {
     category: row.category,
     description: row.description,
     date: asIsoDate(row.expense_date),
-    created_at: asIsoTimestamp(row.created_at)
+    created_at: asIsoTimestamp(row.created_at),
+    platform: row.platform ?? null
   };
 }
 
@@ -176,7 +179,7 @@ async function getExistingExpense(tx, idempotencyKey, requestHash) {
   }
 
   const expenses = await tx`
-    SELECT id, amount_minor, category, description, expense_date, created_at
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform
     FROM expenses
     WHERE id = ${existingRequest.expense_id}
   `;
@@ -215,7 +218,7 @@ async function listExpenses(rawQuery, userId) {
     : sql`ORDER BY created_at DESC`;
 
   const rows = await sql`
-    SELECT id, amount_minor, category, description, expense_date, created_at
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform
     FROM expenses
     ${whereClause}
     ${orderClause}
@@ -270,9 +273,9 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
       const createdAt = new Date().toISOString();
 
       const insertedExpenses = await tx`
-        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at)
-        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt})
-        RETURNING id, amount_minor, category, description, expense_date, created_at
+        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform)
+        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt}, ${result.data.platform ?? null})
+        RETURNING id, amount_minor, category, description, expense_date, created_at, platform
       `;
 
       await tx`
@@ -326,9 +329,10 @@ async function updateExpense(rawBody, expenseId, userId) {
     SET amount_minor = ${result.data.amount},
         category = ${result.data.category.trim()},
         description = ${result.data.description.trim()},
-        expense_date = ${result.data.date}
+        expense_date = ${result.data.date},
+        platform = ${result.data.platform ?? null}
     WHERE id = ${expenseId} AND user_id = ${userId}
-    RETURNING id, amount_minor, category, description, expense_date, created_at
+    RETURNING id, amount_minor, category, description, expense_date, created_at, platform
   `;
 
   if (!rows[0]) {

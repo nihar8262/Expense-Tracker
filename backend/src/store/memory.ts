@@ -50,6 +50,7 @@ type StoredExpense = {
   description: string;
   date: string;
   createdAt: string;
+  platform: string | null;
 };
 
 type StoredIdempotency = {
@@ -107,6 +108,7 @@ type StoredWalletExpense = {
   date: string;
   splitRule: "equal" | "fixed" | "percentage";
   createdAt: string;
+  platform: string | null;
 };
 
 type StoredWalletExpenseSplit = {
@@ -177,7 +179,8 @@ function mapExpense(expense: StoredExpense): ExpenseRecord {
     category: expense.category,
     description: expense.description,
     date: expense.date,
-    created_at: expense.createdAt
+    created_at: expense.createdAt,
+    platform: expense.platform
   };
 }
 
@@ -444,6 +447,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
           date: expense.date,
           split_rule: expense.splitRule,
           created_at: expense.createdAt,
+          platform: expense.platform ?? null,
           splits
         };
       });
@@ -661,7 +665,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       category: input.category.trim(),
       description: input.description.trim(),
       date: input.date,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      platform: input.platform ?? null
     };
 
     expenses.set(nextExpense.id, nextExpense);
@@ -704,7 +709,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       amountMinor: input.amount,
       category: input.category.trim(),
       description: input.description.trim(),
-      date: input.date
+      date: input.date,
+      platform: input.platform ?? null
     };
 
     expenses.set(expenseId, updatedExpense);
@@ -825,6 +831,81 @@ export function createMemoryExpenseStore(): ExpenseStore {
         inviteStatus: member.email?.trim() ? "pending" : "linked",
         joinedAt: createdAt
       });
+    }
+
+    return buildWalletDetail(walletId);
+  }
+
+  async function updateWallet(userId: string, walletId: string, input: CreateWalletInput): Promise<WalletDetailRecord> {
+    const wallet = wallets.get(walletId);
+
+    if (!wallet) {
+      throw new WalletNotFoundError();
+    }
+
+    assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can edit this group.");
+    }
+
+    wallet.name = input.name.trim();
+    wallet.description = input.description?.trim() || null;
+    wallet.defaultSplitRule = input.defaultSplitRule;
+
+    const currentMembers = [...walletMembers.values()].filter((m) => m.walletId === walletId);
+    const ownerMember = currentMembers.find((m) => m.role === "owner");
+    const keptMemberIds = new Set<string>();
+    if (ownerMember) {
+      keptMemberIds.add(ownerMember.id);
+    }
+
+    for (const member of input.members) {
+      const normalizedName = member.displayName.trim();
+      const normalizedEmail = member.email?.trim().toLowerCase() || null;
+
+      if (ownerMember && (normalizedName.toLowerCase() === ownerMember.displayName.toLowerCase() || (normalizedEmail && ownerMember.email && normalizedEmail === ownerMember.email.toLowerCase()))) {
+        continue;
+      }
+
+      let existingMember = null;
+      if (normalizedEmail) {
+        existingMember = currentMembers.find((m) => m.email && m.email.toLowerCase() === normalizedEmail);
+      } else {
+        existingMember = currentMembers.find((m) => m.displayName.toLowerCase() === normalizedName.toLowerCase());
+      }
+
+      if (existingMember) {
+        existingMember.displayName = normalizedName;
+        keptMemberIds.add(existingMember.id);
+      } else {
+        const newId = randomUUID();
+        walletMembers.set(newId, {
+          id: newId,
+          walletId,
+          userId: null,
+          displayName: normalizedName,
+          email: normalizedEmail,
+          role: "member",
+          inviteStatus: normalizedEmail ? "pending" : "linked",
+          joinedAt: new Date().toISOString()
+        });
+        keptMemberIds.add(newId);
+      }
+    }
+
+    for (const member of currentMembers) {
+      if (keptMemberIds.has(member.id)) {
+        continue;
+      }
+
+      if (memberHasWalletHistory(member.id)) {
+        member.userId = null;
+        member.email = null;
+        member.inviteStatus = "declined";
+      } else {
+        walletMembers.delete(member.id);
+      }
     }
 
     return buildWalletDetail(walletId);
@@ -1086,7 +1167,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       description: input.description.trim(),
       date: input.date,
       splitRule: input.splitRule,
-      createdAt
+      createdAt,
+      platform: input.platform ?? null
     };
 
     const normalizedSplits =
@@ -1132,7 +1214,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       category: input.category.trim(),
       description: input.description.trim(),
       date: input.date,
-      splitRule: input.splitRule
+      splitRule: input.splitRule,
+      platform: input.platform ?? null
     });
 
     const normalizedSplits =
@@ -1515,6 +1598,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     updateBudget,
     deleteBudget,
     createWallet,
+    updateWallet,
     listWallets,
     getWallet,
     deleteWallet,

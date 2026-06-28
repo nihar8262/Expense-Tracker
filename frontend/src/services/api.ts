@@ -181,6 +181,20 @@ export async function createWallet(
   return body.wallet;
 }
 
+export async function updateWallet(
+  walletId: string,
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> },
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: payload
+  }, "Failed to update wallet.");
+  return body.wallet;
+}
+
 export async function listWallets(user: User): Promise<Wallet[]> {
   const body = await apiRequest<{ wallets: Wallet[] }>(user, { url: buildWalletsUrl(), method: "GET" }, "Failed to load wallets.");
   return body.wallets;
@@ -258,7 +272,7 @@ export async function deleteWalletBudget(walletId: string, walletBudgetId: strin
 
 export async function createSharedWalletExpense(
   walletId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses`;
@@ -273,7 +287,7 @@ export async function createSharedWalletExpense(
 export async function updateSharedWalletExpense(
   walletId: string,
   walletExpenseId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> },
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;

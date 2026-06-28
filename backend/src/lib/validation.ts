@@ -51,7 +51,8 @@ export const createExpenseSchema = z.object({
   }),
   category: z.string().trim().min(1, "Category is required.").max(64, "Category is too long."),
   description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
-  date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value.")
+  date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
+  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
 });
 
 export const expensesQuerySchema = z.object({
@@ -139,7 +140,8 @@ export const createWalletExpenseSchema = z
     description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
     date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
     splitRule: z.enum(["equal", "fixed", "percentage"]),
-    splits: z.array(walletSplitSchema).min(1, "At least one split member is required.")
+    splits: z.array(walletSplitSchema).min(1, "At least one split member is required."),
+    platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
   })
   .transform((value, context) => {
     const normalizedSplits = value.splits.map((split, index) => {

@@ -157,7 +157,8 @@ const createWalletExpenseSchema = z
     description: z.string().trim().min(1).max(280),
     date: z.string().trim().refine(isValidIsoDate),
     splitRule: z.enum(["equal", "fixed", "percentage"]),
-    splits: z.array(z.object({ memberId: z.string().trim().min(1), value: z.union([z.string(), z.number()]).optional() })).min(1)
+    splits: z.array(z.object({ memberId: z.string().trim().min(1), value: z.union([z.string(), z.number()]).optional() })).min(1),
+    platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
   })
   .transform((value, context) => ({
     ...value,
@@ -556,7 +557,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
   const members = await sql`SELECT id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at FROM wallet_members WHERE wallet_id = ${walletId} ORDER BY joined_at ASC`;
   const expenseCountRows = await sql`SELECT COUNT(*)::int AS total FROM wallet_expenses WHERE wallet_id = ${walletId}`;
   const expenseRows = await sql`
-    SELECT wallet_expenses.id, wallet_expenses.wallet_id, wallet_expenses.paid_by_member_id, payer.display_name AS paid_by_member_name, wallet_expenses.amount_minor, wallet_expenses.category, wallet_expenses.description, wallet_expenses.expense_date, wallet_expenses.split_rule, wallet_expenses.created_at
+    SELECT wallet_expenses.id, wallet_expenses.wallet_id, wallet_expenses.paid_by_member_id, payer.display_name AS paid_by_member_name, wallet_expenses.amount_minor, wallet_expenses.category, wallet_expenses.description, wallet_expenses.expense_date, wallet_expenses.split_rule, wallet_expenses.created_at, wallet_expenses.platform
     FROM wallet_expenses
     INNER JOIN wallet_members AS payer ON payer.id = wallet_expenses.paid_by_member_id
     WHERE wallet_expenses.wallet_id = ${walletId}
@@ -629,7 +630,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     wallet: mapWallet(walletRows[0]),
     members: members.map(mapWalletMember),
     budgets: walletBudgetRows.map((budget) => ({ id: budget.id, wallet_id: budget.wallet_id, amount: formatMinorUnits(Number(budget.amount_minor)), scope: budget.budget_scope, category: budget.category, month: budget.budget_month, created_at: asIsoTimestamp(budget.created_at) })),
-    expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), splits: splitMap.get(expense.id) ?? [] })),
+    expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), platform: expense.platform ?? null, splits: splitMap.get(expense.id) ?? [] })),
     balances: balanceRows.map((balance) => ({ member_id: balance.member_id, member_name: balance.member_name, net_amount: formatMinorUnits(Number(balance.net_amount_minor)) })),
     settlements: settlementRows.map((settlement) => ({ id: settlement.id, wallet_id: settlement.wallet_id, from_member_id: settlement.from_member_id, from_member_name: settlement.from_member_name, to_member_id: settlement.to_member_id, to_member_name: settlement.to_member_name, amount: formatMinorUnits(Number(settlement.amount_minor)), date: asIsoDate(settlement.settlement_date), note: settlement.note, created_at: asIsoTimestamp(settlement.created_at) })),
     expensePagination: {
@@ -676,6 +677,86 @@ async function createWalletForUser(user, rawBody) {
     return loadWalletDetail(tx, walletId);
   });
   return { status: 201, body: { wallet } };
+}
+
+async function updateWalletForUser(userId, walletId, rawBody) {
+  const result = createWalletSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid wallet payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const wallet = walletRows[0];
+    if (!wallet) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (wallet.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can edit this group.");
+    }
+
+    await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule} WHERE id = ${walletId}`;
+
+    const currentMembers = await tx`SELECT id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId}`;
+    const ownerMember = currentMembers.find((m) => m.member_role === "owner");
+    const keptMemberIds = new Set();
+    if (ownerMember) {
+      keptMemberIds.add(ownerMember.id);
+    }
+
+    for (const member of result.data.members) {
+      const normalizedName = member.displayName.trim();
+      const normalizedEmail = member.email?.trim().toLowerCase() || null;
+
+      if (ownerMember && (normalizedName.toLowerCase() === ownerMember.display_name.toLowerCase() || (normalizedEmail && ownerMember.email && normalizedEmail === ownerMember.email.toLowerCase()))) {
+        continue;
+      }
+
+      let existingMember = null;
+      if (normalizedEmail) {
+        existingMember = currentMembers.find((m) => m.email && m.email.toLowerCase() === normalizedEmail);
+      } else {
+        existingMember = currentMembers.find((m) => m.display_name.toLowerCase() === normalizedName.toLowerCase());
+      }
+
+      if (existingMember) {
+        if (existingMember.display_name !== normalizedName) {
+          await tx`UPDATE wallet_members SET display_name = ${normalizedName} WHERE id = ${existingMember.id}`;
+        }
+        keptMemberIds.add(existingMember.id);
+      } else {
+        const newId = randomUUID();
+        await tx`INSERT INTO wallet_members (id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at) VALUES (${newId}, ${walletId}, ${null}, ${normalizedName}, ${normalizedEmail}, ${"member"}, ${normalizedEmail ? "pending" : "linked"}, ${new Date().toISOString()})`;
+        keptMemberIds.add(newId);
+      }
+    }
+
+    for (const member of currentMembers) {
+      if (keptMemberIds.has(member.id)) {
+        continue;
+      }
+
+      const historyRows = await tx`
+        SELECT
+          EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
+          EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
+          EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+      `;
+
+      const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+
+      if (hasHistory) {
+        await tx`UPDATE wallet_members SET user_id = ${null}, email = ${null}, invite_status = ${"declined"} WHERE id = ${member.id}`;
+      } else {
+        await tx`DELETE FROM wallet_members WHERE id = ${member.id}`;
+      }
+    }
+
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 200, body: { wallet } };
 }
 
 async function getWalletForUser(userId, walletId, query = {}) {
@@ -1081,7 +1162,7 @@ async function createWalletExpenseForUser(userId, walletId, rawBody) {
       throw new Error("One or more members do not belong to this wallet.");
     }
     const expenseId = randomUUID();
-    await tx`INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at) VALUES (${expenseId}, ${walletId}, ${result.data.paidByMemberId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${result.data.splitRule}, ${new Date().toISOString()})`;
+    await tx`INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at, platform) VALUES (${expenseId}, ${walletId}, ${result.data.paidByMemberId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${result.data.splitRule}, ${new Date().toISOString()}, ${result.data.platform ?? null})`;
     const splits = result.data.splitRule === "equal" ? buildEqualSplits(result.data.amount, result.data.splits.map((split) => split.memberId)) : result.data.splitRule === "fixed" ? result.data.splits.map((split) => ({ memberId: split.memberId, amountMinor: split.value ?? 0, percentageBasisPoints: null })) : buildPercentageSplits(result.data.amount, result.data.splits);
     for (const split of splits) {
       await tx`INSERT INTO wallet_expense_splits (wallet_expense_id, member_id, amount_minor, percentage_basis_points) VALUES (${expenseId}, ${split.memberId}, ${split.amountMinor}, ${split.percentageBasisPoints})`;
@@ -1112,7 +1193,7 @@ async function updateWalletExpenseForUser(userId, walletId, walletExpenseId, raw
     }
     await tx`
       UPDATE wallet_expenses
-      SET paid_by_member_id = ${result.data.paidByMemberId}, amount_minor = ${result.data.amount}, category = ${result.data.category.trim()}, description = ${result.data.description.trim()}, expense_date = ${result.data.date}, split_rule = ${result.data.splitRule}
+      SET paid_by_member_id = ${result.data.paidByMemberId}, amount_minor = ${result.data.amount}, category = ${result.data.category.trim()}, description = ${result.data.description.trim()}, expense_date = ${result.data.date}, split_rule = ${result.data.splitRule}, platform = ${result.data.platform ?? null}
       WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}
     `;
     await tx`DELETE FROM wallet_expense_splits WHERE wallet_expense_id = ${walletExpenseId}`;
@@ -1543,6 +1624,7 @@ module.exports = {
   linkWalletInvitesForUser,
   listWalletsForUser,
   createWalletForUser,
+  updateWalletForUser,
   getWalletForUser,
   deleteWalletForUser,
   leaveWalletForUser,

@@ -17,6 +17,7 @@ export type ExpenseRecord = {
   description: string;
   date: string;
   created_at: string;
+  platform: string | null;
 };
 
 export type BudgetScope = "monthly" | "category";
@@ -75,6 +76,7 @@ export type WalletExpenseRecord = {
   date: string;
   split_rule: SplitRule;
   created_at: string;
+  platform: string | null;
   splits: WalletExpenseSplitRecord[];
 };
 
@@ -174,6 +176,7 @@ export interface ExpenseStore {
   updateBudget(userId: string, budgetId: string, input: CreateBudgetInput): Promise<BudgetRecord>;
   deleteBudget(userId: string, budgetId: string): Promise<void>;
   createWallet(userId: string, ownerProfile: { name: string | null; email: string | null }, input: CreateWalletInput): Promise<WalletDetailRecord>;
+  updateWallet(userId: string, walletId: string, input: CreateWalletInput): Promise<WalletDetailRecord>;
   listWallets(userId: string): Promise<WalletRecord[]>;
   getWallet(userId: string, walletId: string): Promise<WalletDetailRecord>;
   deleteWallet(userId: string, walletId: string): Promise<void>;

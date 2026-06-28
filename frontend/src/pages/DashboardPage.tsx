@@ -3,6 +3,8 @@ import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { EmptyState, PageHero, SectionHeader, SurfaceCard, cn } from "../components/ui";
 import { TrendChart } from "../components/TrendChart";
 import { useNavigate } from "react-router-dom";
+import { PLATFORMS } from "../lib/platforms";
+import { PlatformLogo } from "../components/PlatformPicker";
 import type {
   BudgetForm,
   BudgetHistoryGroup,
@@ -43,6 +45,7 @@ type DashboardPageProps = {
   chartDisplayType: ChartDisplayType;
   selectedCategory: string;
   selectedTimeRange: TimeRangeFilter;
+  selectedPlatform: string;
   chartGranularity: ChartGranularity;
   total: string;
   dashboardStats: DashboardStats;
@@ -67,6 +70,7 @@ type DashboardPageProps = {
   onCloseBudgetHistory: () => void;
   onSelectedCategoryChange: (category: string) => void;
   onSelectedTimeRangeChange: (range: TimeRangeFilter) => void;
+  onSelectedPlatformChange: (platform: string) => void;
   onChartDisplayTypeChange: (displayType: ChartDisplayType) => void;
   onChartGranularityChange: (granularity: ChartGranularity) => void;
 };
@@ -96,6 +100,7 @@ export function DashboardPage({
   chartDisplayType,
   selectedCategory,
   selectedTimeRange,
+  selectedPlatform,
   chartGranularity,
   total,
   dashboardStats,
@@ -120,6 +125,7 @@ export function DashboardPage({
   onCloseBudgetHistory,
   onSelectedCategoryChange,
   onSelectedTimeRangeChange,
+  onSelectedPlatformChange,
   onChartDisplayTypeChange,
   onChartGranularityChange
 }: DashboardPageProps) {
@@ -248,6 +254,20 @@ export function DashboardPage({
             </label>
 
             <label className="grid gap-2 text-sm font-medium text-secondary">
+              Platform / Source
+              <select value={selectedPlatform} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
+                <option value="">All platforms</option>
+                <option value="none">No platform</option>
+                {PLATFORMS.filter(p => p.id !== "others").map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+                <option value="others">Others</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
               Range
               <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
                 <option value="all">All time</option>
@@ -260,7 +280,7 @@ export function DashboardPage({
         </div>
       </SurfaceCard>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <SurfaceCard className="bg-[linear-gradient(135deg,var(--primary),var(--gold))] p-6 text-white shadow-[0_24px_70px_rgba(30,122,83,0.24)]">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/80">{statMeta[0].label}</p>
           <strong className="mt-4 block text-4xl font-semibold tracking-[-0.04em]">{total}</strong>
@@ -283,6 +303,34 @@ export function DashboardPage({
           <p className="section-eyebrow">{statMeta[3].label}</p>
           <strong className="mt-4 block text-2xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.topCategory?.category ?? "No data"}</strong>
           <p className="mt-3 text-sm leading-6 text-secondary">{dashboardStats.topCategory ? dashboardStats.topCategory.formattedAmount : "Add expenses to reveal category leaders."}</p>
+        </SurfaceCard>
+
+        <SurfaceCard className="p-5 sm:p-6 flex flex-col justify-between">
+          <div>
+            <p className="section-eyebrow">Top Platform</p>
+            {dashboardStats.topPlatform ? (
+              <div className="flex items-center gap-3 mt-4">
+                <PlatformLogo
+                  logo={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.logo}
+                  name={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
+                  className="w-10 h-10 ring-2 ring-primary/10"
+                />
+                <div>
+                  <strong className="block text-xl font-semibold tracking-[-0.03em] text-ink">
+                    {PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
+                  </strong>
+                  <p className="text-sm text-secondary mt-0.5">
+                    {dashboardStats.topPlatform.formattedAmount} spent
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-muted">No platforms used yet.</p>
+            )}
+          </div>
+          <p className="mt-3 text-sm leading-6 text-secondary">
+            {dashboardStats.topPlatform ? "Highest spending platform in view." : "Add platform expenses to reveal."}
+          </p>
         </SurfaceCard>
       </section>
 

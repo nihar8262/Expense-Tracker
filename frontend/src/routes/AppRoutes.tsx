@@ -62,7 +62,7 @@ import {
   writePendingSubmission
 } from "../utils/storage";
 
-const EXPENSES_PAGE_SIZE = 50;
+const EXPENSES_PAGE_SIZE = 25;
 
 function createInitialFormState(baseDate = new Date()): ExpenseForm {
   return {
@@ -260,6 +260,7 @@ export function AppRoutes() {
     listWallets,
     getWalletDetail,
     createWallet,
+    updateWallet,
     deleteWalletGroup,
     leaveWalletGroup,
     addWalletMember,
@@ -301,6 +302,7 @@ export function AppRoutes() {
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("all");
+  const [selectedPlatform, setSelectedPlatform] = useState("");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
   const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
   const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
@@ -393,7 +395,8 @@ export function AppRoutes() {
       category: walletExpense.category,
       description: walletExpense.description,
       date: walletExpense.date,
-      created_at: walletExpense.created_at
+      created_at: walletExpense.created_at,
+      platform: walletExpense.platform
     }));
   }, [dashboardViewMode, dashboardWallet, expenses]);
 
@@ -402,11 +405,25 @@ export function AppRoutes() {
     [dashboardExpenses]
   );
 
-  const visibleExpenses = useMemo(() => expenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange)), [expenses, selectedTimeRange]);
-  const dashboardVisibleExpenses = useMemo(
-    () => dashboardExpenses.filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange)),
-    [dashboardExpenses, selectedTimeRange]
-  );
+  const visibleExpenses = useMemo(() => {
+    return expenses
+      .filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange))
+      .filter((expense) => {
+        if (!selectedPlatform) return true;
+        if (selectedPlatform === "none") return !expense.platform;
+        return expense.platform === selectedPlatform;
+      });
+  }, [expenses, selectedTimeRange, selectedPlatform]);
+
+  const dashboardVisibleExpenses = useMemo(() => {
+    return dashboardExpenses
+      .filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange))
+      .filter((expense) => {
+        if (!selectedPlatform) return true;
+        if (selectedPlatform === "none") return !expense.platform;
+        return expense.platform === selectedPlatform;
+      });
+  }, [dashboardExpenses, selectedTimeRange, selectedPlatform]);
   const totalExpensePages = Math.max(1, Math.ceil(visibleExpenses.length / EXPENSES_PAGE_SIZE));
   const paginatedExpenses = useMemo(() => {
     const startIndex = (currentExpensesPage - 1) * EXPENSES_PAGE_SIZE;
@@ -474,12 +491,27 @@ export function AppRoutes() {
       return byDate !== 0 ? byDate : right.created_at.localeCompare(left.created_at);
     })[0] ?? null;
 
+    const platformTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
+      if (expense.platform) {
+        accumulator[expense.platform] = (accumulator[expense.platform] ?? 0) + Number(expense.amount);
+      }
+      return accumulator;
+    }, {});
+
+    const sortedPlatforms = Object.entries(platformTotals).sort((left, right) => right[1] - left[1]);
+    const topPlatform = sortedPlatforms[0] ? {
+      platform: sortedPlatforms[0][0],
+      amount: sortedPlatforms[0][1],
+      formattedAmount: formatCurrency(sortedPlatforms[0][1].toFixed(2))
+    } : null;
+
     return {
       expenseCount,
       average: formatCurrency(average.toFixed(2)),
       topCategory: categoryBreakdown[0] ?? null,
       latestExpense,
-      categoryBreakdown
+      categoryBreakdown,
+      topPlatform
     };
   }, [dashboardVisibleExpenses]);
 
@@ -1110,6 +1142,28 @@ export function AppRoutes() {
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create wallet.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleUpdateWallet(walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to edit a shared wallet.");
+      return false;
+    }
+
+    startWalletSubmit("update-wallet");
+
+    try {
+      const wallet = await updateWallet(walletId, input, currentUser);
+      await loadWallets(currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Wallet updated.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update wallet.");
       return false;
     } finally {
       endWalletSubmit();
@@ -1861,6 +1915,7 @@ export function AppRoutes() {
   function handleClearExpenseFilters() {
     setSelectedCategory("");
     setSelectedTimeRange("all");
+    setSelectedPlatform("");
     setSortNewestFirst(true);
   }
 
@@ -1921,7 +1976,7 @@ export function AppRoutes() {
             wallets={wallets}
             dashboardViewMode={dashboardViewMode}
             dashboardWalletId={dashboardWalletId}
-            onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
+            onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); setSelectedPlatform(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
             onDashboardWalletIdChange={setDashboardWalletId}
             budgetForm={budgetForm}
             budgetCategoryOptions={dashboardBudgetCategoryOptions}
@@ -1933,6 +1988,8 @@ export function AppRoutes() {
             chartDisplayType={chartDisplayType}
             selectedCategory={selectedCategory}
             selectedTimeRange={selectedTimeRange}
+            selectedPlatform={selectedPlatform}
+            onSelectedPlatformChange={setSelectedPlatform}
             chartGranularity={chartGranularity}
             total={total}
             dashboardStats={dashboardStats}
@@ -1972,6 +2029,7 @@ export function AppRoutes() {
               customCategoryName={customCategoryName}
               selectedCategory={selectedCategory}
               selectedTimeRange={selectedTimeRange}
+              selectedPlatform={selectedPlatform}
               sortNewestFirst={sortNewestFirst}
               categories={categories}
               visibleExpenses={paginatedExpenses}
@@ -1998,6 +2056,7 @@ export function AppRoutes() {
               onSelectedCategoryChange={setSelectedCategory}
               onSortNewestFirstChange={setSortNewestFirst}
               onSelectedTimeRangeChange={setSelectedTimeRange}
+              onSelectedPlatformChange={setSelectedPlatform}
               onExpensesPageChange={setCurrentExpensesPage}
               onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
               onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
@@ -2021,6 +2080,7 @@ export function AppRoutes() {
               formatCurrency={formatCurrency}
               onSelectWallet={setSelectedWalletId}
               onCreateWallet={handleCreateWallet}
+              onUpdateWallet={handleUpdateWallet}
               onDeleteWallet={handleDeleteWallet}
               onLeaveWallet={handleLeaveWallet}
               onAddWalletMember={handleAddWalletMember}

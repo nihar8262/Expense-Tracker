@@ -52,6 +52,7 @@ type ExpenseRow = {
   description: string;
   expense_date: string | Date;
   created_at: string | Date;
+  platform: string | null;
 };
 
 type IdempotencyRow = {
@@ -108,6 +109,7 @@ type WalletExpenseRow = {
   expense_date: string | Date;
   split_rule: "equal" | "fixed" | "percentage";
   created_at: string | Date;
+  platform: string | null;
 };
 
 type WalletExpenseSplitRow = {
@@ -197,7 +199,8 @@ function mapExpense(row: ExpenseRow): ExpenseRecord {
     category: row.category,
     description: row.description,
     date: asIsoDate(row.expense_date),
-    created_at: asIsoTimestamp(row.created_at)
+    created_at: asIsoTimestamp(row.created_at),
+    platform: row.platform
   };
 }
 
@@ -609,6 +612,8 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
       await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
+      await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
+      await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
     })();
   }
 
@@ -635,7 +640,7 @@ async function getExistingExpense(tx: DbClient, idempotencyKey: string, requestH
   }
 
   const expenseRows = await tx<ExpenseRow[]>`
-    SELECT id, amount_minor, category, description, expense_date, created_at
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform
     FROM expenses
     WHERE id = ${existingRequest.expense_id}
   `;
@@ -786,7 +791,8 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
            wallet_expenses.description,
            wallet_expenses.expense_date,
            wallet_expenses.split_rule,
-           wallet_expenses.created_at
+           wallet_expenses.created_at,
+           wallet_expenses.platform
     FROM wallet_expenses
     INNER JOIN wallet_members AS payer ON payer.id = wallet_expenses.paid_by_member_id
     WHERE wallet_expenses.wallet_id = ${walletId}
@@ -839,6 +845,7 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     date: asIsoDate(expense.expense_date),
     split_rule: expense.split_rule,
     created_at: asIsoTimestamp(expense.created_at),
+    platform: expense.platform,
     splits: splitsByExpenseId.get(expense.id) ?? []
   }));
 
@@ -959,9 +966,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         const insertedExpenses = await tx<ExpenseRow[]>`
-          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at)
-          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt})
-          RETURNING id, amount_minor, category, description, expense_date, created_at
+          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform)
+          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt}, ${input.platform ?? null})
+          RETURNING id, amount_minor, category, description, expense_date, created_at, platform
         `;
 
         await tx`
@@ -983,7 +990,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       const orderClause = query.sort === "date_desc" ? sql`ORDER BY expense_date DESC, created_at DESC` : sql`ORDER BY created_at DESC`;
 
       const rows = await sql<ExpenseRow[]>`
-        SELECT id, amount_minor, category, description, expense_date, created_at
+        SELECT id, amount_minor, category, description, expense_date, created_at, platform
         FROM expenses
         ${whereClause}
         ${orderClause}
@@ -1000,9 +1007,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
         SET amount_minor = ${input.amount},
             category = ${input.category.trim()},
             description = ${input.description.trim()},
-            expense_date = ${input.date}
+            expense_date = ${input.date},
+            platform = ${input.platform ?? null}
         WHERE id = ${expenseId} AND user_id = ${userId}
-        RETURNING id, amount_minor, category, description, expense_date, created_at
+        RETURNING id, amount_minor, category, description, expense_date, created_at, platform
       `;
 
       if (!updatedRows[0]) {
@@ -1136,6 +1144,108 @@ export function createPostgresExpenseStore(): ExpenseStore {
             INSERT INTO wallet_members (id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at)
             VALUES (${randomUUID()}, ${walletId}, ${null}, ${normalizedName}, ${member.email?.trim().toLowerCase() || null}, ${"member"}, ${member.email?.trim() ? "pending" : "linked"}, ${createdAt})
           `;
+        }
+
+        return loadWalletDetail(tx, walletId);
+      });
+    },
+
+    async updateWallet(userId: string, walletId: string, input: CreateWalletInput): Promise<WalletDetailRecord> {
+      await ensureSchema(sql);
+
+      return sql.begin(async (tx) => {
+        const walletRows = await tx<{ owner_user_id: string }[]>`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+        const wallet = walletRows[0];
+
+        if (!wallet) {
+          throw new WalletNotFoundError();
+        }
+
+        await ensureWalletAccess(tx, userId, walletId);
+
+        if (wallet.owner_user_id !== userId) {
+          throw new WalletValidationError("Only the wallet owner can edit this group.");
+        }
+
+        await tx`
+          UPDATE wallets
+          SET name = ${input.name.trim()},
+              description = ${input.description?.trim() || null},
+              default_split_rule = ${input.defaultSplitRule}
+          WHERE id = ${walletId}
+        `;
+
+        const currentMembers = await tx<WalletMemberRow[]>`
+          SELECT id, display_name, email, member_role
+          FROM wallet_members
+          WHERE wallet_id = ${walletId}
+        `;
+
+        const ownerMember = currentMembers.find((m) => m.member_role === "owner");
+        const keptMemberIds = new Set<string>();
+        if (ownerMember) {
+          keptMemberIds.add(ownerMember.id);
+        }
+
+        for (const member of input.members) {
+          const normalizedName = member.displayName.trim();
+          const normalizedEmail = member.email?.trim().toLowerCase() || null;
+
+          if (ownerMember && (normalizedName.toLowerCase() === ownerMember.display_name.toLowerCase() || (normalizedEmail && ownerMember.email && normalizedEmail === ownerMember.email.toLowerCase()))) {
+            continue;
+          }
+
+          let existingMember = null;
+          if (normalizedEmail) {
+            existingMember = currentMembers.find((m) => m.email && m.email.toLowerCase() === normalizedEmail);
+          } else {
+            existingMember = currentMembers.find((m) => m.display_name.toLowerCase() === normalizedName.toLowerCase());
+          }
+
+          if (existingMember) {
+            if (existingMember.display_name !== normalizedName) {
+              await tx`UPDATE wallet_members SET display_name = ${normalizedName} WHERE id = ${existingMember.id}`;
+            }
+            keptMemberIds.add(existingMember.id);
+          } else {
+            const newId = randomUUID();
+            await tx`
+              INSERT INTO wallet_members (id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at)
+              VALUES (${newId}, ${walletId}, ${null}, ${normalizedName}, ${normalizedEmail}, ${"member"}, ${normalizedEmail ? "pending" : "linked"}, ${new Date().toISOString()})
+            `;
+            keptMemberIds.add(newId);
+          }
+        }
+
+        for (const member of currentMembers) {
+          if (keptMemberIds.has(member.id)) {
+            continue;
+          }
+
+          const historyRows = await tx<{
+            has_expenses: boolean;
+            has_splits: boolean;
+            has_settlements: boolean;
+          }[]>`
+            SELECT
+              EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
+              EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
+              EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+          `;
+
+          const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+
+          if (hasHistory) {
+            await tx`
+              UPDATE wallet_members
+              SET user_id = ${null},
+                  email = ${null},
+                  invite_status = ${"declined"}
+              WHERE id = ${member.id}
+            `;
+          } else {
+            await tx`DELETE FROM wallet_members WHERE id = ${member.id}`;
+          }
         }
 
         return loadWalletDetail(tx, walletId);
@@ -1561,7 +1671,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         await tx`
-          INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at)
+          INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at, platform)
           VALUES (
             ${expenseId},
             ${walletId},
@@ -1571,7 +1681,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${input.description.trim()},
             ${input.date},
             ${input.splitRule},
-            ${createdAt}
+            ${createdAt},
+            ${input.platform ?? null}
           )
         `;
 
@@ -1617,7 +1728,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
               category = ${input.category.trim()},
               description = ${input.description.trim()},
               expense_date = ${input.date},
-              split_rule = ${input.splitRule}
+              split_rule = ${input.splitRule},
+              platform = ${input.platform ?? null}
           WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}
         `;
 
