@@ -235,10 +235,28 @@
 
   .modal-overlay {
     @apply fixed inset-0 z-50 flex items-end justify-center bg-[rgba(18,26,20,0.26)] p-0 backdrop-blur-sm sm:items-center sm:p-6;
+    animation: modalFadeIn 0.2s ease-out forwards;
   }
 
   .modal-panel {
     @apply max-h-[88vh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-white/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(252,251,247,0.9))] shadow-[0_30px_90px_rgba(40,44,35,0.16)] backdrop-blur-xl sm:max-w-[840px] sm:rounded-[28px];
+    animation: modalScaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes modalFadeIn {
+    from { opacity: 0; backdrop-filter: blur(0px); }
+    to { opacity: 1; backdrop-filter: blur(4px); }
+  }
+
+  @keyframes modalScaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
   }
 
   .data-pill {
@@ -348,6 +366,116 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@keyframes fadeScaleCollapse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    max-height: 200px;
+    margin-bottom: 12px;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-color: transparent;
+    overflow: hidden;
+  }
+}
+
+.animate-delete {
+  animation: fadeScaleCollapse 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes fadeScaleRow {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    background-color: rgba(239, 68, 68, 0.08);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+    background-color: transparent;
+  }
+}
+
+.animate-delete-row {
+  animation: fadeScaleRow 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+/* Premium Custom Checkboxes */
+input[type="checkbox"] {
+  position: relative;
+  height: 16px;
+  width: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+  appearance: none;
+  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  background-color: rgba(255, 255, 255, 0.8);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.dark input[type="checkbox"] {
+  background-color: rgba(24, 24, 27, 0.8);
+}
+
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  height: 8px;
+  width: 3.5px;
+  transform: rotate(45deg);
+  border-right: 1.8px solid white;
+  border-bottom: 1.8px solid white;
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  background-color: #f4f4f5;
+  border-color: #e4e4e7;
+}
+
+.dark input[type="checkbox"]:disabled {
+  background-color: #18181b;
+  border-color: #27272a;
+}
+
+@keyframes slideIn {
+  0% {
+    transform: translateY(1rem) scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

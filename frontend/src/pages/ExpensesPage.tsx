@@ -113,29 +113,65 @@ export function ExpensesPage({
 }: ExpensesPageProps) {
   const [showValidation, setShowValidation] = useState(false);
   const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    type: "single" | "selected";
+    expenseId?: string;
+    description: string;
+    amount?: string;
+  } | null>(null);
 
   function handleEditStart(expense: Parameters<typeof onEditStart>[0]) {
     onEditStart(expense);
     setIsExpenseSheetOpen(true);
+    setShowValidation(false);
   }
 
   function handleEditCancel() {
     onEditCancel();
     setIsExpenseSheetOpen(false);
+    setShowValidation(false);
   }
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const pageStart = totalVisibleExpenses === 0 ? 0 : (currentExpensesPage - 1) * expensesPageSize + 1;
   const pageEnd = totalVisibleExpenses === 0 ? 0 : Math.min(currentExpensesPage * expensesPageSize, totalVisibleExpenses);
-  const validationErrors = useMemo(
-    () => ({
-      amount: form.amount.trim() ? "" : "Amount is required.",
-      category: form.category.trim() ? "" : "Category is required.",
-      description: form.description.trim() ? "" : "Description is required.",
-      date: form.date.trim() ? "" : "Date is required."
-    }),
-    [form.amount, form.category, form.date, form.description]
-  );
+  
+  const validationErrors = useMemo(() => {
+    const errors = {
+      amount: "",
+      category: "",
+      description: "",
+      date: ""
+    };
+
+    const amountTrimmed = form.amount.trim();
+    if (!amountTrimmed) {
+      errors.amount = "Please enter the expense amount.";
+    } else {
+      const amountNum = parseFloat(amountTrimmed);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        errors.amount = "Amount must be a positive number.";
+      }
+    }
+
+    if (!form.category.trim()) {
+      errors.category = "Please select a category.";
+    }
+
+    const descTrimmed = form.description.trim();
+    if (!descTrimmed) {
+      errors.description = "Please enter a description.";
+    } else if (descTrimmed.length < 3) {
+      errors.description = "Description must be at least 3 characters long.";
+    }
+
+    if (!form.date.trim()) {
+      errors.date = "Please select a date.";
+    }
+
+    return errors;
+  }, [form.amount, form.category, form.date, form.description]);
+
   const hasValidationErrors = Object.values(validationErrors).some(Boolean);
   const activeFilters = [
     selectedCategory ? `Category: ${selectedCategory}` : null,
@@ -149,10 +185,16 @@ export function ExpensesPage({
 
     if (hasValidationErrors) {
       event.preventDefault();
+      Object.values(validationErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
     await onSubmit(event);
+    setShowValidation(false);
     setIsExpenseSheetOpen(false);
   }
 
@@ -164,6 +206,34 @@ export function ExpensesPage({
     event.preventDefault();
     nextField?.focus();
   }
+
+  const handleDeleteClick = (expense: Expense) => {
+    setDeleteConfirmation({
+      type: "single",
+      expenseId: expense.id,
+      description: expense.description,
+      amount: formatCurrency(expense.amount),
+    });
+  };
+
+  const handleDeleteSelectedClick = () => {
+    if (selectedVisibleExpenseIds.length === 0) return;
+    setDeleteConfirmation({
+      type: "selected",
+      description: `${selectedVisibleExpenseIds.length} selected ${selectedVisibleExpenseIds.length === 1 ? "expense" : "expenses"}`,
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmation) return;
+    const { type, expenseId } = deleteConfirmation;
+    setDeleteConfirmation(null);
+    if (type === "single" && expenseId) {
+      await onDeleteExpense(expenseId);
+    } else if (type === "selected") {
+      await onDeleteSelectedExpenses();
+    }
+  };
 
   function renderExpenseForm(isSheet = false) {
     return (
@@ -391,7 +461,7 @@ export function ExpensesPage({
               type="button"
               className="ui-button-danger"
               disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
-              onClick={() => void onDeleteSelectedExpenses()}
+              onClick={handleDeleteSelectedClick}
             >
               {selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId)) ? "Deleting..." : "Delete selected"}
             </button>
@@ -420,7 +490,14 @@ export function ExpensesPage({
                 </thead>
                 <tbody>
                   {visibleExpenses.map((expense) => (
-                    <tr key={expense.id} className="cursor-pointer hover:bg-white" onClick={() => handleEditStart(expense)}>
+                    <tr
+                      key={expense.id}
+                      className={cn(
+                        "cursor-pointer hover:bg-white",
+                        deletingExpenseIds.includes(expense.id) && "animate-delete-row"
+                      )}
+                      onClick={() => handleEditStart(expense)}
+                    >
                       <td>
                         <input
                           type="checkbox"
@@ -458,7 +535,7 @@ export function ExpensesPage({
                             disabled={deletingExpenseIds.includes(expense.id)}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void onDeleteExpense(expense.id);
+                              handleDeleteClick(expense);
                             }}
                           >
                             {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
@@ -473,7 +550,13 @@ export function ExpensesPage({
 
             <div className="grid gap-3 lg:hidden">
               {visibleExpenses.map((expense) => (
-                <article key={expense.id} className="table-card-mobile space-y-4">
+                <article
+                  key={expense.id}
+                  className={cn(
+                    "table-card-mobile space-y-4",
+                    deletingExpenseIds.includes(expense.id) && "animate-delete"
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
                       <input
@@ -505,7 +588,12 @@ export function ExpensesPage({
                     <button type="button" className="ui-button-secondary" onClick={() => handleEditStart(expense)}>
                       Edit
                     </button>
-                    <button type="button" className="ui-button-danger" disabled={deletingExpenseIds.includes(expense.id)} onClick={() => void onDeleteExpense(expense.id)}>
+                    <button
+                      type="button"
+                      className="ui-button-danger"
+                      disabled={deletingExpenseIds.includes(expense.id)}
+                      onClick={() => handleDeleteClick(expense)}
+                    >
                       {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
                     </button>
                   </div>
@@ -542,6 +630,52 @@ export function ExpensesPage({
       {isExpenseSheetOpen ? (
         <ModalFrame onClose={() => { if (editingExpenseId) { handleEditCancel(); } else { setIsExpenseSheetOpen(false); } }} className="max-w-[760px] overflow-y-auto p-5 sm:p-6">
           {renderExpenseForm(true)}
+        </ModalFrame>
+      ) : null}
+
+      {deleteConfirmation ? (
+        <ModalFrame onClose={() => setDeleteConfirmation(null)} className="max-w-[440px] p-6 text-center">
+          <div className="flex flex-col items-center justify-center space-y-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger-tint text-[color:var(--danger-text)] shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="h-7 w-7">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="font-display text-xl font-bold text-ink">
+                {deleteConfirmation.type === "single" ? "Delete expense?" : "Delete selected expenses?"}
+              </h3>
+              <p className="text-sm leading-6 text-secondary">
+                {deleteConfirmation.type === "single" ? (
+                  <>
+                    Are you sure you want to permanently delete <strong className="text-ink">"{deleteConfirmation.description}"</strong> ({deleteConfirmation.amount})? This action cannot be undone.
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to permanently delete <strong className="text-ink">{deleteConfirmation.description}</strong>? This action cannot be undone.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="flex w-full flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="ui-button-secondary w-full justify-center sm:w-auto"
+                onClick={() => setDeleteConfirmation(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ui-button-danger w-full justify-center sm:w-auto"
+                onClick={() => void handleConfirmDelete()}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </ModalFrame>
       ) : null}
     </>

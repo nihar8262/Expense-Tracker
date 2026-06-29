@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useAuth, providerOptions } from "../hooks/useAuth";
@@ -13,6 +13,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { ExpensesPage } from "../pages/ExpensesPage";
 import { LandingPage } from "../pages/LandingPage";
 import { WalletsPage } from "../pages/WalletsPage";
+import { cn } from "../components/ui";
 import type {
   BillReminder,
   BillReminderRecurrence,
@@ -61,6 +62,18 @@ import {
   writeCustomCategories,
   writePendingSubmission
 } from "../utils/storage";
+
+interface Toast {
+  id: string;
+  type: "success" | "error" | "info";
+  message: string;
+}
+
+declare global {
+  interface Window {
+    showToast?: (message: string, type?: "success" | "error" | "info") => void;
+  }
+}
 
 const EXPENSES_PAGE_SIZE = 25;
 
@@ -253,6 +266,26 @@ function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranu
 
 export function AppRoutes() {
   const navigate = useNavigate();
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((current) => [...current, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((current) => current.filter((t) => t.id !== id));
+    }, 10000);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((t) => t.id !== id));
+  }, []);
+
+  useEffect(() => {
+    window.showToast = addToast;
+    return () => {
+      delete window.showToast;
+    };
+  }, [addToast]);
   const { authLoading, currentUser, authMessage, setAuthMessage, signIn, signOutCurrentUser } = useAuth();
   const { listExpenses, createExpense, updateExpense, deleteExpense } = useExpenses();
   const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
@@ -936,6 +969,56 @@ export function AppRoutes() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    if (statusMessage) {
+      addToast(statusMessage, "success");
+      setStatusMessage("");
+    }
+  }, [statusMessage, addToast]);
+
+  useEffect(() => {
+    if (errorMessage) {
+      addToast(errorMessage, "error");
+      setErrorMessage("");
+    }
+  }, [errorMessage, addToast]);
+
+  useEffect(() => {
+    if (walletStatusMessage) {
+      addToast(walletStatusMessage, "success");
+      setWalletStatusMessage("");
+    }
+  }, [walletStatusMessage, addToast]);
+
+  useEffect(() => {
+    if (walletErrorMessage) {
+      addToast(walletErrorMessage, "error");
+      setWalletErrorMessage("");
+    }
+  }, [walletErrorMessage, addToast]);
+
+  useEffect(() => {
+    if (budgetStatusMessage) {
+      addToast(budgetStatusMessage, "success");
+      setBudgetStatusMessage("");
+    }
+  }, [budgetStatusMessage, addToast]);
+
+  useEffect(() => {
+    if (budgetErrorMessage) {
+      addToast(budgetErrorMessage, "error");
+      setBudgetErrorMessage("");
+    }
+  }, [budgetErrorMessage, addToast]);
+
+  useEffect(() => {
+    if (authMessage) {
+      const isError = authMessage.toLowerCase().includes("fail") || authMessage.toLowerCase().includes("error") || authMessage.toLowerCase().includes("invalid");
+      addToast(authMessage, isError ? "error" : "success");
+      setAuthMessage("");
+    }
+  }, [authMessage, addToast, setAuthMessage]);
+
   async function handleSignOut() {
     await signOutCurrentUser();
     writePendingSubmission(null);
@@ -1010,12 +1093,6 @@ export function AppRoutes() {
       return;
     }
 
-    const confirmed = window.confirm("Delete this expense permanently?");
-
-    if (!confirmed) {
-      return;
-    }
-
     const result = await removeExpenses([expenseId]);
 
     if (result.deletedCount === 1 && result.failedCount === 0) {
@@ -1034,12 +1111,6 @@ export function AppRoutes() {
 
   async function handleDeleteSelectedExpenses() {
     if (selectedVisibleExpenseIds.length === 0) {
-      return;
-    }
-
-    const confirmed = window.confirm(`Delete ${selectedVisibleExpenseIds.length} selected expenses permanently?`);
-
-    if (!confirmed) {
       return;
     }
 
@@ -1381,6 +1452,30 @@ export function AppRoutes() {
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete shared expense.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleDeleteWalletExpenses(inputWalletId: string, walletExpenseIds: string[]) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete shared expenses.");
+      return false;
+    }
+
+    startWalletSubmit("expense");
+
+    try {
+      let finalWallet = selectedWallet;
+      for (const expenseId of walletExpenseIds) {
+        finalWallet = await deleteSharedWalletExpense(inputWalletId, expenseId, currentUser);
+      }
+      setSelectedWallet(finalWallet);
+      setWalletStatusMessage(`${walletExpenseIds.length} shared ${walletExpenseIds.length === 1 ? "expense" : "expenses"} deleted.`);
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete shared expenses.");
       return false;
     } finally {
       endWalletSubmit();
@@ -2088,6 +2183,7 @@ export function AppRoutes() {
               onCreateWalletExpense={handleCreateWalletExpense}
               onUpdateWalletExpense={handleUpdateWalletExpense}
               onDeleteWalletExpense={handleDeleteWalletExpense}
+              onDeleteWalletExpenses={handleDeleteWalletExpenses}
               onCreateWalletBudget={handleCreateWalletBudget}
               onUpdateWalletBudget={handleUpdateWalletBudget}
               onDeleteWalletBudget={handleDeleteWalletBudget}
@@ -2131,31 +2227,83 @@ export function AppRoutes() {
   }
 
   return (
-    <Routes>
-      {currentUser ? (
-        <>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/signin" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={renderSignedInPage("dashboard")} />
-          <Route path="/expenses" element={renderSignedInPage("expenses")} />
-          <Route path="/wallets" element={renderSignedInPage("wallets")} />
-          <Route path="/alerts" element={renderSignedInPage("alerts")} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </>
-      ) : (
-        <>
-          <Route path="/" element={<LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
-          <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
-          <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
-          <Route path="/dashboard" element={<Navigate to="/" replace />} />
-          <Route path="/expenses" element={<Navigate to="/" replace />} />
-          <Route path="/wallets" element={<Navigate to="/" replace />} />
-          <Route path="/alerts" element={<Navigate to="/" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </>
-      )}
-    </Routes>
+    <>
+      <Routes>
+        {currentUser ? (
+          <>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/signin" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={renderSignedInPage("dashboard")} />
+            <Route path="/expenses" element={renderSignedInPage("expenses")} />
+            <Route path="/wallets" element={renderSignedInPage("wallets")} />
+            <Route path="/alerts" element={renderSignedInPage("alerts")} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </>
+        ) : (
+          <>
+            <Route path="/" element={<LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
+            <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
+            <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
+            <Route path="/dashboard" element={<Navigate to="/" replace />} />
+            <Route path="/expenses" element={<Navigate to="/" replace />} />
+            <Route path="/wallets" element={<Navigate to="/" replace />} />
+            <Route path="/alerts" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
+      </Routes>
+
+      {/* Toasts Container */}
+      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4 sm:px-0">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={cn(
+              "pointer-events-auto flex items-start justify-between gap-3 rounded-[20px] border p-4 shadow-[0_20px_50px_rgba(0,0,0,0.12)] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md transition-all duration-300 animate-slide-in",
+              toast.type === "success"
+                ? "border-emerald-500/20 text-emerald-950 dark:text-emerald-50"
+                : toast.type === "error"
+                ? "border-red-500/20 text-red-950 dark:text-red-50"
+                : "border-zinc-500/20 text-zinc-950 dark:text-zinc-50"
+            )}
+          >
+            <div className="flex items-start gap-2.5 min-w-0">
+              {toast.type === "success" ? (
+                <span className="text-emerald-500 mt-0.5 shrink-0">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </span>
+              ) : toast.type === "error" ? (
+                <span className="text-red-500 mt-0.5 shrink-0">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </span>
+              ) : (
+                <span className="text-zinc-500 mt-0.5 shrink-0">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </span>
+              )}
+              <p className="text-sm font-semibold leading-5 text-ink break-words">{toast.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => removeToast(toast.id)}
+              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 mt-0.5 transition-colors shrink-0"
+              aria-label="Dismiss notification"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 

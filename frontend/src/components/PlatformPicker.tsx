@@ -65,6 +65,7 @@ export function PlatformPicker({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const portalRef = useRef<HTMLDivElement | null>(null);
 
   const isInteractive = Boolean(onChange) && !disabled;
 
@@ -88,7 +89,8 @@ export function PlatformPicker({
     const handleClickOutside = (event: MouseEvent) => {
       if (
         containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
+        !containerRef.current.contains(event.target as Node) &&
+        (!portalRef.current || !portalRef.current.contains(event.target as Node))
       ) {
         setIsOpen(false);
       }
@@ -223,7 +225,10 @@ export function PlatformPicker({
 
       {/* Mobile Bottom Sheet (Portal to document.body to avoid clipping & stacking context bugs) */}
       {isOpen && typeof document !== "undefined" && createPortal(
-        <div className="sm:hidden fixed inset-0 z-50 flex items-end justify-center">
+        <div
+          ref={portalRef}
+          className="sm:hidden fixed inset-0 z-50 flex items-end justify-center"
+        >
           {/* Backdrop */}
           <div
             className={cn(

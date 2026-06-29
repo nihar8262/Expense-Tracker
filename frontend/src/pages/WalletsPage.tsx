@@ -93,6 +93,10 @@ type WalletsPageProps = {
     walletId: string,
     walletExpenseId: string,
   ) => Promise<boolean>;
+  onDeleteWalletExpenses: (
+    walletId: string,
+    walletExpenseIds: string[],
+  ) => Promise<boolean>;
   onCreateWalletBudget: (
     walletId: string,
     input: BudgetForm,
@@ -265,6 +269,7 @@ export function WalletsPage({
   onCreateWalletExpense,
   onUpdateWalletExpense,
   onDeleteWalletExpense,
+  onDeleteWalletExpenses,
   onCreateWalletBudget,
   onUpdateWalletBudget,
   onDeleteWalletBudget,
@@ -302,6 +307,13 @@ export function WalletsPage({
     string | null
   >(null);
   const [expensePlatform, setExpensePlatform] = useState<string | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    type: "single" | "selected";
+    expenseId?: string;
+    description: string;
+    amount?: string;
+  } | null>(null);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
 
   const [settlementFromMemberId, setSettlementFromMemberId] = useState("");
   const [settlementToMemberId, setSettlementToMemberId] = useState("");
@@ -371,15 +383,41 @@ export function WalletsPage({
     [editWalletName],
   );
 
-  const expenseErrors = useMemo(
-    () => ({
-      amount: expenseAmount.trim() ? "" : "Amount is required.",
-      date: expenseDate.trim() ? "" : "Date is required.",
-      category: expenseCategory.trim() ? "" : "Category is required.",
-      description: expenseDescription.trim() ? "" : "Description is required.",
-    }),
-    [expenseAmount, expenseDate, expenseCategory, expenseDescription],
-  );
+  const expenseErrors = useMemo(() => {
+    const errors = {
+      amount: "",
+      category: "",
+      description: "",
+      date: ""
+    };
+
+    const amountTrimmed = expenseAmount.trim();
+    if (!amountTrimmed) {
+      errors.amount = "Please enter the group expense amount.";
+    } else {
+      const amountNum = parseFloat(amountTrimmed);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        errors.amount = "Amount must be a positive number.";
+      }
+    }
+
+    if (!expenseCategory.trim()) {
+      errors.category = "Please select a category for the group expense.";
+    }
+
+    const descTrimmed = expenseDescription.trim();
+    if (!descTrimmed) {
+      errors.description = "Please enter a description for the group expense.";
+    } else if (descTrimmed.length < 3) {
+      errors.description = "Description must be at least 3 characters long.";
+    }
+
+    if (!expenseDate.trim()) {
+      errors.date = "Please select a date for the transaction.";
+    }
+
+    return errors;
+  }, [expenseAmount, expenseCategory, expenseDescription, expenseDate]);
 
   const settlementErrors = useMemo(
     () => ({
@@ -695,6 +733,11 @@ export function WalletsPage({
     setIsWalletBudgetHistoryOpen(false);
     setWalletBudgetStatusMessage("");
     setWalletBudgetErrorMessage("");
+    setShowExpenseValidation(false);
+    setShowSettlementValidation(false);
+    setShowCreateWalletValidation(false);
+    setShowMemberValidation(false);
+    setSelectedExpenseIds([]);
   }, [selectedWallet]);
 
   function handleWalletBudgetFormChange(
@@ -740,6 +783,11 @@ export function WalletsPage({
     setShowCreateWalletValidation(true);
 
     if (Object.values(createWalletErrors).some(Boolean)) {
+      Object.values(createWalletErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
@@ -792,6 +840,11 @@ export function WalletsPage({
     setShowEditWalletValidation(true);
 
     if (Object.values(editWalletErrors).some(Boolean)) {
+      Object.values(editWalletErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
@@ -819,6 +872,11 @@ export function WalletsPage({
     setShowMemberValidation(true);
 
     if (Object.values(memberErrors).some(Boolean)) {
+      Object.values(memberErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
@@ -845,6 +903,11 @@ export function WalletsPage({
     setShowExpenseValidation(true);
 
     if (Object.values(expenseErrors).some(Boolean)) {
+      Object.values(expenseErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
@@ -938,6 +1001,11 @@ export function WalletsPage({
     setShowSettlementValidation(true);
 
     if (Object.values(settlementErrors).some(Boolean)) {
+      Object.values(settlementErrors).forEach((errorMsg) => {
+        if (errorMsg && window.showToast) {
+          window.showToast(errorMsg, "error");
+        }
+      });
       return;
     }
 
@@ -1109,34 +1177,68 @@ export function WalletsPage({
     setIsMobileExpenseModalOpen(true);
   }
 
-  async function handleDeleteExpenseClick(walletExpenseId: string) {
-    if (!selectedWallet || !window.confirm("Delete this shared expense?")) {
-      return;
-    }
+  function handleDeleteExpenseClick(walletExpenseId: string) {
+    const expense = selectedWallet?.expenses.find((e) => e.id === walletExpenseId);
+    if (!expense) return;
+    setDeleteConfirmation({
+      type: "single",
+      expenseId: expense.id,
+      description: expense.description,
+      amount: formatCurrency(expense.amount),
+    });
+  }
+
+  function handleToggleExpenseSelection(expenseId: string) {
+    setSelectedExpenseIds((current) =>
+      current.includes(expenseId)
+        ? current.filter((id) => id !== expenseId)
+        : [...current, expenseId],
+    );
+  }
+
+  function handleDeleteSelectedExpensesClick() {
+    const selectedCount = selectedExpenseIds.length;
+    if (selectedCount === 0) return;
+    setDeleteConfirmation({
+      type: "selected",
+      description: `${selectedCount} selected shared ${selectedCount === 1 ? "expense" : "expenses"}`,
+    });
+  }
+
+  async function handleConfirmDeleteExpense() {
+    if (!deleteConfirmation || !selectedWallet) return;
+    const { type, expenseId } = deleteConfirmation;
+    setDeleteConfirmation(null);
+
+    const idsToDelete = type === "single" && expenseId ? [expenseId] : [...selectedExpenseIds];
+    if (idsToDelete.length === 0) return;
 
     setDeletingExpenseIds((current) => [
-      ...new Set([...current, walletExpenseId]),
+      ...new Set([...current, ...idsToDelete]),
     ]);
 
     try {
-      const deleted = await onDeleteWalletExpense(
+      const deleted = await onDeleteWalletExpenses(
         selectedWallet.wallet.id,
-        walletExpenseId,
+        idsToDelete,
       );
 
-      if (deleted && editingWalletExpenseId === walletExpenseId) {
-        setEditingWalletExpenseId(null);
-        setAlreadySettledMemberIds([]);
-        setExpenseAmount("");
-        setExpenseCategory("");
-        setExpenseDescription("");
-        setExpenseDate(getTodayIsoDate());
-        setSplitValues({});
-        setExpensePlatform(null);
+      if (deleted) {
+        if (expenseId && editingWalletExpenseId === expenseId) {
+          setEditingWalletExpenseId(null);
+          setAlreadySettledMemberIds([]);
+          setExpenseAmount("");
+          setExpenseCategory("");
+          setExpenseDescription("");
+          setExpenseDate(getTodayIsoDate());
+          setSplitValues({});
+          setExpensePlatform(null);
+        }
+        setSelectedExpenseIds([]);
       }
     } finally {
       setDeletingExpenseIds((current) =>
-        current.filter((id) => id !== walletExpenseId),
+        current.filter((id) => !idsToDelete.includes(id)),
       );
     }
   }
@@ -2073,15 +2175,66 @@ export function WalletsPage({
                   />
                 ) : (
                   <>
+                    {filteredExpenses.length > 0 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all filtered group expenses"
+                            checked={filteredExpenses.length > 0 && filteredExpenses.every((e) => selectedExpenseIds.includes(e.id))}
+                            onChange={() => {
+                              const allSelected = filteredExpenses.every((e) => selectedExpenseIds.includes(e.id));
+                              if (allSelected) {
+                                setSelectedExpenseIds((current) =>
+                                  current.filter((id) => !filteredExpenses.some((e) => e.id === id)),
+                                );
+                              } else {
+                                setSelectedExpenseIds((current) => [
+                                  ...new Set([...current, ...filteredExpenses.map((e) => e.id)]),
+                                ]);
+                              }
+                            }}
+                          />
+                          <span className="text-sm font-semibold text-ink">Select All</span>
+                          <span className="text-sm text-secondary">
+                            {selectedExpenseIds.length > 0 ? `(${selectedExpenseIds.length} selected)` : ""}
+                          </span>
+                        </div>
+                        {selectedExpenseIds.length > 0 ? (
+                          <button
+                            type="button"
+                            className="ui-button-danger !py-1.5 !px-3 text-xs"
+                            disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
+                            onClick={handleDeleteSelectedExpensesClick}
+                          >
+                            {selectedExpenseIds.some((id) => deletingExpenseIds.includes(id)) ? "Deleting..." : "Delete selected"}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="grid gap-3">
                       {paginatedWalletExpenses.map((expense) => (
                         <article
                           key={expense.id}
-                          className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                          className={cn(
+                            "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
+                            selectedExpenseIds.includes(expense.id)
+                              ? "border-primary/25 bg-success-tint"
+                              : "border-[color:var(--border)] bg-white/80",
+                            deletingExpenseIds.includes(expense.id) && "animate-delete",
+                          )}
                         >
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="flex items-center gap-3">
-                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${expense.description}`}
+                                checked={selectedExpenseIds.includes(expense.id)}
+                                disabled={deletingExpenseIds.includes(expense.id)}
+                                onChange={() => handleToggleExpenseSelection(expense.id)}
+                                className="mr-1"
+                              />
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
                                 <CategoryIcon
                                   iconId={
                                     budgetCategoryOptions.find(
@@ -2091,31 +2244,30 @@ export function WalletsPage({
                                 />
                               </span>
                               {expense.platform ? (
-                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0" />
+                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                               ) : null}
-                              <div className="space-y-1.5">
-                                <strong className="block text-base text-ink">
+                              <div className="min-w-0 space-y-1">
+                                <strong className="block text-base font-semibold text-ink truncate">
                                   {expense.description}
                                 </strong>
-                                <p className="text-sm leading-6 text-secondary">
-                                  {expense.category} · paid by{" "}
-                                  {expense.paid_by_member_name} · {expense.date}
+                                <p className="text-xs text-secondary leading-none">
+                                  {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
                                 </p>
                               </div>
                             </div>
-                            <div className="text-left lg:text-right">
-                              <strong className="block text-xl text-ink">
+                            <div className="text-left lg:text-right shrink-0">
+                              <strong className="block text-xl font-bold tracking-tight text-ink">
                                 {formatCurrency(expense.amount)}
                               </strong>
-                              <span className="text-sm text-secondary">
+                              <span className="text-xs font-medium text-secondary">
                                 {expense.split_rule} split
                               </span>
                             </div>
                           </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
+                          <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
                             <button
                               type="button"
-                              className="ui-button-ghost"
+                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
                               onClick={() =>
                                 handleStartExpenseEdit(expense.id)
                               }
@@ -2124,7 +2276,7 @@ export function WalletsPage({
                             </button>
                             <button
                               type="button"
-                              className="ui-button-danger"
+                              className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
                               disabled={deletingExpenseIds.includes(
                                 expense.id,
                               )}
@@ -2285,11 +2437,25 @@ export function WalletsPage({
                         {filteredExpenses.map((expense) => (
                           <article
                             key={expense.id}
-                            className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                            className={cn(
+                              "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
+                              selectedExpenseIds.includes(expense.id)
+                                ? "border-primary/25 bg-success-tint"
+                                : "border-[color:var(--border)] bg-white/80",
+                              deletingExpenseIds.includes(expense.id) && "animate-delete",
+                            )}
                           >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select ${expense.description}`}
+                                  checked={selectedExpenseIds.includes(expense.id)}
+                                  disabled={deletingExpenseIds.includes(expense.id)}
+                                  onChange={() => handleToggleExpenseSelection(expense.id)}
+                                  className="mr-1"
+                                />
+                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
                                   <CategoryIcon
                                     iconId={
                                       budgetCategoryOptions.find(
@@ -2299,31 +2465,30 @@ export function WalletsPage({
                                   />
                                 </span>
                                 {expense.platform ? (
-                                  <PlatformPicker value={expense.platform} onChange={null} className="shrink-0" />
+                                  <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                                 ) : null}
-                                <div className="min-w-0 space-y-1.5">
-                                  <strong className="block truncate text-base text-ink">
+                                <div className="min-w-0 space-y-1">
+                                  <strong className="block truncate text-base font-semibold text-ink">
                                     {expense.description}
                                   </strong>
-                                  <p className="text-sm leading-6 text-secondary">
-                                    {expense.category} · paid by{" "}
-                                    {expense.paid_by_member_name} · {expense.date}
+                                  <p className="text-xs text-secondary leading-none">
+                                    {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
                                   </p>
                                 </div>
                               </div>
                               <div className="shrink-0 text-left sm:text-right">
-                                <strong className="block text-xl text-ink">
+                                <strong className="block text-xl font-bold tracking-tight text-ink">
                                   {formatCurrency(expense.amount)}
                                 </strong>
-                                <span className="text-sm text-secondary">
+                                <span className="text-xs font-medium text-secondary">
                                   {expense.split_rule} split
                                 </span>
                               </div>
                             </div>
-                            <div className="mt-4 flex flex-wrap gap-2">
+                            <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
                               <button
                                 type="button"
-                                className="ui-button-ghost"
+                                className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
                                 onClick={() => {
                                   handleStartExpenseEdit(expense.id);
                                   setIsExpenseModalOpen(false);
@@ -2333,7 +2498,7 @@ export function WalletsPage({
                               </button>
                               <button
                                 type="button"
-                                className="ui-button-danger"
+                                className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
                                 disabled={deletingExpenseIds.includes(
                                   expense.id,
                                 )}
@@ -2631,6 +2796,52 @@ export function WalletsPage({
               </button>
             </div>
           </form>
+        </ModalFrame>
+      ) : null}
+
+      {deleteConfirmation ? (
+        <ModalFrame onClose={() => setDeleteConfirmation(null)} className="max-w-[440px] p-6 text-center">
+          <div className="flex flex-col items-center justify-center space-y-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-danger-tint text-[color:var(--danger-text)] shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="h-7 w-7">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="font-display text-xl font-bold text-ink">
+                {deleteConfirmation.type === "single" ? "Delete shared expense?" : "Delete selected shared expenses?"}
+              </h3>
+              <p className="text-sm leading-6 text-secondary">
+                {deleteConfirmation.type === "single" ? (
+                  <>
+                    Are you sure you want to permanently delete <strong className="text-ink">"{deleteConfirmation.description}"</strong> ({deleteConfirmation.amount}) from this wallet? This action cannot be undone.
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to permanently delete <strong className="text-ink">{deleteConfirmation.description}</strong> from this wallet? This action cannot be undone.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="flex w-full flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="ui-button-secondary w-full justify-center sm:w-auto"
+                onClick={() => setDeleteConfirmation(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ui-button-danger w-full justify-center sm:w-auto"
+                onClick={() => void handleConfirmDeleteExpense()}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </ModalFrame>
       ) : null}
     </>
