@@ -1437,26 +1437,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleDeleteWalletExpense(inputWalletId: string, walletExpenseId: string) {
-    if (!currentUser) {
-      setWalletErrorMessage("Sign in to delete a shared expense.");
-      return false;
-    }
 
-    startWalletSubmit("expense");
-
-    try {
-      const wallet = await deleteSharedWalletExpense(inputWalletId, walletExpenseId, currentUser);
-      setSelectedWallet(wallet);
-      setWalletStatusMessage("Shared expense deleted.");
-      return true;
-    } catch (error) {
-      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete shared expense.");
-      return false;
-    } finally {
-      endWalletSubmit();
-    }
-  }
 
   async function handleDeleteWalletExpenses(inputWalletId: string, walletExpenseIds: string[]) {
     if (!currentUser) {
@@ -2182,7 +2163,6 @@ export function AppRoutes() {
               onRemoveWalletMember={handleRemoveWalletMember}
               onCreateWalletExpense={handleCreateWalletExpense}
               onUpdateWalletExpense={handleUpdateWalletExpense}
-              onDeleteWalletExpense={handleDeleteWalletExpense}
               onDeleteWalletExpenses={handleDeleteWalletExpenses}
               onCreateWalletBudget={handleCreateWalletBudget}
               onUpdateWalletBudget={handleUpdateWalletBudget}

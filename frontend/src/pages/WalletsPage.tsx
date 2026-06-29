@@ -89,10 +89,6 @@ type WalletsPageProps = {
       platform?: string | null;
     },
   ) => Promise<boolean>;
-  onDeleteWalletExpense: (
-    walletId: string,
-    walletExpenseId: string,
-  ) => Promise<boolean>;
   onDeleteWalletExpenses: (
     walletId: string,
     walletExpenseIds: string[],
@@ -268,7 +264,6 @@ export function WalletsPage({
   onRemoveWalletMember,
   onCreateWalletExpense,
   onUpdateWalletExpense,
-  onDeleteWalletExpense,
   onDeleteWalletExpenses,
   onCreateWalletBudget,
   onUpdateWalletBudget,
