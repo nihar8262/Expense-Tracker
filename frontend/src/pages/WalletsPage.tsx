@@ -2247,7 +2247,7 @@ export function WalletsPage({
                                   {expense.description}
                                 </strong>
                                 <p className="text-xs text-secondary leading-none">
-                                  {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
+                                  {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
                                 </p>
                               </div>
                             </div>
@@ -2331,7 +2331,7 @@ export function WalletsPage({
                             <strong className="block text-lg text-ink">{expense.description}</strong>
                             <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
                               <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
-                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span></span>
+                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                               <span>•</span>
                               <span>{expense.date}</span>
                               <span>•</span>
@@ -2543,7 +2543,7 @@ export function WalletsPage({
                                       {expense.description}
                                     </strong>
                                     <p className="text-xs text-secondary leading-none">
-                                      {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
+                                      {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
                                     </p>
                                   </div>
                                 </div>
@@ -2628,7 +2628,7 @@ export function WalletsPage({
                                 <strong className="block text-lg text-ink">{expense.description}</strong>
                                 <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
                                   <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
-                                  <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span></span>
+                                  <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                                   <span>•</span>
                                   <span>{expense.date}</span>
                                   <span>•</span>
