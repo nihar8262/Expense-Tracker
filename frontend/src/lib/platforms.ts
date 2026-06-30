@@ -16,5 +16,7 @@ export const PLATFORMS: Platform[] = [
   { id: "uber",             name: "Uber",              logo: "/platforms/uber.png" },
   { id: "ola",              name: "Ola",               logo: "/platforms/ola.jpg" },
   { id: "rapido",           name: "Rapido",            logo: "/platforms/rapido.png" },
+  { id: "district",         name: "District",         logo: "/platforms/district.webp" },
+  { id: "bookmyshow",       name: "Book My Show",     logo: "/platforms/bookmyshow.webp"},
   { id: "others",           name: "Others",            logo: "/platforms/others.jpg" },
 ];

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
-import { EmptyState, PageHero, SectionHeader, SurfaceCard, cn } from "../components/ui";
+import { EmptyState, PageHero, SectionHeader, SurfaceCard, ModalFrame, cn } from "../components/ui";
 import { TrendChart } from "../components/TrendChart";
 import { useNavigate } from "react-router-dom";
 import { PLATFORMS } from "../lib/platforms";
 import { PlatformLogo } from "../components/PlatformPicker";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import type {
   BudgetForm,
   BudgetHistoryGroup,
@@ -16,6 +17,7 @@ import type {
   ChartSummary,
   DashboardInsight,
   DashboardStats,
+  Expense,
   TimeRangeFilter,
   TrendDetailItem,
   TrendPoint,
@@ -73,6 +75,7 @@ type DashboardPageProps = {
   onSelectedPlatformChange: (platform: string) => void;
   onChartDisplayTypeChange: (displayType: ChartDisplayType) => void;
   onChartGranularityChange: (granularity: ChartGranularity) => void;
+  activeExpenses: Expense[];
 };
 
 const statMeta = [
@@ -127,7 +130,8 @@ export function DashboardPage({
   onSelectedTimeRangeChange,
   onSelectedPlatformChange,
   onChartDisplayTypeChange,
-  onChartGranularityChange
+  onChartGranularityChange,
+  activeExpenses
 }: DashboardPageProps) {
   const navigate = useNavigate();
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
@@ -136,6 +140,69 @@ export function DashboardPage({
   const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const activeTrendPoint = spendTrend.find((point) => point.key === activeTrendDetailKey) ?? null;
   const activeTrendItems = activeTrendPoint ? trendDetailLookup[activeTrendPoint.key] ?? [] : [];
+
+  const [selectedCategoryBreakdown, setSelectedCategoryBreakdown] = useState<string | null>(null);
+
+  const pieChartData = useMemo(() => {
+    if (!selectedCategoryBreakdown) return [];
+
+    const categoryExpenses = activeExpenses.filter((e) => e.category === selectedCategoryBreakdown);
+    const platformSums: Record<string, number> = {};
+    let othersSum = 0;
+
+    categoryExpenses.forEach((expense) => {
+      const amt = Number(expense.amount) || 0;
+      if (expense.platform && expense.platform !== "others") {
+        platformSums[expense.platform] = (platformSums[expense.platform] || 0) + amt;
+      } else {
+        othersSum += amt;
+      }
+    });
+
+    const data = Object.entries(platformSums).map(([platformId, value]) => {
+      const platform = PLATFORMS.find((p) => p.id === platformId);
+      return {
+        id: platformId,
+        name: platform ? platform.name : platformId,
+        value,
+        logo: platform?.logo || null
+      };
+    });
+
+    if (othersSum > 0) {
+      data.push({
+        id: "others",
+        name: "Others",
+        value: othersSum,
+        logo: "/platforms/others.jpg"
+      });
+    }
+
+    return data.sort((a, b) => b.value - a.value);
+  }, [activeExpenses, selectedCategoryBreakdown]);
+
+  const pieChartColors = ["#1e7a53", "#d4a857", "#2e9a6e", "#e2b86c", "#41b585", "#5ca890", "#829085"];
+
+  const platformColorMap: Record<string, string> = {
+    swiggy: "#FF5000",           // orange
+    zomato: "#CB202D",           // red
+    zepto: "#8C2DE9",            // bright purple
+    swish: "#5CE681",            // light green
+    bigbasket: "#619F05",        // green
+    blinkit: "#FFDE00",          // yellow
+    amazon_now: "#56B6F7",       // sky blue
+    flipkart_minutes: "#FF9F00", // yellowish orange
+    uber: "#000000",             // black
+    ola: "#A3D829",              // parrot green
+    rapido: "#E6B800",           // dark yellow
+    district: "#7B2CBF",         // purple
+    bookmyshow: "#FF4B60",       // light red
+    others: "#829085"            // grey
+  };
+
+  const getPlatformColor = (platformId: string, index: number): string => {
+    return platformColorMap[platformId] || pieChartColors[index % pieChartColors.length];
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -388,22 +455,47 @@ export function DashboardPage({
       />
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <SurfaceCard className="space-y-5 p-5 sm:p-6">
+        <SurfaceCard className="space-y-4 p-4 sm:p-5">
           <SectionHeader title="Spending breakdown" description="Categories with the largest share of the current view." />
           {dashboardStats.categoryBreakdown.length === 0 ? (
             <EmptyState title="No breakdown yet" description="Add a few expenses to unlock category weighting and spend share signals." />
           ) : (
-            <div className="grid gap-4">
+            <div className="space-y-3.5">
               {dashboardStats.categoryBreakdown.slice(0, 5).map((item) => (
-                <div key={item.category} className="space-y-2 rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+                <div
+                  key={item.category}
+                  className="space-y-1.5 py-0.5 cursor-pointer hover:bg-black/[0.02] rounded-lg px-2 -mx-2 transition active:scale-[0.99] select-none"
+                  onClick={() => setSelectedCategoryBreakdown(item.category)}
+                  title={`View platform breakdown for ${item.category}`}
+                >
                   <div className="flex items-center justify-between gap-3">
-                    <strong className="text-base text-ink">{item.category}</strong>
-                    <span className="text-sm font-semibold text-ink">{item.formattedAmount}</span>
+                    <div className="flex items-center min-w-0">
+                      <span className="text-sm font-semibold text-ink truncate">{item.category}</span>
+                      {item.platforms && item.platforms.length > 0 && (
+                        <div className="flex -space-x-1.5 ml-2 shrink-0">
+                          {item.platforms.map((platformId) => {
+                            const platform = PLATFORMS.find((p) => p.id === platformId);
+                            if (!platform) return null;
+                            return (
+                              <PlatformLogo
+                                key={platformId}
+                                logo={platform.logo}
+                                name={platform.name}
+                                className="w-5 h-5 rounded-full border border-white/95 ring-1 ring-black/5 shadow-xs"
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-baseline gap-1.5 shrink-0">
+                      <span className="text-sm font-semibold text-ink">{item.formattedAmount}</span>
+                      <span className="text-[10px] font-medium text-muted">({item.share.toFixed(0)}%)</span>
+                    </div>
                   </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-[#edf1eb]">
-                    <div className="h-full rounded-full bg-[linear-gradient(90deg,var(--primary),var(--gold))]" style={{ width: `${Math.max(item.share, 8)}%` }} />
+                  <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.04]">
+                    <div className="h-full rounded-full bg-[linear-gradient(90deg,var(--primary),var(--gold))]" style={{ width: `${Math.max(item.share, 4)}%` }} />
                   </div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">{item.share.toFixed(0)}% of current spend</p>
                 </div>
               ))}
             </div>
@@ -571,6 +663,93 @@ export function DashboardPage({
         
         </SurfaceCard>
       </section>
+
+      {selectedCategoryBreakdown && (
+        <ModalFrame onClose={() => setSelectedCategoryBreakdown(null)} className="max-w-[500px] w-full p-5 sm:p-6 rounded-[28px] border border-white/60 bg-white/95 shadow-xl backdrop-blur-xl">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="section-eyebrow">Category Share Split</p>
+                <h3 className="font-display text-3xl leading-none tracking-[-0.03em] text-ink mt-1.5">{selectedCategoryBreakdown}</h3>
+              </div>
+              <button
+                type="button"
+                className="ui-button-ghost min-h-0 h-9 w-9 p-0 flex items-center justify-center rounded-full text-secondary hover:text-ink transition"
+                onClick={() => setSelectedCategoryBreakdown(null)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {pieChartData.length === 0 ? (
+              <EmptyState title="No platform spend" description="No platform records found under this category." />
+            ) : (
+              <div className="flex flex-col items-center justify-center sm:flex-row gap-6 py-2">
+                <div className="w-[180px] h-[180px] relative flex items-center justify-center shrink-0">
+                  <div className="absolute flex flex-col items-center justify-center text-center select-none pointer-events-none">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Total</span>
+                    <span className="text-base font-bold text-ink">{formatCurrency(pieChartData.reduce((sum, item) => sum + item.value, 0).toFixed(2))}</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={75}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {pieChartData.map((item, index) => (
+                          <Cell key={`cell-${index}`} fill={getPlatformColor(item.id, index)} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value: any) => [formatCurrency(Number(value).toFixed(2)), "Amount"]}
+                        contentStyle={{
+                          backgroundColor: "rgba(255, 255, 255, 0.95)",
+                          borderRadius: "12px",
+                          border: "1px solid var(--border)",
+                          fontSize: "12px",
+                          color: "var(--ink)",
+                          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)"
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="flex-1 space-y-2.5 w-full">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">Platform Breakdown</p>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                    {pieChartData.map((item, index) => {
+                      const totalVal = pieChartData.reduce((sum, i) => sum + i.value, 0);
+                      const percentage = totalVal > 0 ? (item.value / totalVal) * 100 : 0;
+                      return (
+                        <div key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: getPlatformColor(item.id, index) }} />
+                            {item.logo ? (
+                              <PlatformLogo logo={item.logo} name={item.name} className="w-4 h-4 rounded-full shadow-xs shrink-0" />
+                            ) : null}
+                            <span className="font-medium text-ink truncate">{item.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="font-semibold text-ink">{formatCurrency(item.value.toFixed(2))}</span>
+                            <span className="text-[10px] text-muted">({percentage.toFixed(0)}%)</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </ModalFrame>
+      )}
     </>
   );
 }

@@ -329,7 +329,9 @@ Vercel
 ### Dashboard
 
 - **Data view toggle**: Switch between Personal and Wallet data sources with icons. Wallet mode shows a wallet selector dropdown.
-- **Quick stats**: Expense count, average spend, top category, latest expense, and category breakdown.
+- **Quick stats**: Expense count, average spend, top category, latest expense.
+- **Spending breakdown tab**: Redesigned, compact layout presenting categories as borderless list rows with thin progress bars, inline percentage shares, and overlapping platform logo chips.
+- **Platform split Donut Chart**: Click any category in the breakdown list to open an interactive modal popup displaying a Recharts-powered Donut Chart. Shows absolute spend and percentage split across platforms (e.g. Swiggy, Zomato, Zepto) using official brand-consistent colors. Features a category spend total indicator in the center of the chart.
 - **Budget tracking**: Current month budget summaries and overview. Switches between personal and wallet budgets based on the active data view.
 - **Spend trend chart**: Line/bar chart with daily, weekly, or monthly granularity.
 - **Insights**: Auto-generated insights comparing month-over-month spending, budget pressure, and top categories.

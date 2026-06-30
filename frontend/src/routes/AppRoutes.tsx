@@ -512,12 +512,22 @@ export function AppRoutes() {
 
     const categoryBreakdown = Object.entries(categoryTotals)
       .sort((left, right) => right[1] - left[1])
-      .map(([category, amount]) => ({
-        category,
-        amount,
-        formattedAmount: formatCurrency(amount.toFixed(2)),
-        share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0
-      }));
+      .map(([category, amount]) => {
+        const platforms = Array.from(
+          new Set(
+            dashboardVisibleExpenses
+              .filter((e) => e.category === category && e.platform)
+              .map((e) => e.platform as string)
+          )
+        );
+        return {
+          category,
+          amount,
+          formattedAmount: formatCurrency(amount.toFixed(2)),
+          share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
+          platforms
+        };
+      });
 
     const latestExpense = [...dashboardVisibleExpenses].sort((left, right) => {
       const byDate = right.date.localeCompare(left.date);
@@ -2047,6 +2057,7 @@ export function AppRoutes() {
       >
         {page === "dashboard" ? (
           <DashboardPage
+            activeExpenses={dashboardVisibleExpenses}
             categories={dashboardViewMode === "wallet" ? dashboardCategories : categories}
             dashboardInsights={dashboardInsights}
             wallets={wallets}

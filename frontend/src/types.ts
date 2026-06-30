@@ -218,6 +218,7 @@ export type CategoryBreakdownItem = {
 	amount: number;
 	formattedAmount: string;
 	share: number;
+	platforms: string[];
 };
 
 export type TopPlatformItem = {
