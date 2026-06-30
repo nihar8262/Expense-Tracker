@@ -294,6 +294,9 @@ export type NotificationCenterProps = {
 	onDeleteBillReminder: (billReminderId: string) => Promise<boolean>;
 	onPreferencesChange: (field: "daily_logging_enabled" | "daily_logging_hour" | "budget_alerts_enabled" | "budget_alert_threshold", value: boolean | number) => void;
 	onSavePreferences: () => void;
+	wallets: Wallet[];
+	preferenceScope: string;
+	onPreferenceScopeChange: (scope: string) => void;
 };
 
 export class ApiError extends Error {

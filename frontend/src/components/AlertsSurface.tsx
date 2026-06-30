@@ -28,6 +28,9 @@ export function AlertsSurface({
   isSavingBillReminder,
   isRunningChecks,
   preferences,
+  wallets,
+  preferenceScope,
+  onPreferenceScopeChange,
   onMarkRead,
   onMarkAllRead,
   onDeleteNotification,
@@ -349,16 +352,37 @@ export function AlertsSurface({
         preferences ? (
           <SurfaceCard className="space-y-5 p-5 sm:p-6">
             <SectionHeader eyebrow="Preferences" title="Scheduled checks" description="Tune daily nudges and budget alert thresholds without changing your main dashboard layout." />
-            <div className="grid gap-4 lg:grid-cols-2">
-              <label className="flex min-h-14 items-center justify-between rounded-[22px] border border-[color:var(--border)] bg-white/80 px-4 py-3 text-sm font-medium text-secondary shadow-sm">
-                <span>Daily logging reminder</span>
-                <input className="h-5 w-5 rounded-md" type="checkbox" checked={preferences.daily_logging_enabled} onChange={(event) => onPreferencesChange("daily_logging_enabled", event.target.checked)} />
-              </label>
+            
+            <div className="grid gap-2 text-sm font-medium text-secondary max-w-sm">
+              <span>Alert preference scope</span>
+              <select
+                value={preferenceScope}
+                onChange={(e) => onPreferenceScopeChange(e.target.value)}
+                className="w-full rounded-[22px] border border-[color:var(--border)] bg-white px-4 py-2 text-sm font-medium"
+              >
+                <option value="personal">Personal Account</option>
+                {wallets.map((wallet) => (
+                  <option key={wallet.id} value={wallet.id}>
+                    Wallet: {wallet.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Daily reminder hour
-                <input type="number" min={0} max={23} value={preferences.daily_logging_hour} onChange={(event) => onPreferencesChange("daily_logging_hour", Number(event.target.value))} />
-              </label>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {preferenceScope === "personal" && (
+                <>
+                  <label className="flex min-h-14 items-center justify-between rounded-[22px] border border-[color:var(--border)] bg-white/80 px-4 py-3 text-sm font-medium text-secondary shadow-sm">
+                    <span>Daily logging reminder</span>
+                    <input className="h-5 w-5 rounded-md" type="checkbox" checked={preferences.daily_logging_enabled} onChange={(event) => onPreferencesChange("daily_logging_enabled", event.target.checked)} />
+                  </label>
+
+                  <label className="grid gap-2 text-sm font-medium text-secondary">
+                    Daily reminder hour
+                    <input type="number" min={0} max={23} value={preferences.daily_logging_hour} onChange={(event) => onPreferencesChange("daily_logging_hour", Number(event.target.value))} />
+                  </label>
+                </>
+              )}
 
               <label className="flex min-h-14 items-center justify-between rounded-[22px] border border-[color:var(--border)] bg-white/80 px-4 py-3 text-sm font-medium text-secondary shadow-sm">
                 <span>Budget alerts</span>

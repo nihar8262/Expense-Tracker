@@ -96,6 +96,8 @@ type StoredWalletMember = {
   role: "owner" | "member";
   inviteStatus: "linked" | "pending" | "declined";
   joinedAt: string;
+  budgetAlertsEnabled?: boolean;
+  budgetAlertThreshold?: number;
 };
 
 type StoredWalletExpense = {
@@ -226,7 +228,9 @@ function mapWalletMember(member: StoredWalletMember): WalletMemberRecord {
     email: member.email,
     role: member.role,
     invite_status: member.inviteStatus,
-    joined_at: member.joinedAt
+    joined_at: member.joinedAt,
+    budget_alerts_enabled: member.budgetAlertsEnabled,
+    budget_alert_threshold: member.budgetAlertThreshold
   };
 }
 
@@ -1425,6 +1429,38 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return mapReminderPreferences(nextPreferences);
   }
 
+  async function getWalletReminderPreferences(userId: string, walletId: string): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+    const membership = [...walletMembers.values()].find(
+      (m) => m.walletId === walletId && m.userId === userId && m.inviteStatus === "linked"
+    );
+    if (!membership) {
+      throw new WalletValidationError("Not a member of this wallet or wallet does not exist.");
+    }
+    return {
+      budget_alerts_enabled: membership.budgetAlertsEnabled !== undefined ? membership.budgetAlertsEnabled : true,
+      budget_alert_threshold: membership.budgetAlertThreshold !== undefined ? membership.budgetAlertThreshold : 80
+    };
+  }
+
+  async function upsertWalletReminderPreferences(
+    userId: string,
+    walletId: string,
+    input: { budgetAlertsEnabled: boolean; budgetAlertThreshold: number }
+  ): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+    const membership = [...walletMembers.values()].find(
+      (m) => m.walletId === walletId && m.userId === userId && m.inviteStatus === "linked"
+    );
+    if (!membership) {
+      throw new WalletValidationError("Not a member of this wallet or wallet does not exist.");
+    }
+    membership.budgetAlertsEnabled = input.budgetAlertsEnabled;
+    membership.budgetAlertThreshold = input.budgetAlertThreshold;
+    return {
+      budget_alerts_enabled: membership.budgetAlertsEnabled,
+      budget_alert_threshold: membership.budgetAlertThreshold
+    };
+  }
+
   async function runNotificationChecks(userId?: string, now = new Date()): Promise<NotificationCheckResult> {
     pruneExpiredBudgetNotifications(now, userId);
 
@@ -1507,6 +1543,75 @@ export function createMemoryExpenseStore(): ExpenseStore {
 
             if (created) {
               createdNotifications.push(mapNotification(created));
+            }
+          }
+        }
+
+        // Wallet budget checks
+        const userWalletMemberships = [...walletMembers.values()].filter(
+          (m) => m.userId === targetUserId && m.inviteStatus === "linked"
+        );
+
+        for (const membership of userWalletMemberships) {
+          const wallet = wallets.get(membership.walletId);
+          if (!wallet) continue;
+
+          const walletBudgetAlertsEnabled = membership.budgetAlertsEnabled !== undefined ? membership.budgetAlertsEnabled : true;
+          if (!walletBudgetAlertsEnabled) continue;
+
+          const walletAlertThreshold = membership.budgetAlertThreshold !== undefined ? membership.budgetAlertThreshold : 80;
+
+          const activeWalletBudgets = [...walletBudgets.values()].filter(
+            (wb) => wb.walletId === wallet.id && wb.month === currentMonth
+          );
+
+          for (const walletBudget of activeWalletBudgets) {
+            const activeWalletExpenses = [...walletExpenses.values()].filter(
+              (we) => we.walletId === wallet.id && we.date.startsWith(currentMonth)
+            );
+
+            const spentMinor = activeWalletExpenses
+              .filter((we) => (walletBudget.scope === "category" ? we.category === walletBudget.category : true))
+              .reduce((sum, we) => sum + we.amountMinor, 0);
+
+            if (spentMinor <= 0) {
+              continue;
+            }
+
+            if (spentMinor > walletBudget.amountMinor) {
+              const created = createNotificationIfMissing({
+                userId: targetUserId,
+                type: "budget-overspent",
+                title: walletBudget.scope === "category" ? `[${wallet.name}] ${walletBudget.category} budget exceeded` : `[${wallet.name}] Budget exceeded`,
+                message: `${formatMinorUnits(spentMinor)} spent against a ${formatMinorUnits(walletBudget.amountMinor)} budget for ${walletBudget.month}.`,
+                scheduledFor: null,
+                metadata: { walletId: wallet.id, budgetId: walletBudget.id, month: walletBudget.month },
+                dedupeKey: `wallet-budget-overspent:${wallet.id}:${walletBudget.id}:${walletBudget.month}`
+              });
+
+              if (created) {
+                createdNotifications.push(mapNotification(created));
+              }
+
+              continue;
+            }
+
+            const thresholdMinor = Math.ceil((walletBudget.amountMinor * walletAlertThreshold) / 100);
+
+            if (spentMinor >= thresholdMinor) {
+              const created = createNotificationIfMissing({
+                userId: targetUserId,
+                type: "budget-threshold",
+                title: walletBudget.scope === "category" ? `[${wallet.name}] ${walletBudget.category} budget nearing limit` : `[${wallet.name}] Budget nearing limit`,
+                message: `${formatMinorUnits(spentMinor)} spent, which is ${walletAlertThreshold}% or more of your ${formatMinorUnits(walletBudget.amountMinor)} budget for ${walletBudget.month}.`,
+                scheduledFor: null,
+                metadata: { walletId: wallet.id, budgetId: walletBudget.id, month: walletBudget.month },
+                dedupeKey: `wallet-budget-threshold:${wallet.id}:${walletBudget.id}:${walletBudget.month}:${walletAlertThreshold}`
+              });
+
+              if (created) {
+                createdNotifications.push(mapNotification(created));
+              }
             }
           }
         }
@@ -1626,6 +1731,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
     deleteNotification,
     getReminderPreferences,
     upsertReminderPreferences,
+    getWalletReminderPreferences,
+    upsertWalletReminderPreferences,
     runNotificationChecks,
     deleteUserData
   };

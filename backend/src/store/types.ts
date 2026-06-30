@@ -56,6 +56,8 @@ export type WalletMemberRecord = {
   role: WalletMemberRole;
   invite_status: "linked" | "pending" | "declined";
   joined_at: string;
+  budget_alerts_enabled?: boolean;
+  budget_alert_threshold?: number;
 };
 
 export type WalletExpenseSplitRecord = {
@@ -204,6 +206,8 @@ export interface ExpenseStore {
   deleteNotification(userId: string, notificationId: string): Promise<void>;
   getReminderPreferences(userId: string): Promise<ReminderPreferencesRecord>;
   upsertReminderPreferences(userId: string, input: CreateReminderPreferencesInput): Promise<ReminderPreferencesRecord>;
+  getWalletReminderPreferences(userId: string, walletId: string): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }>;
+  upsertWalletReminderPreferences(userId: string, walletId: string, input: { budgetAlertsEnabled: boolean; budgetAlertThreshold: number }): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }>;
   runNotificationChecks(userId?: string, now?: Date): Promise<NotificationCheckResult>;
   deleteUserData(userId: string): Promise<void>;
 }

@@ -967,4 +967,155 @@ describe("expenses API", () => {
 
     expect(deleteResponse.status).toBe(204);
   });
+
+  it("creates wallet budget notifications through reminder checks", async () => {
+    const app = buildApp();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    // 1. Set reminder preferences for user-one
+    await request(app)
+      .put("/api/reminder-preferences")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        dailyLoggingEnabled: false,
+        dailyLoggingHour: 0,
+        budgetAlertsEnabled: true,
+        budgetAlertThreshold: 80
+      });
+
+    // 2. Create a shared wallet for user-one
+    const walletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Apartment Share",
+        description: "Shared living costs",
+        defaultSplitRule: "equal",
+        members: [{ displayName: "Alex" }]
+      });
+
+    expect(walletResponse.status).toBe(201);
+    const walletId = walletResponse.body.wallet.wallet.id;
+    const members = walletResponse.body.wallet.members as Array<{ id: string; display_name: string }>;
+    const ownerMember = members.find((member) => member.display_name === "user-one");
+
+    // 3. Create a wallet budget
+    const budgetResponse = await request(app)
+      .post(`/api/wallets/${walletId}/budgets`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "500.00",
+        scope: "monthly",
+        month: currentMonth
+      });
+    expect(budgetResponse.status).toBe(201);
+
+    // 4. Post a wallet expense that is 90% (exceeds 80% threshold but under 500 budget)
+    const expenseResponse = await request(app)
+      .post(`/api/wallets/${walletId}/expenses`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        paidByMemberId: ownerMember?.id,
+        amount: "450.00",
+        category: "Rent",
+        description: "Rent deposit share",
+        date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
+        splitRule: "equal",
+        splits: [{ memberId: ownerMember?.id }]
+      });
+    expect(expenseResponse.status).toBe(201);
+
+    // 5. Run reminder checks
+    const runChecksResponse = await request(app)
+      .post("/api/notifications/run-checks")
+      .set("Authorization", "Bearer user-one");
+
+    expect(runChecksResponse.status).toBe(200);
+    expect(runChecksResponse.body.created_notifications.some((notification: { type: string }) => notification.type === "budget-threshold")).toBe(true);
+
+    const notificationsResponse = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer user-one");
+
+    expect(notificationsResponse.status).toBe(200);
+    const walletNotification = notificationsResponse.body.notifications.find((notification: { title: string }) => notification.title.includes("Apartment Share"));
+    expect(walletNotification).toBeTruthy();
+    expect(walletNotification.type).toBe("budget-threshold");
+    expect(walletNotification.title).toContain("Budget nearing limit");
+  });
+
+  it("manages wallet-specific budget alert preferences", async () => {
+    const app = buildApp();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    // 1. Create a shared wallet for user-one
+    const walletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Co-op Alert Test",
+        description: "Shared living costs",
+        defaultSplitRule: "equal",
+        members: [{ displayName: "Alex" }]
+      });
+
+    expect(walletResponse.status).toBe(201);
+    const walletId = walletResponse.body.wallet.wallet.id;
+    const members = walletResponse.body.wallet.members as Array<{ id: string; display_name: string }>;
+    const ownerMember = members.find((member) => member.display_name === "user-one");
+
+    // 2. Fetch default preferences
+    const getPrefsResponse = await request(app)
+      .get(`/api/wallets/${walletId}/preferences`)
+      .set("Authorization", "Bearer user-one");
+    
+    expect(getPrefsResponse.status).toBe(200);
+    expect(getPrefsResponse.body.preferences.budget_alerts_enabled).toBe(true);
+    expect(getPrefsResponse.body.preferences.budget_alert_threshold).toBe(80);
+
+    // 3. Update wallet specific budget threshold to 60%
+    const putPrefsResponse = await request(app)
+      .put(`/api/wallets/${walletId}/preferences`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        budgetAlertsEnabled: true,
+        budgetAlertThreshold: 60
+      });
+
+    expect(putPrefsResponse.status).toBe(200);
+    expect(putPrefsResponse.body.preferences.budget_alerts_enabled).toBe(true);
+    expect(putPrefsResponse.body.preferences.budget_alert_threshold).toBe(60);
+
+    // 4. Create a wallet budget of 1000
+    await request(app)
+      .post(`/api/wallets/${walletId}/budgets`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "1000.00",
+        scope: "monthly",
+        month: currentMonth
+      });
+
+    // 5. Add an expense of 700 (which is 70% - exceeds the 60% wallet-specific threshold but under default 80% threshold!)
+    await request(app)
+      .post(`/api/wallets/${walletId}/expenses`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        paidByMemberId: ownerMember?.id,
+        amount: "700.00",
+        category: "Groceries",
+        description: "Bulk supplies",
+        date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`,
+        splitRule: "equal",
+        splits: [{ memberId: ownerMember?.id }]
+      });
+
+    // 6. Run checks
+    const runChecksResponse = await request(app)
+      .post("/api/notifications/run-checks")
+      .set("Authorization", "Bearer user-one");
+
+    expect(runChecksResponse.status).toBe(200);
+    expect(runChecksResponse.body.created_notifications.some((n: any) => n.type === "budget-threshold")).toBe(true);
+  });
 });

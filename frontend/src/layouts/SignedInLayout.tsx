@@ -5,7 +5,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { BellIcon, cn } from "../components/ui";
-import type { BillReminder, Notification, ReminderPreferences } from "../types";
+import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
 
 type SignedInLayoutProps = {
   currentUser: User;
@@ -17,6 +17,9 @@ type SignedInLayoutProps = {
   isDeletingAccount: boolean;
   notifications: Notification[];
   billReminders: BillReminder[];
+  wallets: Wallet[];
+  preferenceScope: string;
+  onPreferenceScopeChange: (scope: string) => void;
   unreadNotificationCount: number;
   reminderPreferences: ReminderPreferences | null;
   isSavingReminderPreferences: boolean;
@@ -68,6 +71,9 @@ export function SignedInLayout({
   isDeletingAccount,
   notifications,
   billReminders,
+  wallets,
+  preferenceScope,
+  onPreferenceScopeChange,
   unreadNotificationCount,
   reminderPreferences,
   isSavingReminderPreferences,
@@ -141,6 +147,9 @@ export function SignedInLayout({
               isSavingBillReminder={isSavingBillReminder}
               isRunningChecks={isRunningNotificationChecks}
               preferences={reminderPreferences}
+              wallets={wallets}
+              preferenceScope={preferenceScope}
+              onPreferenceScopeChange={onPreferenceScopeChange}
               notificationPanelRef={notificationPanelRef}
               onToggle={onToggleNotificationPanel}
               onMarkRead={onMarkNotificationRead}

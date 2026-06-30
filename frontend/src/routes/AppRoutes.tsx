@@ -319,7 +319,9 @@ export function AppRoutes() {
     saveBillReminder,
     deleteBillReminderEntry,
     getReminderPreferences,
-    updateReminderPreferences
+    updateReminderPreferences,
+    getWalletReminderPreferences,
+    updateWalletReminderPreferences
   } = useNotifications();
   const [form, setForm] = useState<ExpenseForm>(initialFormState);
   const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
@@ -331,6 +333,8 @@ export function AppRoutes() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
+  const [preferenceScope, setPreferenceScope] = useState<string>("personal");
+  const [walletPreferences, setWalletPreferences] = useState<Record<string, { budget_alerts_enabled: boolean; budget_alert_threshold: number }>>({});
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -1611,7 +1615,62 @@ export function AppRoutes() {
     }
   }
 
+  async function handlePreferenceScopeChange(scope: string) {
+    setPreferenceScope(scope);
+    if (scope !== "personal" && currentUser && !walletPreferences[scope]) {
+      setIsSavingReminderPreferences(true);
+      try {
+        const prefs = await getWalletReminderPreferences(scope, currentUser);
+        setWalletPreferences((prev) => ({
+          ...prev,
+          [scope]: prefs
+        }));
+      } catch (error) {
+        setAuthMessage(error instanceof Error ? error.message : "Failed to load wallet preferences.");
+      } finally {
+        setIsSavingReminderPreferences(false);
+      }
+    }
+  }
+
+  const activeReminderPreferences = useMemo(() => {
+    if (preferenceScope === "personal") {
+      return reminderPreferences;
+    }
+    const walletPrefs = walletPreferences[preferenceScope];
+    if (!walletPrefs) {
+      return {
+        daily_logging_enabled: false,
+        daily_logging_hour: 0,
+        budget_alerts_enabled: true,
+        budget_alert_threshold: 80,
+        updated_at: ""
+      };
+    }
+    return {
+      daily_logging_enabled: false,
+      daily_logging_hour: 0,
+      budget_alerts_enabled: walletPrefs.budget_alerts_enabled,
+      budget_alert_threshold: walletPrefs.budget_alert_threshold,
+      updated_at: ""
+    };
+  }, [preferenceScope, reminderPreferences, walletPreferences]);
+
   function handleReminderPreferencesChange(field: "daily_logging_enabled" | "daily_logging_hour" | "budget_alerts_enabled" | "budget_alert_threshold", value: boolean | number) {
+    if (preferenceScope !== "personal") {
+      setWalletPreferences((current) => {
+        const prev = current[preferenceScope] || { budget_alerts_enabled: true, budget_alert_threshold: 80 };
+        return {
+          ...current,
+          [preferenceScope]: {
+            ...prev,
+            [field === "budget_alerts_enabled" ? "budget_alerts_enabled" : "budget_alert_threshold"]: value as any
+          }
+        };
+      });
+      return;
+    }
+
     setReminderPreferences((current) => {
       if (!current) {
         return current;
@@ -1625,7 +1684,30 @@ export function AppRoutes() {
   }
 
   async function handleSaveReminderPreferences() {
-    if (!currentUser || !reminderPreferences) {
+    if (!currentUser) {
+      return;
+    }
+
+    if (preferenceScope !== "personal") {
+      const prefs = walletPreferences[preferenceScope];
+      if (!prefs) return;
+      setIsSavingReminderPreferences(true);
+      try {
+        const updated = await updateWalletReminderPreferences(preferenceScope, currentUser, prefs);
+        setWalletPreferences((current) => ({
+          ...current,
+          [preferenceScope]: updated
+        }));
+        addToast("Wallet reminder preferences updated successfully.", "success");
+      } catch (error) {
+        setAuthMessage(error instanceof Error ? error.message : "Failed to update wallet preferences.");
+      } finally {
+        setIsSavingReminderPreferences(false);
+      }
+      return;
+    }
+
+    if (!reminderPreferences) {
       return;
     }
 
@@ -1633,6 +1715,7 @@ export function AppRoutes() {
 
     try {
       setReminderPreferences(await updateReminderPreferences(currentUser, reminderPreferences));
+      addToast("Reminder preferences updated successfully.", "success");
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to update reminder preferences.");
     } finally {
@@ -1665,6 +1748,12 @@ export function AppRoutes() {
       await loadBillReminders(currentUser);
       await loadNotifications(currentUser);
       setAuthMessage("");
+      addToast(
+        billReminderId
+          ? "Bill reminder updated successfully."
+          : "Bill reminder created successfully.",
+        "success"
+      );
       return true;
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to save bill reminder.");
@@ -1685,7 +1774,9 @@ export function AppRoutes() {
     try {
       await deleteBillReminderEntry(billReminderId, currentUser);
       await loadBillReminders(currentUser);
+      await loadNotifications(currentUser);
       setAuthMessage("");
+      addToast("Bill reminder deleted successfully.", "success");
       return true;
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to delete bill reminder.");
@@ -2021,8 +2112,11 @@ export function AppRoutes() {
         isDeletingAccount={isDeletingAccount}
         notifications={notifications}
         billReminders={billReminders}
+        wallets={wallets}
+        preferenceScope={preferenceScope}
+        onPreferenceScopeChange={handlePreferenceScopeChange}
         unreadNotificationCount={unreadNotificationCount}
-        reminderPreferences={reminderPreferences}
+        reminderPreferences={activeReminderPreferences}
         isSavingReminderPreferences={isSavingReminderPreferences}
         isSavingBillReminder={isSavingBillReminder}
         isRunningNotificationChecks={isRunningNotificationChecks}
@@ -2189,7 +2283,10 @@ export function AppRoutes() {
               isSavingPreferences={isSavingReminderPreferences}
               isSavingBillReminder={isSavingBillReminder}
               isRunningChecks={isRunningNotificationChecks}
-              preferences={reminderPreferences}
+              preferences={activeReminderPreferences}
+              wallets={wallets}
+              preferenceScope={preferenceScope}
+              onPreferenceScopeChange={handlePreferenceScopeChange}
               onMarkRead={handleMarkNotificationRead}
               onMarkAllRead={handleMarkAllNotificationsRead}
               onDeleteNotification={handleDeleteNotification}

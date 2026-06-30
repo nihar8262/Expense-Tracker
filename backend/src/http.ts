@@ -3,6 +3,7 @@ import {
   createBudgetSchema,
   createExpenseSchema,
   createReminderPreferencesSchema,
+  createWalletReminderPreferencesSchema,
   createSettlementSchema,
   createWalletExpenseSchema,
   walletInviteResponseSchema,
@@ -1084,6 +1085,60 @@ export async function handleRunNotificationChecks(userId: string | undefined, st
     return {
       status: 500,
       body: { error: "Failed to run reminder checks." }
+    };
+  }
+}
+
+export async function handleGetWalletReminderPreferences(walletId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const preferences = await store.getWalletReminderPreferences(userId, walletId);
+    return {
+      status: 200,
+      body: { preferences }
+    };
+  } catch (error) {
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+    return {
+      status: 500,
+      body: { error: "Failed to load wallet reminder preferences." }
+    };
+  }
+}
+
+export async function handleUpsertWalletReminderPreferences(rawBody: unknown, walletId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createWalletReminderPreferencesSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid wallet reminder preferences payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const preferences = await store.upsertWalletReminderPreferences(userId, walletId, result.data);
+    return {
+      status: 200,
+      body: { preferences }
+    };
+  } catch (error) {
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+    return {
+      status: 500,
+      body: { error: "Failed to update wallet reminder preferences." }
     };
   }
 }

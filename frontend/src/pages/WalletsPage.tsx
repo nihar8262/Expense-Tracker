@@ -2207,7 +2207,8 @@ export function WalletsPage({
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="grid gap-3">
+                    {/* Desktop View */}
+                    <div className="hidden lg:grid lg:gap-3">
                       {paginatedWalletExpenses.map((expense) => (
                         <article
                           key={expense.id}
@@ -2282,6 +2283,79 @@ export function WalletsPage({
                               {deletingExpenseIds.includes(expense.id)
                                 ? "Deleting..."
                                 : "Delete"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    {/* Mobile View */}
+                    <div className="grid gap-3 lg:hidden">
+                      {paginatedWalletExpenses.map((expense) => (
+                        <article
+                          key={expense.id}
+                          className={cn(
+                            "table-card-mobile space-y-4 transition-all duration-200",
+                            selectedExpenseIds.includes(expense.id)
+                              ? "border-primary/25 bg-success-tint"
+                              : "border-[color:var(--border)] bg-white/80",
+                            deletingExpenseIds.includes(expense.id) && "animate-delete",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${expense.description}`}
+                                checked={selectedExpenseIds.includes(expense.id)}
+                                disabled={deletingExpenseIds.includes(expense.id)}
+                                onChange={() => handleToggleExpenseSelection(expense.id)}
+                              />
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                <CategoryIcon
+                                  iconId={
+                                    budgetCategoryOptions.find(
+                                      (option) => option.label === expense.category,
+                                    )?.icon ?? "other"
+                                  }
+                                />
+                              </span>
+                              {expense.platform ? (
+                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                              ) : null}
+                            </div>
+                            <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                          </div>
+
+                          <div className="space-y-2">
+                            <strong className="block text-lg text-ink">{expense.description}</strong>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span></span>
+                              <span>•</span>
+                              <span>{expense.date}</span>
+                              <span>•</span>
+                              <span className="text-xs font-medium text-secondary">
+                                {expense.split_rule} split
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="ui-button-secondary"
+                              onClick={() => handleStartExpenseEdit(expense.id)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger"
+                              disabled={deletingExpenseIds.includes(expense.id)}
+                              onClick={() => void handleDeleteExpenseClick(expense.id)}
+                            >
+                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
                             </button>
                           </div>
                         </article>
@@ -2428,87 +2502,166 @@ export function WalletsPage({
                         No expenses match the current filters.
                       </p>
                     ) : (
-                      <div className="grid gap-3">
-                        {filteredExpenses.map((expense) => (
-                          <article
-                            key={expense.id}
-                            className={cn(
-                              "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
-                              selectedExpenseIds.includes(expense.id)
-                                ? "border-primary/25 bg-success-tint"
-                                : "border-[color:var(--border)] bg-white/80",
-                              deletingExpenseIds.includes(expense.id) && "animate-delete",
-                            )}
-                          >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Select ${expense.description}`}
-                                  checked={selectedExpenseIds.includes(expense.id)}
-                                  disabled={deletingExpenseIds.includes(expense.id)}
-                                  onChange={() => handleToggleExpenseSelection(expense.id)}
-                                  className="mr-1"
-                                />
-                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
-                                  <CategoryIcon
-                                    iconId={
-                                      budgetCategoryOptions.find(
-                                        (option) => option.label === expense.category,
-                                      )?.icon ?? "other"
-                                    }
+                      <>
+                        {/* Desktop View */}
+                        <div className="hidden lg:grid lg:gap-3">
+                          {filteredExpenses.map((expense) => (
+                            <article
+                              key={expense.id}
+                              className={cn(
+                                "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
+                                selectedExpenseIds.includes(expense.id)
+                                  ? "border-primary/25 bg-success-tint"
+                                  : "border-[color:var(--border)] bg-white/80",
+                                deletingExpenseIds.includes(expense.id) && "animate-delete",
+                              )}
+                            >
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${expense.description}`}
+                                    checked={selectedExpenseIds.includes(expense.id)}
+                                    disabled={deletingExpenseIds.includes(expense.id)}
+                                    onChange={() => handleToggleExpenseSelection(expense.id)}
+                                    className="mr-1"
                                   />
-                                </span>
-                                {expense.platform ? (
-                                  <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
-                                ) : null}
-                                <div className="min-w-0 space-y-1">
-                                  <strong className="block truncate text-base font-semibold text-ink">
-                                    {expense.description}
+                                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
+                                    <CategoryIcon
+                                      iconId={
+                                        budgetCategoryOptions.find(
+                                          (option) => option.label === expense.category,
+                                        )?.icon ?? "other"
+                                      }
+                                    />
+                                  </span>
+                                  {expense.platform ? (
+                                    <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                                  ) : null}
+                                  <div className="min-w-0 space-y-1">
+                                    <strong className="block truncate text-base font-semibold text-ink">
+                                      {expense.description}
+                                    </strong>
+                                    <p className="text-xs text-secondary leading-none">
+                                      {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-left sm:text-right">
+                                  <strong className="block text-xl font-bold tracking-tight text-ink">
+                                    {formatCurrency(expense.amount)}
                                   </strong>
-                                  <p className="text-xs text-secondary leading-none">
-                                    {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span> · {expense.date}
-                                  </p>
+                                  <span className="text-xs font-medium text-secondary">
+                                    {expense.split_rule} split
+                                  </span>
                                 </div>
                               </div>
-                              <div className="shrink-0 text-left sm:text-right">
-                                <strong className="block text-xl font-bold tracking-tight text-ink">
-                                  {formatCurrency(expense.amount)}
-                                </strong>
-                                <span className="text-xs font-medium text-secondary">
-                                  {expense.split_rule} split
-                                </span>
+                              <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
+                                <button
+                                  type="button"
+                                  className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                                  onClick={() => {
+                                    handleStartExpenseEdit(expense.id);
+                                    setIsExpenseModalOpen(false);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
+                                  disabled={deletingExpenseIds.includes(
+                                    expense.id,
+                                  )}
+                                  onClick={() =>
+                                    void handleDeleteExpenseClick(expense.id)
+                                  }
+                                >
+                                  {deletingExpenseIds.includes(expense.id)
+                                    ? "Deleting..."
+                                    : "Delete"}
+                                </button>
                               </div>
-                            </div>
-                            <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
-                              <button
-                                type="button"
-                                className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                                onClick={() => {
-                                  handleStartExpenseEdit(expense.id);
-                                  setIsExpenseModalOpen(false);
-                                }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
-                                disabled={deletingExpenseIds.includes(
-                                  expense.id,
-                                )}
-                                onClick={() =>
-                                  void handleDeleteExpenseClick(expense.id)
-                                }
-                              >
-                                {deletingExpenseIds.includes(expense.id)
-                                  ? "Deleting..."
-                                  : "Delete"}
-                              </button>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
+                            </article>
+                          ))}
+                        </div>
+
+                        {/* Mobile View */}
+                        <div className="grid gap-3 lg:hidden">
+                          {filteredExpenses.map((expense) => (
+                            <article
+                              key={expense.id}
+                              className={cn(
+                                "table-card-mobile space-y-4 transition-all duration-200",
+                                selectedExpenseIds.includes(expense.id)
+                                  ? "border-primary/25 bg-success-tint"
+                                  : "border-[color:var(--border)] bg-white/80",
+                                deletingExpenseIds.includes(expense.id) && "animate-delete",
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${expense.description}`}
+                                    checked={selectedExpenseIds.includes(expense.id)}
+                                    disabled={deletingExpenseIds.includes(expense.id)}
+                                    onChange={() => handleToggleExpenseSelection(expense.id)}
+                                  />
+                                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                    <CategoryIcon
+                                      iconId={
+                                        budgetCategoryOptions.find(
+                                          (option) => option.label === expense.category,
+                                        )?.icon ?? "other"
+                                      }
+                                    />
+                                  </span>
+                                  {expense.platform ? (
+                                    <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                                  ) : null}
+                                </div>
+                                <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                              </div>
+
+                              <div className="space-y-2">
+                                <strong className="block text-lg text-ink">{expense.description}</strong>
+                                <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                                  <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name}</span></span>
+                                  <span>•</span>
+                                  <span>{expense.date}</span>
+                                  <span>•</span>
+                                  <span className="text-xs font-medium text-secondary">
+                                    {expense.split_rule} split
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary"
+                                  onClick={() => {
+                                    handleStartExpenseEdit(expense.id);
+                                    setIsExpenseModalOpen(false);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ui-button-danger"
+                                  disabled={deletingExpenseIds.includes(expense.id)}
+                                  onClick={() => void handleDeleteExpenseClick(expense.id)}
+                                >
+                                  {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
+                                </button>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                 </ModalFrame>

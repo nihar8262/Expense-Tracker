@@ -15,6 +15,8 @@ export function useNotifications() {
     saveBillReminder: useCallback((input: { title: string; amount: string; category: string; dueDate: string; recurrence: BillReminderRecurrence; intervalCount: number; reminderDaysBefore: number; isActive: boolean }, user: User, billReminderId?: string) => api.saveBillReminder(input, user, billReminderId), []),
     deleteBillReminderEntry: useCallback((billReminderId: string, user: User) => api.deleteBillReminderEntry(billReminderId, user), []),
     getReminderPreferences: useCallback((user: User) => api.getReminderPreferences(user), []),
-    updateReminderPreferences: useCallback((user: User, preferences: ReminderPreferences) => api.updateReminderPreferences(user, preferences), [])
+    updateReminderPreferences: useCallback((user: User, preferences: ReminderPreferences) => api.updateReminderPreferences(user, preferences), []),
+    getWalletReminderPreferences: useCallback((walletId: string, user: User) => api.getWalletReminderPreferences(walletId, user), []),
+    updateWalletReminderPreferences: useCallback((walletId: string, user: User, preferences: { budget_alerts_enabled: boolean; budget_alert_threshold: number }) => api.updateWalletReminderPreferences(walletId, user, preferences), [])
   };
 }

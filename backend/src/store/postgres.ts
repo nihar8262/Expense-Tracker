@@ -513,12 +513,16 @@ async function ensureSchema(sql: Sql): Promise<void> {
           email VARCHAR(160),
           member_role VARCHAR(16) NOT NULL CHECK (member_role IN ('owner', 'member')),
           invite_status VARCHAR(16) NOT NULL DEFAULT 'linked' CHECK (invite_status IN ('linked', 'pending', 'declined')),
-          joined_at TIMESTAMPTZ NOT NULL
+          joined_at TIMESTAMPTZ NOT NULL,
+          budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100)
         )
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS wallet_members_wallet_id_idx ON wallet_members (wallet_id, joined_at ASC)`;
       await sql`CREATE INDEX IF NOT EXISTS wallet_members_user_id_idx ON wallet_members (user_id)`;
+      await sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE`;
+      await sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100)`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS wallet_expenses (
@@ -1969,6 +1973,50 @@ export function createPostgresExpenseStore(): ExpenseStore {
       return mapReminderPreferences(rows[0]);
     },
 
+    async getWalletReminderPreferences(userId: string, walletId: string): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+      await ensureSchema(sql);
+
+      const rows = await sql<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }[]>`
+        SELECT budget_alerts_enabled, budget_alert_threshold
+        FROM wallet_members
+        WHERE wallet_id = ${walletId} AND user_id = ${userId} AND invite_status = 'linked'
+      `;
+
+      if (rows.length === 0) {
+        throw new WalletValidationError("Not a member of this wallet or wallet does not exist.");
+      }
+
+      return {
+        budget_alerts_enabled: rows[0].budget_alerts_enabled,
+        budget_alert_threshold: rows[0].budget_alert_threshold
+      };
+    },
+
+    async upsertWalletReminderPreferences(
+      userId: string,
+      walletId: string,
+      input: { budgetAlertsEnabled: boolean; budgetAlertThreshold: number }
+    ): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+      await ensureSchema(sql);
+
+      const rows = await sql<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }[]>`
+        UPDATE wallet_members
+        SET budget_alerts_enabled = ${input.budgetAlertsEnabled},
+            budget_alert_threshold = ${input.budgetAlertThreshold}
+        WHERE wallet_id = ${walletId} AND user_id = ${userId} AND invite_status = 'linked'
+        RETURNING budget_alerts_enabled, budget_alert_threshold
+      `;
+
+      if (rows.length === 0) {
+        throw new WalletValidationError("Not a member of this wallet or wallet does not exist.");
+      }
+
+      return {
+        budget_alerts_enabled: rows[0].budget_alerts_enabled,
+        budget_alert_threshold: rows[0].budget_alert_threshold
+      };
+    },
+
     async runNotificationChecks(userId?: string, now = new Date()): Promise<NotificationCheckResult> {
       await ensureSchema(sql);
       await pruneExpiredBudgetNotifications(sql, userId, now);
@@ -2094,6 +2142,87 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
               if (notification) {
                 createdNotifications.push(notification);
+              }
+            }
+          }
+
+          // Wallet budget checks
+          const memberWallets = await sql<{ wallet_id: string; name: string; budget_alerts_enabled: boolean; budget_alert_threshold: number }[]>`
+            SELECT wm.wallet_id, w.name, wm.budget_alerts_enabled, wm.budget_alert_threshold
+            FROM wallet_members wm
+            JOIN wallets w ON wm.wallet_id = w.id
+            WHERE wm.user_id = ${targetUserId} AND wm.invite_status = 'linked'
+          `;
+
+          for (const wallet of memberWallets) {
+            if (!wallet.budget_alerts_enabled) {
+              continue;
+            }
+
+            const walletBudgetRows = await sql<{ id: string; amount_minor: string; budget_scope: string; category: string | null; budget_month: string }[]>`
+              SELECT id, amount_minor, budget_scope, category, budget_month
+              FROM wallet_budgets
+              WHERE wallet_id = ${wallet.wallet_id} AND budget_month = ${currentMonth}
+            `;
+
+            for (const walletBudget of walletBudgetRows) {
+              const spendRows = walletBudget.budget_scope === "category"
+                ? await sql<{ spent_minor: string }[]>`
+                    SELECT COALESCE(SUM(amount_minor), 0)::text AS spent_minor
+                    FROM wallet_expenses
+                    WHERE wallet_id = ${wallet.wallet_id}
+                      AND expense_date >= ${`${currentMonth}-01`}
+                      AND expense_date < ${(new Date(now.getFullYear(), now.getMonth() + 1, 1)).toISOString().slice(0, 10)}
+                      AND category = ${walletBudget.category}
+                  `
+                : await sql<{ spent_minor: string }[]>`
+                    SELECT COALESCE(SUM(amount_minor), 0)::text AS spent_minor
+                    FROM wallet_expenses
+                    WHERE wallet_id = ${wallet.wallet_id}
+                      AND expense_date >= ${`${currentMonth}-01`}
+                      AND expense_date < ${(new Date(now.getFullYear(), now.getMonth() + 1, 1)).toISOString().slice(0, 10)}
+                  `;
+
+              const spentMinor = Number(spendRows[0]?.spent_minor ?? "0");
+
+              if (spentMinor <= 0) {
+                continue;
+              }
+
+              if (spentMinor > Number(walletBudget.amount_minor)) {
+                const notification = await upsertNotification(sql, {
+                  userId: targetUserId,
+                  type: "budget-overspent",
+                  title: walletBudget.budget_scope === "category" ? `[${wallet.name}] ${walletBudget.category} budget exceeded` : `[${wallet.name}] Budget exceeded`,
+                  message: `${formatMinorUnits(spentMinor)} spent against a ${formatMinorUnits(Number(walletBudget.amount_minor))} budget for ${walletBudget.budget_month}.`,
+                  scheduledFor: null,
+                  metadata: { walletId: wallet.wallet_id, budgetId: walletBudget.id, month: walletBudget.budget_month },
+                  dedupeKey: `wallet-budget-overspent:${wallet.wallet_id}:${walletBudget.id}:${walletBudget.budget_month}`
+                });
+
+                if (notification) {
+                  createdNotifications.push(notification);
+                }
+
+                continue;
+              }
+
+              const thresholdMinor = Math.ceil((Number(walletBudget.amount_minor) * wallet.budget_alert_threshold) / 100);
+
+              if (spentMinor >= thresholdMinor) {
+                const notification = await upsertNotification(sql, {
+                  userId: targetUserId,
+                  type: "budget-threshold",
+                  title: walletBudget.budget_scope === "category" ? `[${wallet.name}] ${walletBudget.category} budget nearing limit` : `[${wallet.name}] Budget nearing limit`,
+                  message: `${formatMinorUnits(spentMinor)} spent, which is ${wallet.budget_alert_threshold}% or more of your ${formatMinorUnits(Number(walletBudget.amount_minor))} budget for ${walletBudget.budget_month}.`,
+                  scheduledFor: null,
+                  metadata: { walletId: wallet.wallet_id, budgetId: walletBudget.id, month: walletBudget.budget_month },
+                  dedupeKey: `wallet-budget-threshold:${wallet.wallet_id}:${walletBudget.id}:${walletBudget.budget_month}:${wallet.budget_alert_threshold}`
+                });
+
+                if (notification) {
+                  createdNotifications.push(notification);
+                }
               }
             }
           }

@@ -423,3 +423,26 @@ export async function updateReminderPreferences(
   }, "Failed to update reminder preferences.");
   return body.preferences;
 }
+
+export async function getWalletReminderPreferences(walletId: string, user: User): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/preferences`, API_BASE_URL).toString() : `/api/wallets/${walletId}/preferences`;
+  const body = await apiRequest<{ preferences: { budget_alerts_enabled: boolean; budget_alert_threshold: number } }>(user, { url: endpoint, method: "GET" }, "Failed to load wallet reminder preferences.");
+  return body.preferences;
+}
+
+export async function updateWalletReminderPreferences(
+  walletId: string,
+  user: User,
+  preferences: { budget_alerts_enabled: boolean; budget_alert_threshold: number }
+): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/preferences`, API_BASE_URL).toString() : `/api/wallets/${walletId}/preferences`;
+  const body = await apiRequest<{ preferences: { budget_alerts_enabled: boolean; budget_alert_threshold: number } }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: {
+      budgetAlertsEnabled: preferences.budget_alerts_enabled,
+      budgetAlertThreshold: preferences.budget_alert_threshold
+    }
+  }, "Failed to update wallet reminder preferences.");
+  return body.preferences;
+}

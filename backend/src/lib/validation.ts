@@ -262,6 +262,11 @@ export const createReminderPreferencesSchema = z.object({
   budgetAlertThreshold: z.number().int().min(1).max(100)
 });
 
+export const createWalletReminderPreferencesSchema = z.object({
+  budgetAlertsEnabled: z.boolean(),
+  budgetAlertThreshold: z.number().int().min(1).max(100)
+});
+
 export const createBillReminderSchema = z.object({
   title: z.string().trim().min(1, "Bill title is required.").max(120, "Bill title is too long."),
   amount: z
@@ -303,5 +308,6 @@ export type CreateWalletMemberInput = z.infer<typeof createWalletMemberSchema>;
 export type CreateWalletExpenseInput = z.infer<typeof createWalletExpenseSchema>;
 export type CreateSettlementInput = z.infer<typeof createSettlementSchema>;
 export type CreateReminderPreferencesInput = z.infer<typeof createReminderPreferencesSchema>;
+export type CreateWalletReminderPreferencesInput = z.infer<typeof createWalletReminderPreferencesSchema>;
 export type CreateBillReminderInput = z.infer<typeof createBillReminderSchema>;
 export type WalletInviteResponseInput = z.infer<typeof walletInviteResponseSchema>;
