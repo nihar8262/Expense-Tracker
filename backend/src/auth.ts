@@ -24,8 +24,12 @@ export class AuthenticationConfigurationError extends Error {
 
 function readFirebaseAdminCredentials() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  let clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+  if (clientEmail && clientEmail.startsWith("mailto:")) {
+    clientEmail = clientEmail.substring(7);
+  }
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new AuthenticationConfigurationError();
