@@ -171,6 +171,8 @@ export function SignedInLayout({
               onSignOut={onSignOut}
               onDeleteAccount={onOpenDeleteAccountModal}
               isDeletingAccount={isDeletingAccount}
+              photoUrl={reminderPreferences?.photo_url}
+              displayName={reminderPreferences?.display_name}
             />
           </div>
         </div>

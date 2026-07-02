@@ -35,12 +35,13 @@ type WalletsPageProps = {
   submittingAction: string;
   statusMessage: string;
   errorMessage: string;
-  formatCurrency: (amount: string) => string;
+  formatCurrency: (amount: string, customCurrency?: string) => string;
   onSelectWallet: (walletId: string) => void;
   onCreateWallet: (input: {
     name: string;
     description: string;
     defaultSplitRule: SplitRule;
+    currency?: string;
     members: Array<{ displayName: string; email?: string }>;
   }) => Promise<boolean>;
   onUpdateWallet: (
@@ -49,6 +50,7 @@ type WalletsPageProps = {
       name: string;
       description: string;
       defaultSplitRule: SplitRule;
+      currency?: string;
       members: Array<{ displayName: string; email?: string }>;
     },
   ) => Promise<boolean>;
@@ -131,6 +133,7 @@ type WalletsPageProps = {
     walletId: string,
     settlementId: string,
   ) => Promise<boolean>;
+  currencySymbol?: string;
 };
 
 function getTodayIsoDate(baseDate = new Date()): string {
@@ -271,16 +274,19 @@ export function WalletsPage({
   onCreateWalletSettlement,
   onUpdateWalletSettlement,
   onDeleteWalletSettlement,
+  currencySymbol = "₹"
 }: WalletsPageProps) {
   const [walletName, setWalletName] = useState("");
   const [walletDescription, setWalletDescription] = useState("");
   const [walletMembersText, setWalletMembersText] = useState("");
   const [walletSplitRule, setWalletSplitRule] = useState<SplitRule>("equal");
+  const [walletCurrency, setWalletCurrency] = useState("INR");
   const [isWalletEditModalOpen, setIsWalletEditModalOpen] = useState(false);
   const [editWalletName, setEditWalletName] = useState("");
   const [editWalletDescription, setEditWalletDescription] = useState("");
   const [editWalletMembersText, setEditWalletMembersText] = useState("");
   const [editWalletSplitRule, setEditWalletSplitRule] = useState<SplitRule>("equal");
+  const [editWalletCurrency, setEditWalletCurrency] = useState("INR");
   const [showEditWalletValidation, setShowEditWalletValidation] = useState(false);
   const [inviteDisplayName, setInviteDisplayName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -494,9 +500,9 @@ export function WalletsPage({
           ...budget,
           spent,
           remaining,
-          formattedAmount: formatCurrency(budget.amount),
-          formattedSpent: formatCurrency(spent.toFixed(2)),
-          formattedRemaining: formatCurrency(remaining.toFixed(2)),
+          formattedAmount: formatCurrency(budget.amount, selectedWallet.wallet.currency),
+          formattedSpent: formatCurrency(spent.toFixed(2), selectedWallet.wallet.currency),
+          formattedRemaining: formatCurrency(remaining.toFixed(2), selectedWallet.wallet.currency),
           isOverspent: remaining < 0,
         };
       })
@@ -539,12 +545,12 @@ export function WalletsPage({
     const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
 
     return {
-      totalBudget: formatCurrency(totalBudgetAmount.toFixed(2)),
-      totalSpent: formatCurrency(totalSpentAmount.toFixed(2)),
-      totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2)),
+      totalBudget: formatCurrency(totalBudgetAmount.toFixed(2), selectedWallet?.wallet.currency),
+      totalSpent: formatCurrency(totalSpentAmount.toFixed(2), selectedWallet?.wallet.currency),
+      totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2), selectedWallet?.wallet.currency),
       isOverspent: totalRemainingAmount < 0,
     };
-  }, [currentMonthWalletBudgetSummaries, formatCurrency]);
+  }, [currentMonthWalletBudgetSummaries, selectedWallet, formatCurrency]);
 
   const walletBudgetHistoryGroups = useMemo(() => {
     const filteredBudgets = walletBudgetSummaries.filter((budget) =>
@@ -792,6 +798,7 @@ export function WalletsPage({
       name: walletName,
       description: walletDescription,
       defaultSplitRule: walletSplitRule,
+      currency: walletCurrency,
       members,
     });
 
@@ -800,6 +807,7 @@ export function WalletsPage({
       setWalletDescription("");
       setWalletMembersText("");
       setWalletSplitRule("equal");
+      setWalletCurrency("INR");
       setShowCreateWalletValidation(false);
     }
   }
@@ -809,6 +817,7 @@ export function WalletsPage({
     setEditWalletName(selectedWallet.wallet.name);
     setEditWalletDescription(selectedWallet.wallet.description ?? "");
     setEditWalletSplitRule(selectedWallet.wallet.default_split_rule);
+    setEditWalletCurrency(selectedWallet.wallet.currency || "INR");
 
     const otherMembers = selectedWallet.members.filter((m) => m.role !== "owner");
     const membersText = otherMembers
@@ -851,6 +860,7 @@ export function WalletsPage({
       name: editWalletName,
       description: editWalletDescription,
       defaultSplitRule: editWalletSplitRule,
+      currency: editWalletCurrency,
       members,
     });
 
@@ -1347,15 +1357,21 @@ export function WalletsPage({
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Amount</span>
-            <input
-              value={expenseAmount}
-              onChange={(event) => setExpenseAmount(event.target.value)}
-              placeholder="0.00"
-              required
-              aria-invalid={
-                showExpenseValidation && Boolean(expenseErrors.amount)
-              }
-            />
+            <div className="relative">
+              <input
+                className="pl-8"
+                value={expenseAmount}
+                onChange={(event) => setExpenseAmount(event.target.value)}
+                placeholder="0.00"
+                required
+                aria-invalid={
+                  showExpenseValidation && Boolean(expenseErrors.amount)
+                }
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 z-10">
+                {currencySymbol}
+              </span>
+            </div>
             {showExpenseValidation && expenseErrors.amount ? (
               <span className="text-sm text-[color:var(--danger-text)]">
                 {expenseErrors.amount}
@@ -1492,18 +1508,26 @@ export function WalletsPage({
                       {member.display_name}
                     </span>
                     {needsValue ? (
-                      <input
-                        value={splitValues[member.id] ?? ""}
-                        onChange={(event) =>
-                          setSplitValues((current) => ({
-                            ...current,
-                            [member.id]: event.target.value,
-                          }))
-                        }
-                        placeholder={
-                          expenseSplitRule === "fixed" ? "0.00" : "%"
-                        }
-                      />
+                      <div className="relative">
+                        <input
+                          className={expenseSplitRule === "fixed" ? "pl-8" : ""}
+                          value={splitValues[member.id] ?? ""}
+                          onChange={(event) =>
+                            setSplitValues((current) => ({
+                              ...current,
+                              [member.id]: event.target.value,
+                            }))
+                          }
+                          placeholder={
+                            expenseSplitRule === "fixed" ? "0.00" : "%"
+                          }
+                        />
+                        {expenseSplitRule === "fixed" && (
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold pointer-events-none text-zinc-950 z-10">
+                            {currencySymbol}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-sm text-muted">
                         {isSelected ? "Included" : "Excluded"}
@@ -1603,15 +1627,21 @@ export function WalletsPage({
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Amount</span>
-            <input
-              value={settlementAmount}
-              onChange={(event) => setSettlementAmount(event.target.value)}
-              placeholder="0.00"
-              required
-              aria-invalid={
-                showSettlementValidation && Boolean(settlementErrors.amount)
-              }
-            />
+            <div className="relative">
+              <input
+                className="pl-8"
+                value={settlementAmount}
+                onChange={(event) => setSettlementAmount(event.target.value)}
+                placeholder="0.00"
+                required
+                aria-invalid={
+                  showSettlementValidation && Boolean(settlementErrors.amount)
+                }
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 z-10">
+                {currencySymbol}
+              </span>
+            </div>
             {showSettlementValidation && settlementErrors.amount ? (
               <span className="text-sm text-[color:var(--danger-text)]">
                 {settlementErrors.amount}
@@ -1779,6 +1809,26 @@ export function WalletsPage({
                   <option value="equal">Equal</option>
                   <option value="fixed">Fixed amounts</option>
                   <option value="percentage">Percentages</option>
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-sm font-medium text-secondary">
+                Currency
+                <select
+                  value={walletCurrency}
+                  onChange={(event) => setWalletCurrency(event.target.value)}
+                >
+                  <option value="INR">INR (₹)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="JPY">JPY (¥)</option>
+                  <option value="CAD">CAD (C$)</option>
+                  <option value="AUD">AUD (A$)</option>
+                  <option value="CHF">CHF (Fr)</option>
+                  <option value="CNY">CNY (元)</option>
+                  <option value="SGD">SGD (S$)</option>
+                  <option value="NZD">NZD (NZ$)</option>
                 </select>
               </label>
 
@@ -2048,7 +2098,7 @@ export function WalletsPage({
                               : "Square"}
                         </span>
                         <h4 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink">
-                          {formatCurrency(Math.abs(numericBalance).toFixed(2))}
+                          {formatCurrency(Math.abs(numericBalance).toFixed(2), selectedWallet.wallet.currency)}
                         </h4>
                       </article>
                     );
@@ -2073,6 +2123,7 @@ export function WalletsPage({
                 budgetHistoryGroups={walletBudgetHistoryGroups}
                 budgetHistoryRange={walletBudgetHistoryRange}
                 isBudgetHistoryOpen={isWalletBudgetHistoryOpen}
+                currencySymbol={currencySymbol}
                 emptyStateMessage={`No group budgets set for ${currentWalletBudgetMonthLabel} yet. Add one to start tracking shared spend.`}
                 formDescription="Create monthly caps or category-specific targets for this wallet and update them as the plan changes."
                 historyDialogTitle="Group budget history"
@@ -2253,7 +2304,7 @@ export function WalletsPage({
                             </div>
                             <div className="text-left lg:text-right shrink-0">
                               <strong className="block text-xl font-bold tracking-tight text-ink">
-                                {formatCurrency(expense.amount)}
+                                {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
                               </strong>
                               <span className="text-xs font-medium text-secondary">
                                 {expense.split_rule} split
@@ -2324,7 +2375,7 @@ export function WalletsPage({
                                 <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                               ) : null}
                             </div>
-                            <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                            <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
                           </div>
 
                           <div className="space-y-2">
@@ -2549,7 +2600,7 @@ export function WalletsPage({
                                 </div>
                                 <div className="shrink-0 text-left sm:text-right">
                                   <strong className="block text-xl font-bold tracking-tight text-ink">
-                                    {formatCurrency(expense.amount)}
+                                    {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
                                   </strong>
                                   <span className="text-xs font-medium text-secondary">
                                     {expense.split_rule} split
@@ -2621,7 +2672,7 @@ export function WalletsPage({
                                     <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                                   ) : null}
                                 </div>
-                                <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
+                                <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
                               </div>
 
                               <div className="space-y-2">
@@ -2752,7 +2803,7 @@ export function WalletsPage({
                                 </p>
                               </div>
                               <strong className="shrink-0 text-xl text-ink">
-                                {formatCurrency(settlement.amount)}
+                                {formatCurrency(settlement.amount, selectedWallet?.wallet.currency)}
                               </strong>
                             </div>
                             <div className="mt-4 flex flex-wrap gap-2">
@@ -2912,6 +2963,26 @@ export function WalletsPage({
                 <option value="equal">Equal</option>
                 <option value="fixed">Fixed amounts</option>
                 <option value="percentage">Percentages</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Currency
+              <select
+                value={editWalletCurrency}
+                onChange={(event) => setEditWalletCurrency(event.target.value)}
+              >
+                <option value="INR">INR (₹)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="JPY">JPY (¥)</option>
+                <option value="CAD">CAD (C$)</option>
+                <option value="AUD">AUD (A$)</option>
+                <option value="CHF">CHF (Fr)</option>
+                <option value="CNY">CNY (元)</option>
+                <option value="SGD">SGD (S$)</option>
+                <option value="NZD">NZD (NZ$)</option>
               </select>
             </label>
 

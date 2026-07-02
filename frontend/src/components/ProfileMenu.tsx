@@ -1,8 +1,11 @@
+import { Link } from "react-router-dom";
 import type { ProfileMenuProps } from "../types";
 
-export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onSignOut, onDeleteAccount, isDeletingAccount }: ProfileMenuProps) {
-  const avatarAlt = currentUser.displayName ?? currentUser.email ?? "User avatar";
-  const avatarFallback = (currentUser.displayName ?? currentUser.email ?? "U").slice(0, 1).toUpperCase();
+export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onSignOut, onDeleteAccount, isDeletingAccount, photoUrl, displayName }: ProfileMenuProps) {
+  const resolvedDisplayName = displayName || currentUser.displayName || currentUser.email || "Your profile";
+  const avatarAlt = resolvedDisplayName;
+  const avatarFallback = resolvedDisplayName.slice(0, 1).toUpperCase();
+  const resolvedPhotoUrl = photoUrl || currentUser.photoURL;
 
   return (
     <div className="relative" ref={profileMenuRef}>
@@ -13,8 +16,8 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
         aria-haspopup="menu"
         aria-expanded={isOpen}
       >
-        {currentUser.photoURL ? (
-          <img className="h-10 w-10 rounded-full object-cover" src={currentUser.photoURL} alt={avatarAlt} />
+        {resolvedPhotoUrl ? (
+          <img className="h-10 w-10 rounded-full object-cover" src={resolvedPhotoUrl} alt={avatarAlt} />
         ) : (
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-sm font-bold text-white">
             {avatarFallback}
@@ -23,7 +26,7 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
 
         <div className="hidden min-w-0 xl:block">
           <p className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-muted">Signed in</p>
-          <p className="truncate text-sm font-semibold text-ink">{currentUser.displayName ?? currentUser.email ?? "Your profile"}</p>
+          <p className="truncate text-sm font-semibold text-ink">{resolvedDisplayName}</p>
         </div>
 
         <span className="pr-1 text-xs text-muted">▾</span>
@@ -34,11 +37,14 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
           <div className="rounded-[20px] border border-[color:var(--border)] bg-white/80 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Account</p>
             <div className="mt-2 space-y-1">
-              <strong className="block text-base text-ink">{currentUser.displayName ?? "Your profile"}</strong>
+              <strong className="block text-base text-ink">{resolvedDisplayName}</strong>
               <span className="block break-all text-sm text-secondary">{currentUser.email ?? currentUser.uid}</span>
             </div>
 
             <div className="mt-4 grid gap-2">
+              <Link to="/profile" className="ui-button-secondary justify-center text-center flex items-center" onClick={onToggle}>
+                Edit Profile
+              </Link>
               <button type="button" className="ui-button-secondary justify-center" onClick={() => void onSignOut()}>
                 Sign out
               </button>

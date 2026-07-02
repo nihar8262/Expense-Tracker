@@ -44,6 +44,7 @@ export type WalletRecord = {
   name: string;
   description: string | null;
   default_split_rule: SplitRule;
+  currency: string;
   created_at: string;
 };
 
@@ -155,6 +156,10 @@ export type ReminderPreferencesRecord = {
   daily_logging_hour: number;
   budget_alerts_enabled: boolean;
   budget_alert_threshold: number;
+  default_currency: string;
+  default_timezone: string;
+  display_name: string | null;
+  photo_url: string | null;
   updated_at: string;
 };
 

@@ -74,6 +74,7 @@ type StoredWallet = {
   name: string;
   description: string | null;
   defaultSplitRule: "equal" | "fixed" | "percentage";
+  currency: string;
   createdAt: string;
 };
 
@@ -150,6 +151,10 @@ type StoredReminderPreferences = {
   dailyLoggingHour: number;
   budgetAlertsEnabled: boolean;
   budgetAlertThreshold: number;
+  defaultCurrency: string;
+  defaultTimezone: string;
+  displayName: string | null;
+  photoUrl: string | null;
   updatedAt: string;
 };
 
@@ -171,7 +176,9 @@ const DEFAULT_REMINDER_PREFERENCES = {
   dailyLoggingEnabled: true,
   dailyLoggingHour: 20,
   budgetAlertsEnabled: true,
-  budgetAlertThreshold: 80
+  budgetAlertThreshold: 80,
+  defaultCurrency: "INR",
+  defaultTimezone: "UTC"
 } as const;
 
 function mapExpense(expense: StoredExpense): ExpenseRecord {
@@ -215,6 +222,7 @@ function mapWallet(wallet: StoredWallet): WalletRecord {
     name: wallet.name,
     description: wallet.description,
     default_split_rule: wallet.defaultSplitRule,
+    currency: wallet.currency,
     created_at: wallet.createdAt
   };
 }
@@ -269,6 +277,10 @@ function mapReminderPreferences(preferences: StoredReminderPreferences): Reminde
     daily_logging_hour: preferences.dailyLoggingHour,
     budget_alerts_enabled: preferences.budgetAlertsEnabled,
     budget_alert_threshold: preferences.budgetAlertThreshold,
+    default_currency: preferences.defaultCurrency,
+    default_timezone: preferences.defaultTimezone,
+    display_name: preferences.displayName,
+    photo_url: preferences.photoUrl,
     updated_at: preferences.updatedAt
   };
 }
@@ -279,6 +291,53 @@ function getTodayIsoDate(baseDate = new Date()): string {
 
 function getCurrentMonth(baseDate = new Date()): string {
   return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getDateTimeInTimezone(date: Date, timeZone: string) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false
+    });
+    const parts = formatter.formatToParts(date);
+    const getPart = (type: string) => parts.find((p) => p.type === type)?.value || "";
+
+    const year = getPart("year");
+    const month = getPart("month");
+    const day = getPart("day");
+    const hour = Number(getPart("hour"));
+
+    return {
+      dateStr: `${year}-${month}-${day}`,
+      monthStr: `${year}-${month}`,
+      hour
+    };
+  } catch (e) {
+    return {
+      dateStr: date.toISOString().slice(0, 10),
+      monthStr: date.toISOString().slice(0, 7),
+      hour: date.getUTCHours()
+    };
+  }
+}
+
+function getUtcTimeForLocalHour(dateStr: string, hour: number, timeZone: string): string {
+  try {
+    const localIso = `${dateStr}T${String(hour).padStart(2, "0")}:00:00`;
+    const tempUtc = new Date(`${localIso}Z`);
+    const dateInTz = new Date(tempUtc.toLocaleString("en-US", { timeZone }));
+    const diff = tempUtc.getTime() - dateInTz.getTime();
+    const targetDate = new Date(tempUtc.getTime() + diff);
+    return targetDate.toISOString();
+  } catch (e) {
+    return `${dateStr}T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  }
 }
 
 function addDays(date: Date, days: number): Date {
@@ -521,6 +580,10 @@ export function createMemoryExpenseStore(): ExpenseStore {
       dailyLoggingHour: DEFAULT_REMINDER_PREFERENCES.dailyLoggingHour,
       budgetAlertsEnabled: DEFAULT_REMINDER_PREFERENCES.budgetAlertsEnabled,
       budgetAlertThreshold: DEFAULT_REMINDER_PREFERENCES.budgetAlertThreshold,
+      defaultCurrency: DEFAULT_REMINDER_PREFERENCES.defaultCurrency,
+      defaultTimezone: DEFAULT_REMINDER_PREFERENCES.defaultTimezone,
+      displayName: null,
+      photoUrl: null,
       updatedAt: new Date().toISOString()
     };
 
@@ -800,6 +863,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       name: input.name.trim(),
       description: input.description?.trim() || null,
       defaultSplitRule: input.defaultSplitRule,
+      currency: input.currency || "INR",
       createdAt
     };
 
@@ -853,9 +917,83 @@ export function createMemoryExpenseStore(): ExpenseStore {
       throw new WalletValidationError("Only the wallet owner can edit this group.");
     }
 
+    const oldCurrency = wallet.currency.toUpperCase();
+    const newCurrency = (input.currency || "INR").toUpperCase();
+
+    if (oldCurrency !== newCurrency) {
+      const BASE_RATES_TO_USD: Record<string, number> = {
+        USD: 1.0,
+        EUR: 1.08,
+        GBP: 1.27,
+        INR: 0.012,
+        JPY: 0.0064,
+        CAD: 0.73,
+        AUD: 0.66,
+        CHF: 1.11,
+        CNY: 0.14,
+        SGD: 0.74,
+        NZD: 0.61
+      };
+
+      const getExchangeRate = (from: string, to: string, dateStr: string): number => {
+        const fromUpper = from.toUpperCase();
+        const toUpper = to.toUpperCase();
+        if (fromUpper === toUpper) return 1.0;
+
+        const isDirect = fromUpper < toUpper;
+        const first = isDirect ? fromUpper : toUpper;
+        const second = isDirect ? toUpper : fromUpper;
+
+        const firstRate = BASE_RATES_TO_USD[first] || 1.0;
+        const secondRate = BASE_RATES_TO_USD[second] || 1.0;
+        const baseRate = firstRate / secondRate;
+
+        const clean = dateStr.replace(/[^0-9]/g, "");
+        const num = parseInt(clean, 10);
+        const dateHash = isNaN(num) ? 0 : num;
+        const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
+        const rate = baseRate * fluctuation;
+
+        return isDirect ? rate : 1.0 / rate;
+      };
+
+      // 1. Convert budgets
+      for (const bud of walletBudgets.values()) {
+        if (bud.walletId === walletId) {
+          const dateStr = `${bud.month}-01`;
+          const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
+          bud.amountMinor = Math.round(bud.amountMinor * rate);
+        }
+      }
+
+      // 2. Convert expenses & splits
+      for (const we of walletExpenses.values()) {
+        if (we.walletId === walletId) {
+          const rate = getExchangeRate(oldCurrency, newCurrency, we.date);
+          we.amountMinor = Math.round(we.amountMinor * rate);
+
+          const splits = walletExpenseSplits.get(we.id);
+          if (splits) {
+            for (const split of splits) {
+              split.amountMinor = Math.round(split.amountMinor * rate);
+            }
+          }
+        }
+      }
+
+      // 3. Convert settlements
+      for (const setl of walletSettlements.values()) {
+        if (setl.walletId === walletId) {
+          const rate = getExchangeRate(oldCurrency, newCurrency, setl.date);
+          setl.amountMinor = Math.round(setl.amountMinor * rate);
+        }
+      }
+    }
+
     wallet.name = input.name.trim();
     wallet.description = input.description?.trim() || null;
     wallet.defaultSplitRule = input.defaultSplitRule;
+    wallet.currency = input.currency || "INR";
 
     const currentMembers = [...walletMembers.values()].filter((m) => m.walletId === walletId);
     const ownerMember = currentMembers.find((m) => m.role === "owner");
@@ -1416,12 +1554,147 @@ export function createMemoryExpenseStore(): ExpenseStore {
   }
 
   async function upsertReminderPreferences(userId: string, input: CreateReminderPreferencesInput): Promise<ReminderPreferencesRecord> {
+    if (input.displayName) {
+      const conflict = [...reminderPreferences.values()].some(
+        (p) => p.userId !== userId && p.displayName?.toLowerCase() === input.displayName?.toLowerCase()
+      );
+      if (conflict) {
+        throw new WalletValidationError("Username is already taken by another user.");
+      }
+    }
+
+    const existing = reminderPreferences.get(userId);
+    const displayName = input.displayName !== undefined ? input.displayName : (existing?.displayName ?? null);
+    const photoUrl = input.photoUrl !== undefined ? input.photoUrl : (existing?.photoUrl ?? null);
+
+    const defaultCurrency = input.defaultCurrency ?? DEFAULT_REMINDER_PREFERENCES.defaultCurrency;
+    const defaultTimezone = input.defaultTimezone ?? DEFAULT_REMINDER_PREFERENCES.defaultTimezone;
+
+    // Convert in-memory records to the new currency preference
+    if (existing && existing.defaultCurrency && existing.defaultCurrency.toUpperCase() !== defaultCurrency.toUpperCase()) {
+      const oldCurrency = existing.defaultCurrency.toUpperCase();
+      const newCurrency = defaultCurrency.toUpperCase();
+
+      const BASE_RATES_TO_USD: Record<string, number> = {
+        USD: 1.0,
+        EUR: 1.08,
+        GBP: 1.27,
+        INR: 0.012,
+        JPY: 0.0064,
+        CAD: 0.73,
+        AUD: 0.66,
+        CHF: 1.11,
+        CNY: 0.14,
+        SGD: 0.74,
+        NZD: 0.61
+      };
+
+      const getExchangeRate = (from: string, to: string, dateStr: string): number => {
+        const fromUpper = from.toUpperCase();
+        const toUpper = to.toUpperCase();
+        if (fromUpper === toUpper) return 1.0;
+
+        const isDirect = fromUpper < toUpper;
+        const first = isDirect ? fromUpper : toUpper;
+        const second = isDirect ? toUpper : fromUpper;
+
+        const firstRate = BASE_RATES_TO_USD[first] || 1.0;
+        const secondRate = BASE_RATES_TO_USD[second] || 1.0;
+        const baseRate = firstRate / secondRate;
+
+        const clean = dateStr.replace(/[^0-9]/g, "");
+        const num = parseInt(clean, 10);
+        const dateHash = isNaN(num) ? 0 : num;
+        const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
+        const rate = baseRate * fluctuation;
+
+        return isDirect ? rate : 1.0 / rate;
+      };
+
+      // 1. Personal Expenses
+      for (const [id, exp] of expenses.entries()) {
+        if (exp.userId === userId) {
+          const rate = getExchangeRate(oldCurrency, newCurrency, exp.date);
+          exp.amountMinor = Math.round(exp.amountMinor * rate);
+          expenses.set(id, exp);
+        }
+      }
+
+      // 2. Personal Budgets
+      for (const [id, bud] of budgets.entries()) {
+        if (bud.userId === userId) {
+          const rate = getExchangeRate(oldCurrency, newCurrency, `${bud.month}-01`);
+          bud.amountMinor = Math.round(bud.amountMinor * rate);
+          budgets.set(id, bud);
+        }
+      }
+
+      // 3. Personal Bill Reminders
+      for (const [id, bill] of billReminders.entries()) {
+        if (bill.userId === userId) {
+          if (bill.amountMinor === null || bill.amountMinor === undefined) continue;
+          const rate = getExchangeRate(oldCurrency, newCurrency, bill.dueDate);
+          bill.amountMinor = Math.round(bill.amountMinor * rate);
+          billReminders.set(id, bill);
+        }
+      }
+
+      // 4. Wallet details (Budgets, Expenses, Settlements, Splits) where user is member
+      const walletIds = [...walletMembers.values()]
+        .filter((m) => m.userId === userId)
+        .map((m) => m.walletId);
+
+      if (walletIds.length > 0) {
+        // Wallet Budgets
+        for (const [id, wb] of walletBudgets.entries()) {
+          if (walletIds.includes(wb.walletId)) {
+            const rate = getExchangeRate(oldCurrency, newCurrency, `${wb.month}-01`);
+            wb.amountMinor = Math.round(wb.amountMinor * rate);
+            walletBudgets.set(id, wb);
+          }
+        }
+
+        // Wallet Expenses & Splits
+        for (const [id, we] of walletExpenses.entries()) {
+          if (walletIds.includes(we.walletId)) {
+            const rate = getExchangeRate(oldCurrency, newCurrency, we.date);
+            we.amountMinor = Math.round(we.amountMinor * rate);
+            walletExpenses.set(id, we);
+
+            const splits = walletExpenseSplits.get(we.id);
+            if (splits) {
+              const updatedSplits = splits.map((split) => {
+                return {
+                  ...split,
+                  amountMinor: Math.round(split.amountMinor * rate)
+                };
+              });
+              walletExpenseSplits.set(we.id, updatedSplits);
+            }
+          }
+        }
+
+        // Wallet Settlements
+        for (const [id, setl] of walletSettlements.entries()) {
+          if (walletIds.includes(setl.walletId)) {
+            const rate = getExchangeRate(oldCurrency, newCurrency, setl.date);
+            setl.amountMinor = Math.round(setl.amountMinor * rate);
+            walletSettlements.set(id, setl);
+          }
+        }
+      }
+    }
+
     const nextPreferences: StoredReminderPreferences = {
       userId,
       dailyLoggingEnabled: input.dailyLoggingEnabled,
       dailyLoggingHour: input.dailyLoggingHour,
       budgetAlertsEnabled: input.budgetAlertsEnabled,
       budgetAlertThreshold: input.budgetAlertThreshold,
+      defaultCurrency: input.defaultCurrency ?? DEFAULT_REMINDER_PREFERENCES.defaultCurrency,
+      defaultTimezone: input.defaultTimezone ?? DEFAULT_REMINDER_PREFERENCES.defaultTimezone,
+      displayName,
+      photoUrl,
       updatedAt: new Date().toISOString()
     };
 
@@ -1469,25 +1742,29 @@ export function createMemoryExpenseStore(): ExpenseStore {
       : [...new Set([...[...expenses.values()].map((expense) => expense.userId), ...[...budgets.values()].map((budget) => budget.userId), ...reminderPreferences.keys()])];
 
     const createdNotifications: NotificationRecord[] = [];
-    const currentDate = getTodayIsoDate(now);
-    const currentMonth = getCurrentMonth(now);
-    const currentHour = now.getHours();
 
     for (const targetUserId of targetUserIds) {
       const preferences = getReminderPreferencesInternal(targetUserId);
 
-      if (preferences.dailyLoggingEnabled && currentHour >= preferences.dailyLoggingHour) {
-        const hasLoggedToday = [...expenses.values()].some((expense) => expense.userId === targetUserId && expense.date === currentDate);
+      const timezone = preferences.defaultTimezone || "UTC";
+      const userTime = getDateTimeInTimezone(now, timezone);
+      const userDate = userTime.dateStr;
+      const userMonth = userTime.monthStr;
+      const userHour = userTime.hour;
+
+      if (preferences.dailyLoggingEnabled && userHour >= preferences.dailyLoggingHour) {
+        const hasLoggedToday = [...expenses.values()].some((expense) => expense.userId === targetUserId && expense.date === userDate);
 
         if (!hasLoggedToday) {
+          const scheduledForUtc = getUtcTimeForLocalHour(userDate, preferences.dailyLoggingHour, timezone);
           const created = createNotificationIfMissing({
             userId: targetUserId,
             type: "daily-log",
             title: "Log today's spending",
             message: "You have not added any expenses today. Capture them before the day ends.",
-            scheduledFor: `${currentDate}T${String(preferences.dailyLoggingHour).padStart(2, "0")}:00:00.000Z`,
-            metadata: { date: currentDate },
-            dedupeKey: `daily-log:${currentDate}`
+            scheduledFor: scheduledForUtc,
+            metadata: { date: userDate },
+            dedupeKey: `daily-log:${userDate}`
           });
 
           if (created) {
@@ -1498,8 +1775,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
 
       if (!preferences.budgetAlertsEnabled) {
       } else {
-        const userBudgets = [...budgets.values()].filter((budget) => budget.userId === targetUserId && budget.month === currentMonth);
-        const userExpenses = [...expenses.values()].filter((expense) => expense.userId === targetUserId && expense.date.startsWith(currentMonth));
+        const userBudgets = [...budgets.values()].filter((budget) => budget.userId === targetUserId && budget.month === userMonth);
+        const userExpenses = [...expenses.values()].filter((expense) => expense.userId === targetUserId && expense.date.startsWith(userMonth));
 
         for (const budget of userBudgets) {
           const spentMinor = userExpenses
@@ -1562,12 +1839,12 @@ export function createMemoryExpenseStore(): ExpenseStore {
           const walletAlertThreshold = membership.budgetAlertThreshold !== undefined ? membership.budgetAlertThreshold : 80;
 
           const activeWalletBudgets = [...walletBudgets.values()].filter(
-            (wb) => wb.walletId === wallet.id && wb.month === currentMonth
+            (wb) => wb.walletId === wallet.id && wb.month === userMonth
           );
 
           for (const walletBudget of activeWalletBudgets) {
             const activeWalletExpenses = [...walletExpenses.values()].filter(
-              (we) => we.walletId === wallet.id && we.date.startsWith(currentMonth)
+              (we) => we.walletId === wallet.id && we.date.startsWith(userMonth)
             );
 
             const spentMinor = activeWalletExpenses
@@ -1627,7 +1904,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
         const dueDate = new Date(`${nextDueDate}T00:00:00.000Z`);
         const reminderDate = addDays(dueDate, -billReminder.reminderDaysBefore);
 
-        if (new Date(`${currentDate}T00:00:00.000Z`) < reminderDate) {
+        if (new Date(`${userDate}T00:00:00.000Z`) < reminderDate) {
           continue;
         }
 

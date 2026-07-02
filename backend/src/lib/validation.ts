@@ -100,6 +100,7 @@ export const createWalletSchema = z.object({
   name: z.string().trim().min(1, "Wallet name is required.").max(120, "Wallet name is too long."),
   description: z.string().trim().max(280, "Description is too long.").optional(),
   defaultSplitRule: z.enum(["equal", "fixed", "percentage"]).default("equal"),
+  currency: z.string().trim().max(10).default("INR"),
   members: z
     .array(
       z.object({
@@ -259,7 +260,11 @@ export const createReminderPreferencesSchema = z.object({
   dailyLoggingEnabled: z.boolean(),
   dailyLoggingHour: z.number().int().min(0).max(23),
   budgetAlertsEnabled: z.boolean(),
-  budgetAlertThreshold: z.number().int().min(1).max(100)
+  budgetAlertThreshold: z.number().int().min(1).max(100),
+  defaultCurrency: z.string().trim().min(1).max(10).optional(),
+  defaultTimezone: z.string().trim().min(1).max(100).optional(),
+  displayName: z.string().trim().max(120).nullable().optional(),
+  photoUrl: z.string().trim().nullable().optional()
 });
 
 export const createWalletReminderPreferencesSchema = z.object({

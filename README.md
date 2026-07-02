@@ -35,12 +35,12 @@ A full-stack personal finance application for tracking daily spending, managing 
 
 - **Personal expenses** — Create, edit, delete, filter by category, and sort by date. Idempotent submission prevents duplicates on retry.
 - **Budgets** — Set monthly or category-specific spending caps. Track remaining budget with overspend warnings.
-- **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements.
-- **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources.
-- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, and wallet invite notifications. Stale budget alerts are pruned automatically, and notification checks run on expense creation and page load so reminders stay current.
+- **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements. Each wallet supports its own independent default currency preference with transaction-safe backend conversions.
+- **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources. Automatically maps and visualizes converted currency amounts seamlessly.
+- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, and wallet invite notifications. Timezone-aware scheduler ensures notifications deliver relative to the user's chosen local time.
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
-- **Account management** — Profile menu with sign-out and full account deletion (removes all data and the Firebase account).
+- **Account management & profile editing** — Profile customization menu supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
 - **Responsive design** — Desktop navigation bar with bottom tab navigation on mobile.
 - **Dark-mode-ready surface system** — Tailwind CSS v4 with CSS custom properties for theming.
 
@@ -300,12 +300,13 @@ Vercel
 
 ### Shared Wallets
 
-- **Create wallets** with a name, description, default split rule, and initial members.
+- **Create wallets** with a name, description, default split rule, default currency, and initial members.
 - **Member management**: Add/remove members, invite by email, accept/decline invitations.
 - **Shared expenses**: Record group purchases with payer selection and three split modes (equal, fixed, percentage). Toggle individual split members. Mark members as "already settled" to auto-create settlement records.
 - **Balances**: Real-time net balance per member (who owes, who receives, who is square).
 - **Settlements**: Record, edit, and delete payback transactions.
 - **Wallet budgets**: Same monthly/category budget system, scoped to the wallet's shared expenses.
+- **Wallet currencies**: Configure a default currency preference for each group wallet independently. All member balances, budgets, expenses, and settlements are rendered in that currency. Changing the currency preference initiates a backend, transaction-safe database-wide conversion of all past transaction totals.
 - **Show more modals**: Filterable full-list views for expenses and settlements (month, category, amount range).
 - **Access control**: All linked members see the same data. Only the owner can delete the wallet. Members can leave.
 

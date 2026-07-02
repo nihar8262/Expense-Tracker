@@ -170,7 +170,7 @@ export async function deleteAccountData(user: User): Promise<void> {
 }
 
 export async function createWallet(
-  payload: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> },
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> },
   user: User
 ): Promise<WalletDetail> {
   const body = await apiRequest<{ wallet: WalletDetail }>(user, {
@@ -183,7 +183,7 @@ export async function createWallet(
 
 export async function updateWallet(
   walletId: string,
-  payload: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> },
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
@@ -418,7 +418,11 @@ export async function updateReminderPreferences(
       dailyLoggingEnabled: reminderPreferences.daily_logging_enabled,
       dailyLoggingHour: reminderPreferences.daily_logging_hour,
       budgetAlertsEnabled: reminderPreferences.budget_alerts_enabled,
-      budgetAlertThreshold: reminderPreferences.budget_alert_threshold
+      budgetAlertThreshold: reminderPreferences.budget_alert_threshold,
+      defaultCurrency: reminderPreferences.default_currency,
+      defaultTimezone: reminderPreferences.default_timezone,
+      displayName: reminderPreferences.display_name,
+      photoUrl: reminderPreferences.photo_url
     }
   }, "Failed to update reminder preferences.");
   return body.preferences;

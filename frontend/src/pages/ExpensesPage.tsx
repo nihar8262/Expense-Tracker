@@ -52,6 +52,7 @@ type ExpensesPageProps = {
   onEditStart: (expense: Expense) => void;
   onDeleteExpense: (expenseId: string) => Promise<void>;
   onClearFilters: () => void;
+  currencySymbol?: string;
 };
 
 function getTodayValue(): string {
@@ -109,7 +110,8 @@ export function ExpensesPage({
   onToggleExpenseSelection,
   onEditStart,
   onDeleteExpense,
-  onClearFilters
+  onClearFilters,
+  currencySymbol = "₹"
 }: ExpensesPageProps) {
   const [showValidation, setShowValidation] = useState(false);
   const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false);
@@ -247,19 +249,25 @@ export function ExpensesPage({
         <form className="grid gap-4" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Amount</span>
-            <input
-              type="number"
-              min="0.01"
-              step="0.01"
-              required
-              autoFocus={!editingExpenseId}
-              inputMode="decimal"
-              disabled={!currentUserPresent}
-              value={form.amount}
-              aria-invalid={showValidation && Boolean(validationErrors.amount)}
-              onChange={(event) => onFormChange((current) => ({ ...current, amount: event.target.value }))}
-              onKeyDown={(event) => handleFieldAdvance(event, descriptionInputRef.current)}
-            />
+            <div className="relative">
+              <input
+                type="number"
+                className="pl-8"
+                min="0.01"
+                step="0.01"
+                required
+                autoFocus={!editingExpenseId}
+                inputMode="decimal"
+                disabled={!currentUserPresent}
+                value={form.amount}
+                aria-invalid={showValidation && Boolean(validationErrors.amount)}
+                onChange={(event) => onFormChange((current) => ({ ...current, amount: event.target.value }))}
+                onKeyDown={(event) => handleFieldAdvance(event, descriptionInputRef.current)}
+              />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 z-10">
+                {currencySymbol}
+              </span>
+            </div>
             {showValidation && validationErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.amount}</span> : null}
           </label>
 

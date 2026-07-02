@@ -38,6 +38,7 @@ type BudgetTrackerSectionProps = {
   onBudgetHistoryRangeChange: (range: BudgetHistoryRange) => void;
   onOpenBudgetHistory: () => void;
   onCloseBudgetHistory: () => void;
+  currencySymbol?: string;
 };
 
 function getBudgetTitle(budget: BudgetSummary): string {
@@ -84,7 +85,8 @@ export function BudgetTrackerSection({
   onBudgetDelete,
   onBudgetHistoryRangeChange,
   onOpenBudgetHistory,
-  onCloseBudgetHistory
+  onCloseBudgetHistory,
+  currencySymbol = "₹"
 }: BudgetTrackerSectionProps) {
   const [showBudgetValidation, setShowBudgetValidation] = useState(false);
   const [isMobileEditOpen, setIsMobileEditOpen] = useState(false);
@@ -138,7 +140,12 @@ export function BudgetTrackerSection({
 
         <label className="grid gap-2 text-sm font-medium text-secondary">
           <span className="required-mark">Amount</span>
-          <input type="number" min="0.01" step="0.01" required value={budgetForm.amount} onChange={(event) => onBudgetFormChange((current) => ({ ...current, amount: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.amount)} />
+          <div className="relative">
+            <input type="number" className="pl-8" min="0.01" step="0.01" required value={budgetForm.amount} onChange={(event) => onBudgetFormChange((current) => ({ ...current, amount: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.amount)} />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 z-10">
+              {currencySymbol}
+            </span>
+          </div>
           {showBudgetValidation && budgetErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.amount}</span> : null}
         </label>
 

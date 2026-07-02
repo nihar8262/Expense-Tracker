@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { User } from "firebase/auth";
+import { updateProfile, type User } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useAuth, providerOptions } from "../hooks/useAuth";
 import { useBudgets } from "../hooks/useBudgets";
@@ -13,6 +13,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { ExpensesPage } from "../pages/ExpensesPage";
 import { LandingPage } from "../pages/LandingPage";
 import { WalletsPage } from "../pages/WalletsPage";
+import { ProfilePage } from "../pages/ProfilePage";
 import { cn } from "../components/ui";
 import type {
   BillReminder,
@@ -54,7 +55,7 @@ import {
   getStartOfWeek,
   getTodayIsoDate
 } from "../utils/date";
-import { formatBudgetMonth, formatCurrency } from "../utils/format";
+import { formatBudgetMonth } from "../utils/format";
 import {
   clearCustomCategories,
   readCustomCategories,
@@ -286,7 +287,7 @@ export function AppRoutes() {
       delete window.showToast;
     };
   }, [addToast]);
-  const { authLoading, currentUser, authMessage, setAuthMessage, signIn, signOutCurrentUser } = useAuth();
+  const { authLoading, currentUser, authMessage, setAuthMessage, setCurrentUser, signIn, signOutCurrentUser } = useAuth();
   const { listExpenses, createExpense, updateExpense, deleteExpense } = useExpenses();
   const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
   const {
@@ -333,6 +334,90 @@ export function AppRoutes() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
+  const getCurrencySymbol = useCallback((code: string = "INR") => {
+    const symbols: Record<string, string> = {
+      USD: "$",
+      EUR: "€",
+      GBP: "£",
+      INR: "₹",
+      JPY: "¥",
+      CAD: "C$",
+      AUD: "A$",
+      CHF: "Fr",
+      CNY: "元",
+      SGD: "S$",
+      NZD: "NZ$"
+    };
+    return symbols[code.toUpperCase()] || "$";
+  }, []);
+
+  const formatCurrency = useCallback((amount: string, customCurrency?: string): string => {
+    const value = Number(amount);
+    const currency = customCurrency || reminderPreferences?.default_currency || "INR";
+
+    let locale = "en-IN";
+    if (currency === "USD") locale = "en-US";
+    else if (currency === "EUR") locale = "de-DE";
+    else if (currency === "GBP") locale = "en-GB";
+    else if (currency === "JPY") locale = "ja-JP";
+    else if (currency === "CAD") locale = "en-CA";
+    else if (currency === "AUD") locale = "en-AU";
+    else locale = "en-US";
+
+    try {
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(value);
+    } catch (e) {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(value);
+    }
+  }, [reminderPreferences?.default_currency]);
+
+  async function handleUpdateProfile(displayName: string, photoURL: string): Promise<void> {
+    if (!currentUser || !reminderPreferences) {
+      throw new Error("You must be logged in to update your profile.");
+    }
+    setIsUpdatingProfile(true);
+    try {
+      const updatedPrefs = {
+        ...reminderPreferences,
+        display_name: displayName,
+        photo_url: photoURL
+      };
+
+      const resultPrefs = await updateReminderPreferences(currentUser, updatedPrefs);
+      setReminderPreferences(resultPrefs);
+
+      const firebasePhotoURL = photoURL.startsWith("data:") ? (currentUser.providerData?.find(p => p.photoURL)?.photoURL || "") : photoURL;
+      await updateProfile(currentUser, { displayName, photoURL: firebasePhotoURL });
+
+      // Shallow clone Firebase User object preserving all prototype methods (e.g. getIdToken)
+      const clonedUser = Object.assign(Object.create(Object.getPrototypeOf(currentUser)), currentUser);
+      clonedUser.displayName = displayName;
+      clonedUser.photoURL = firebasePhotoURL;
+      setCurrentUser(clonedUser);
+
+      addToast("Profile details updated successfully.", "success");
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : "Failed to update profile.";
+      setAuthMessage(errMsg);
+      addToast(errMsg, "error");
+      throw error;
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  }
+
   const [preferenceScope, setPreferenceScope] = useState<string>("personal");
   const [walletPreferences, setWalletPreferences] = useState<Record<string, { budget_alerts_enabled: boolean; budget_alert_threshold: number }>>({});
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
@@ -502,7 +587,7 @@ export function AppRoutes() {
     };
   }, [spendTrend]);
 
-  const total = useMemo(() => formatCurrency(dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2)), [dashboardVisibleExpenses]);
+  const total = useMemo(() => formatCurrency(dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2)), [dashboardVisibleExpenses, formatCurrency]);
 
   const dashboardStats = useMemo<DashboardStats>(() => {
     const expenseCount = dashboardVisibleExpenses.length;
@@ -560,7 +645,7 @@ export function AppRoutes() {
       categoryBreakdown,
       topPlatform
     };
-  }, [dashboardVisibleExpenses]);
+  }, [dashboardVisibleExpenses, formatCurrency]);
 
   const budgetSummaries = useMemo<BudgetSummary[]>(() => {
     return budgets
@@ -595,7 +680,7 @@ export function AppRoutes() {
 
         return (left.category ?? "").localeCompare(right.category ?? "");
       });
-  }, [budgets, expenses]);
+  }, [budgets, expenses, formatCurrency]);
 
   const currentBudgetMonth = getCurrentMonthValue();
 
@@ -623,9 +708,9 @@ export function AppRoutes() {
           ...budget,
           spent,
           remaining,
-          formattedAmount: formatCurrency(budget.amount),
-          formattedSpent: formatCurrency(spent.toFixed(2)),
-          formattedRemaining: formatCurrency(remaining.toFixed(2)),
+          formattedAmount: formatCurrency(budget.amount, dashboardWallet.wallet.currency),
+          formattedSpent: formatCurrency(spent.toFixed(2), dashboardWallet.wallet.currency),
+          formattedRemaining: formatCurrency(remaining.toFixed(2), dashboardWallet.wallet.currency),
           isOverspent: remaining < 0
         };
       })
@@ -635,7 +720,7 @@ export function AppRoutes() {
         if (left.scope !== right.scope) return left.scope === "monthly" ? -1 : 1;
         return (left.category ?? "").localeCompare(right.category ?? "");
       });
-  }, [dashboardViewMode, dashboardWallet, budgetSummaries]);
+  }, [dashboardViewMode, dashboardWallet, budgetSummaries, formatCurrency]);
 
   const dashboardCurrentMonthBudgetSummaries = useMemo(() => dashboardBudgetSummaries.filter((budget) => budget.month === currentBudgetMonth), [dashboardBudgetSummaries, currentBudgetMonth]);
 
@@ -644,13 +729,15 @@ export function AppRoutes() {
     const totalSpentAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
     const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
 
+    const targetCurrency = dashboardViewMode === "wallet" && dashboardWallet ? dashboardWallet.wallet.currency : undefined;
+
     return {
-      totalBudget: formatCurrency(totalBudgetAmount.toFixed(2)),
-      totalSpent: formatCurrency(totalSpentAmount.toFixed(2)),
-      totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2)),
+      totalBudget: formatCurrency(totalBudgetAmount.toFixed(2), targetCurrency),
+      totalSpent: formatCurrency(totalSpentAmount.toFixed(2), targetCurrency),
+      totalRemaining: formatCurrency(totalRemainingAmount.toFixed(2), targetCurrency),
       isOverspent: totalRemainingAmount < 0
     };
-  }, [dashboardCurrentMonthBudgetSummaries]);
+  }, [dashboardCurrentMonthBudgetSummaries, dashboardViewMode, dashboardWallet, formatCurrency]);
 
   const dashboardInsights = useMemo<DashboardInsight[]>(() => {
     const insights: DashboardInsight[] = [];
@@ -701,7 +788,7 @@ export function AppRoutes() {
     }
 
     return insights.slice(0, 3);
-  }, [currentBudgetMonth, dashboardCurrentMonthBudgetSummaries, dashboardStats, dashboardExpenses, selectedCategory]);
+  }, [currentBudgetMonth, dashboardCurrentMonthBudgetSummaries, dashboardStats, dashboardExpenses, selectedCategory, formatCurrency]);
 
   const dashboardBudgetHistoryGroups = useMemo<BudgetHistoryGroup[]>(() => {
     const filteredBudgets = dashboardBudgetSummaries.filter((budget) => isBudgetMonthInRange(budget.month, budgetHistoryRange));
@@ -807,6 +894,15 @@ export function AppRoutes() {
       setReminderPreferences(await getReminderPreferences(user));
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to load reminder preferences.");
+      setReminderPreferences({
+        daily_logging_enabled: true,
+        daily_logging_hour: 20,
+        budget_alerts_enabled: true,
+        budget_alert_threshold: 80,
+        default_currency: "INR",
+        default_timezone: "UTC",
+        updated_at: new Date().toISOString()
+      });
     }
   }
 
@@ -1210,7 +1306,7 @@ export function AppRoutes() {
     setWalletSubmittingAction("");
   }
 
-  async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }) {
+  async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to create a shared wallet.");
       return false;
@@ -1233,7 +1329,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleUpdateWallet(walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }) {
+  async function handleUpdateWallet(walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to edit a shared wallet.");
       return false;
@@ -1644,6 +1740,8 @@ export function AppRoutes() {
         daily_logging_hour: 0,
         budget_alerts_enabled: true,
         budget_alert_threshold: 80,
+        default_currency: "INR",
+        default_timezone: "UTC",
         updated_at: ""
       };
     }
@@ -1652,11 +1750,16 @@ export function AppRoutes() {
       daily_logging_hour: 0,
       budget_alerts_enabled: walletPrefs.budget_alerts_enabled,
       budget_alert_threshold: walletPrefs.budget_alert_threshold,
+      default_currency: "INR",
+      default_timezone: "UTC",
       updated_at: ""
     };
   }, [preferenceScope, reminderPreferences, walletPreferences]);
 
-  function handleReminderPreferencesChange(field: "daily_logging_enabled" | "daily_logging_hour" | "budget_alerts_enabled" | "budget_alert_threshold", value: boolean | number) {
+  function handleReminderPreferencesChange(
+    field: "daily_logging_enabled" | "daily_logging_hour" | "budget_alerts_enabled" | "budget_alert_threshold" | "default_currency" | "default_timezone",
+    value: boolean | number | string
+  ) {
     if (preferenceScope !== "personal") {
       setWalletPreferences((current) => {
         const prev = current[preferenceScope] || { budget_alerts_enabled: true, budget_alert_threshold: 80 };
@@ -1714,8 +1817,18 @@ export function AppRoutes() {
     setIsSavingReminderPreferences(true);
 
     try {
-      setReminderPreferences(await updateReminderPreferences(currentUser, reminderPreferences));
+      const oldCurrency = reminderPreferences.default_currency;
+      const updated = await updateReminderPreferences(currentUser, reminderPreferences);
+      setReminderPreferences(updated);
       addToast("Reminder preferences updated successfully.", "success");
+
+      if (oldCurrency && updated.default_currency && oldCurrency.toUpperCase() !== updated.default_currency.toUpperCase()) {
+        await Promise.all([
+          loadExpenses(currentUser),
+          loadBudgets(currentUser),
+          loadWallets(currentUser)
+        ]);
+      }
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to update reminder preferences.");
     } finally {
@@ -2096,7 +2209,7 @@ export function AppRoutes() {
     setSortNewestFirst(true);
   }
 
-  function renderSignedInPage(page: "dashboard" | "expenses" | "wallets" | "alerts") {
+  function renderSignedInPage(page: "dashboard" | "expenses" | "wallets" | "alerts" | "profile") {
     if (!currentUser) {
       return null;
     }
@@ -2157,6 +2270,7 @@ export function AppRoutes() {
             wallets={wallets}
             dashboardViewMode={dashboardViewMode}
             dashboardWalletId={dashboardWalletId}
+            currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
             onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); setSelectedPlatform(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
             onDashboardWalletIdChange={setDashboardWalletId}
             budgetForm={budgetForm}
@@ -2227,6 +2341,7 @@ export function AppRoutes() {
               deletingExpenseIds={deletingExpenseIds}
               isLoading={isLoading}
               formatCurrency={formatCurrency}
+              currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
               resolveCategoryIcon={resolveCategoryIcon}
               onFormChange={setForm}
               onCategorySelect={handleCategorySelect}
@@ -2259,6 +2374,7 @@ export function AppRoutes() {
               statusMessage={walletStatusMessage}
               errorMessage={walletErrorMessage}
               formatCurrency={formatCurrency}
+              currencySymbol={selectedWallet ? getCurrencySymbol(selectedWallet.wallet.currency) : getCurrencySymbol(reminderPreferences?.default_currency)}
               onSelectWallet={setSelectedWalletId}
               onCreateWallet={handleCreateWallet}
               onUpdateWallet={handleUpdateWallet}
@@ -2276,7 +2392,7 @@ export function AppRoutes() {
               onUpdateWalletSettlement={handleUpdateWalletSettlement}
               onDeleteWalletSettlement={handleDeleteWalletSettlement}
             />
-          ) : (
+          ) : page === "alerts" ? (
             <AlertsPage
               notifications={notifications}
               billReminders={billReminders}
@@ -2296,6 +2412,18 @@ export function AppRoutes() {
               onDeleteBillReminder={handleDeleteBillReminder}
               onPreferencesChange={handleReminderPreferencesChange}
               onSavePreferences={handleSaveReminderPreferences}
+            />
+          ) : (
+            <ProfilePage
+              currentUser={currentUser}
+              reminderPreferences={reminderPreferences}
+              isSavingReminderPreferences={isSavingReminderPreferences}
+              onReminderPreferencesChange={handleReminderPreferencesChange}
+              onSaveReminderPreferences={handleSaveReminderPreferences}
+              onUpdateProfile={handleUpdateProfile}
+              isUpdatingProfile={isUpdatingProfile}
+              onOpenDeleteAccountModal={openDeleteAccountModal}
+              isDeletingAccount={isDeletingAccount}
             />
           )}
       </SignedInLayout>
@@ -2326,6 +2454,7 @@ export function AppRoutes() {
             <Route path="/expenses" element={renderSignedInPage("expenses")} />
             <Route path="/wallets" element={renderSignedInPage("wallets")} />
             <Route path="/alerts" element={renderSignedInPage("alerts")} />
+            <Route path="/profile" element={renderSignedInPage("profile")} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         ) : (
@@ -2337,6 +2466,7 @@ export function AppRoutes() {
             <Route path="/expenses" element={<Navigate to="/" replace />} />
             <Route path="/wallets" element={<Navigate to="/" replace />} />
             <Route path="/alerts" element={<Navigate to="/" replace />} />
+            <Route path="/profile" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </>
         )}

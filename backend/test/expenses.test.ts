@@ -846,11 +846,12 @@ describe("expenses API", () => {
   it("creates budget and daily-log notifications through reminder checks", async () => {
     const app = buildApp();
 
+    // Set up user-one with budget alerts and log an expense to trigger budget-threshold
     await request(app)
       .put("/api/reminder-preferences")
       .set("Authorization", "Bearer user-one")
       .send({
-        dailyLoggingEnabled: true,
+        dailyLoggingEnabled: false,
         dailyLoggingHour: 0,
         budgetAlertsEnabled: true,
         budgetAlertThreshold: 80
@@ -876,22 +877,51 @@ describe("expenses API", () => {
         date: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`
       });
 
-    const runChecksResponse = await request(app)
+    // Set up user-two with daily log reminders enabled and no expenses today
+    await request(app)
+      .put("/api/reminder-preferences")
+      .set("Authorization", "Bearer user-two")
+      .send({
+        dailyLoggingEnabled: true,
+        dailyLoggingHour: 0,
+        budgetAlertsEnabled: false,
+        budgetAlertThreshold: 80
+      });
+
+    // Run checks for user-one
+    const runChecksResponseOne = await request(app)
       .post("/api/notifications/run-checks")
       .set("Authorization", "Bearer user-one");
 
-    expect(runChecksResponse.status).toBe(200);
-    expect(runChecksResponse.body.created_notifications.length).toBeGreaterThanOrEqual(2);
+    expect(runChecksResponseOne.status).toBe(200);
+    expect(runChecksResponseOne.body.created_notifications.length).toBeGreaterThanOrEqual(1);
 
-    const notificationsResponse = await request(app)
+    // Run checks for user-two
+    const runChecksResponseTwo = await request(app)
+      .post("/api/notifications/run-checks")
+      .set("Authorization", "Bearer user-two");
+
+    expect(runChecksResponseTwo.status).toBe(200);
+    expect(runChecksResponseTwo.body.created_notifications.length).toBeGreaterThanOrEqual(1);
+
+    // Check user-one notifications
+    const notificationsResponseOne = await request(app)
       .get("/api/notifications")
       .set("Authorization", "Bearer user-one");
 
-    expect(notificationsResponse.status).toBe(200);
-    expect(notificationsResponse.body.notifications.some((notification: { type: string }) => notification.type === "budget-threshold")).toBe(true);
-    expect(notificationsResponse.body.notifications.some((notification: { type: string }) => notification.type === "daily-log")).toBe(true);
+    expect(notificationsResponseOne.status).toBe(200);
+    expect(notificationsResponseOne.body.notifications.some((notification: { type: string }) => notification.type === "budget-threshold")).toBe(true);
 
-    const firstNotificationId = notificationsResponse.body.notifications[0].id;
+    // Check user-two notifications
+    const notificationsResponseTwo = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer user-two");
+
+    expect(notificationsResponseTwo.status).toBe(200);
+    expect(notificationsResponseTwo.body.notifications.some((notification: { type: string }) => notification.type === "daily-log")).toBe(true);
+
+    // Test mark read logic
+    const firstNotificationId = notificationsResponseOne.body.notifications[0].id;
     const markReadResponse = await request(app)
       .patch(`/api/notifications/${firstNotificationId}/read`)
       .set("Authorization", "Bearer user-one");
@@ -1117,5 +1147,70 @@ describe("expenses API", () => {
 
     expect(runChecksResponse.status).toBe(200);
     expect(runChecksResponse.body.created_notifications.some((n: any) => n.type === "budget-threshold")).toBe(true);
+  });
+
+  it("converts wallet amounts on currency preference change", async () => {
+    const app = buildApp();
+
+    // 1. Create a wallet with default INR
+    const walletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Test Currency Wallet",
+        description: "Testing conversion",
+        defaultSplitRule: "equal",
+        currency: "INR",
+        members: []
+      });
+
+    const walletId = walletResponse.body.wallet.wallet.id;
+    const ownerMemberId = walletResponse.body.wallet.members[0].id;
+
+    // 2. Add an expense of 100 INR
+    await request(app)
+      .post(`/api/wallets/${walletId}/expenses`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        paidByMemberId: ownerMemberId,
+        amount: "100.00",
+        category: "Entertainment",
+        description: "Movie tickets",
+        date: "2026-07-02",
+        splitRule: "equal",
+        splits: [{ memberId: ownerMemberId }]
+      });
+
+    // 3. Add a budget of 300 INR
+    await request(app)
+      .post(`/api/wallets/${walletId}/budgets`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        amount: "300.00",
+        scope: "monthly",
+        month: "2026-07"
+      });
+
+    // 4. Update wallet currency to USD
+    const updateResponse = await request(app)
+      .put(`/api/wallets/${walletId}`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Test Currency Wallet",
+        description: "Testing conversion",
+        defaultSplitRule: "equal",
+        currency: "USD",
+        members: []
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.wallet.wallet.currency).toBe("USD");
+
+    // 5. Verify amounts have converted (INR to USD rate is around 0.012)
+    const convertedWallet = updateResponse.body.wallet;
+    expect(convertedWallet.expenses[0].amount).not.toBe("100.00");
+    expect(convertedWallet.budgets[0].amount).not.toBe("300.00");
+    expect(Number(convertedWallet.expenses[0].amount)).toBeLessThan(10);
+    expect(Number(convertedWallet.budgets[0].amount)).toBeLessThan(10);
   });
 });

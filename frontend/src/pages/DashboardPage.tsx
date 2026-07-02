@@ -76,6 +76,7 @@ type DashboardPageProps = {
   onChartDisplayTypeChange: (displayType: ChartDisplayType) => void;
   onChartGranularityChange: (granularity: ChartGranularity) => void;
   activeExpenses: Expense[];
+  currencySymbol?: string;
 };
 
 const statMeta = [
@@ -131,7 +132,8 @@ export function DashboardPage({
   onSelectedPlatformChange,
   onChartDisplayTypeChange,
   onChartGranularityChange,
-  activeExpenses
+  activeExpenses,
+  currencySymbol
 }: DashboardPageProps) {
   const navigate = useNavigate();
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
@@ -438,6 +440,7 @@ export function DashboardPage({
         budgetHistoryGroups={budgetHistoryGroups}
         budgetHistoryRange={budgetHistoryRange}
         isBudgetHistoryOpen={isBudgetHistoryOpen}
+        currencySymbol={currencySymbol}
         emptyStateMessage={`No budgets set for ${currentBudgetMonthLabel} yet. Add one to start tracking remaining spend.`}
         formDescription="Create monthly caps or category-specific targets and update them whenever your plan changes."
         historyDialogTitle="Month-wise budget history"
