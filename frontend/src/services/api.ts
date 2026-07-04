@@ -218,8 +218,17 @@ export async function removeWalletMember(walletId: string, memberId: string, use
   return body.wallet;
 }
 
-export async function getWalletDetail(walletId: string, user: User): Promise<WalletDetail> {
-  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;
+export async function getWalletDetail(
+  walletId: string,
+  user: User,
+  expenseOffset = 0,
+  expenseLimit = 50
+): Promise<WalletDetail> {
+  const url = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL) : new URL(`/api/wallets/${walletId}`, window.location.origin);
+  url.searchParams.set("expenseOffset", String(expenseOffset));
+  url.searchParams.set("expenseLimit", String(expenseLimit));
+  
+  const endpoint = url.toString();
   const body = await apiRequest<{ wallet: WalletDetail }>(user, { url: endpoint, method: "GET" }, "Failed to load wallet.");
   return body.wallet;
 }

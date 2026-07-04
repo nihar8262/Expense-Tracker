@@ -39,7 +39,8 @@ import {
   type WalletRecord,
   WalletSettlementNotFoundError,
   type WalletSettlementRecord,
-  WalletValidationError
+  WalletValidationError,
+  type WalletHistoryPagination
 } from "./types.js";
 
 type StoredExpense = {
@@ -467,12 +468,14 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return wallet;
   }
 
-  function buildWalletDetail(walletId: string): WalletDetailRecord {
+  function buildWalletDetail(walletId: string, pagination?: WalletHistoryPagination): WalletDetailRecord {
     const wallet = wallets.get(walletId);
 
     if (!wallet) {
       throw new WalletNotFoundError();
     }
+
+    const pag = pagination ?? { expenseLimit: 50, expenseOffset: 0, settlementLimit: 50, settlementOffset: 0 };
 
     const members = listWalletMembers(walletId);
     const membersById = new Map(members.map((member) => [member.id, member]));
@@ -484,55 +487,61 @@ export function createMemoryExpenseStore(): ExpenseStore {
       })
       .map(mapWalletBudget);
 
-    const expenseRecords: WalletExpenseRecord[] = [...walletExpenses.values()]
+    const allExpenses = [...walletExpenses.values()]
       .filter((expense) => expense.walletId === walletId)
       .sort((left, right) => {
         const byDate = right.date.localeCompare(left.date);
         return byDate !== 0 ? byDate : right.createdAt.localeCompare(left.createdAt);
-      })
-      .map((expense) => {
-        const payer = membersById.get(expense.paidByMemberId);
-        const splits = (walletExpenseSplits.get(expense.id) ?? []).map((split): WalletExpenseSplitRecord => ({
-          member_id: split.memberId,
-          member_name: membersById.get(split.memberId)?.displayName ?? "Unknown member",
-          amount: formatMinorUnits(split.amountMinor),
-          percentage: split.percentageBasisPoints === null ? null : split.percentageBasisPoints / 100
-        }));
-
-        return {
-          id: expense.id,
-          wallet_id: expense.walletId,
-          paid_by_member_id: expense.paidByMemberId,
-          paid_by_member_name: payer?.displayName ?? "Unknown member",
-          amount: formatMinorUnits(expense.amountMinor),
-          category: expense.category,
-          description: expense.description,
-          date: expense.date,
-          split_rule: expense.splitRule,
-          created_at: expense.createdAt,
-          platform: expense.platform ?? null,
-          splits
-        };
       });
 
-    const settlements: WalletSettlementRecord[] = [...walletSettlements.values()]
+    const paginatedExpenses = allExpenses.slice(pag.expenseOffset, pag.expenseOffset + pag.expenseLimit);
+
+    const expenseRecords: WalletExpenseRecord[] = paginatedExpenses.map((expense) => {
+      const payer = membersById.get(expense.paidByMemberId);
+      const splits = (walletExpenseSplits.get(expense.id) ?? []).map((split): WalletExpenseSplitRecord => ({
+        member_id: split.memberId,
+        member_name: membersById.get(split.memberId)?.displayName ?? "Unknown member",
+        amount: formatMinorUnits(split.amountMinor),
+        percentage: split.percentageBasisPoints === null ? null : split.percentageBasisPoints / 100
+      }));
+
+      return {
+        id: expense.id,
+        wallet_id: expense.walletId,
+        paid_by_member_id: expense.paidByMemberId,
+        paid_by_member_name: payer?.displayName ?? "Unknown member",
+        amount: formatMinorUnits(expense.amountMinor),
+        category: expense.category,
+        description: expense.description,
+        date: expense.date,
+        split_rule: expense.splitRule,
+        created_at: expense.createdAt,
+        platform: expense.platform ?? null,
+        splits
+      };
+    });
+
+    const allSettlements = [...walletSettlements.values()]
       .filter((settlement) => settlement.walletId === walletId)
       .sort((left, right) => {
         const byDate = right.date.localeCompare(left.date);
         return byDate !== 0 ? byDate : right.createdAt.localeCompare(left.createdAt);
-      })
-      .map((settlement) => ({
-        id: settlement.id,
-        wallet_id: settlement.walletId,
-        from_member_id: settlement.fromMemberId,
-        from_member_name: membersById.get(settlement.fromMemberId)?.displayName ?? "Unknown member",
-        to_member_id: settlement.toMemberId,
-        to_member_name: membersById.get(settlement.toMemberId)?.displayName ?? "Unknown member",
-        amount: formatMinorUnits(settlement.amountMinor),
-        date: settlement.date,
-        note: settlement.note,
-        created_at: settlement.createdAt
-      }));
+      });
+
+    const paginatedSettlements = allSettlements.slice(pag.settlementOffset, pag.settlementOffset + pag.settlementLimit);
+
+    const settlements: WalletSettlementRecord[] = paginatedSettlements.map((settlement) => ({
+      id: settlement.id,
+      wallet_id: settlement.walletId,
+      from_member_id: settlement.fromMemberId,
+      from_member_name: membersById.get(settlement.fromMemberId)?.displayName ?? "Unknown member",
+      to_member_id: settlement.toMemberId,
+      to_member_name: membersById.get(settlement.toMemberId)?.displayName ?? "Unknown member",
+      amount: formatMinorUnits(settlement.amountMinor),
+      date: settlement.date,
+      note: settlement.note,
+      created_at: settlement.createdAt
+    }));
 
     const balancesByMember = new Map(members.map((member) => [member.id, 0]));
 
@@ -557,13 +566,86 @@ export function createMemoryExpenseStore(): ExpenseStore {
       }))
       .sort((left, right) => Number(right.net_amount) - Number(left.net_amount));
 
+    // Calculate aggregations on ALL expenses (uncut)
+    const totalAmountMinor = allExpenses.reduce((sum, e) => sum + e.amountMinor, 0);
+    const expenseCount = allExpenses.length;
+
+    const monthlyMap = new Map<string, { totalMinor: number; count: number }>();
+    for (const exp of allExpenses) {
+      const month = exp.date.slice(0, 7); // YYYY-MM
+      const curr = monthlyMap.get(month) ?? { totalMinor: 0, count: 0 };
+      curr.totalMinor += exp.amountMinor;
+      curr.count += 1;
+      monthlyMap.set(month, curr);
+    }
+    const monthlyTotals = [...monthlyMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, data]) => ({
+        month,
+        total: formatMinorUnits(data.totalMinor),
+        count: data.count
+      }));
+
+    const categoryMap = new Map<string, { totalMinor: number; count: number }>();
+    for (const exp of allExpenses) {
+      const category = exp.category;
+      const curr = categoryMap.get(category) ?? { totalMinor: 0, count: 0 };
+      curr.totalMinor += exp.amountMinor;
+      curr.count += 1;
+      categoryMap.set(category, curr);
+    }
+    const categoryTotals = [...categoryMap.entries()]
+      .sort((a, b) => b[1].totalMinor - a[1].totalMinor)
+      .map(([category, data]) => ({
+        category,
+        total: formatMinorUnits(data.totalMinor),
+        count: data.count
+      }));
+
+    // Group by month and category
+    const budgetMap = new Map<string, number>(); // key: "month:category"
+    for (const exp of allExpenses) {
+      const month = exp.date.slice(0, 7);
+      const key = `${month}:${exp.category}`;
+      budgetMap.set(key, (budgetMap.get(key) ?? 0) + exp.amountMinor);
+    }
+    const budgetTotals = [...budgetMap.entries()].map(([key, amountMinor]) => {
+      const [month, category] = key.split(":");
+      return {
+        month,
+        category: category || null,
+        total: formatMinorUnits(amountMinor)
+      };
+    });
+
+    const walletAggregation = {
+      total_amount: formatMinorUnits(totalAmountMinor),
+      expense_count: expenseCount,
+      monthly_totals: monthlyTotals,
+      category_totals: categoryTotals,
+      budget_totals: budgetTotals
+    };
+
     return {
       wallet: mapWallet(wallet),
       members: members.map(mapWalletMember),
       budgets: budgetRecords,
       expenses: expenseRecords,
       balances,
-      settlements
+      settlements,
+      walletAggregation,
+      expensePagination: {
+        limit: pag.expenseLimit,
+        offset: pag.expenseOffset,
+        total: allExpenses.length,
+        hasMore: pag.expenseOffset + expenseRecords.length < allExpenses.length
+      },
+      settlementPagination: {
+        limit: pag.settlementLimit,
+        offset: pag.settlementOffset,
+        total: allSettlements.length,
+        hasMore: pag.settlementOffset + settlements.length < allSettlements.length
+      }
     };
   }
 
@@ -1242,9 +1324,9 @@ export function createMemoryExpenseStore(): ExpenseStore {
       .map(mapWallet);
   }
 
-  async function getWallet(userId: string, walletId: string): Promise<WalletDetailRecord> {
+  async function getWallet(userId: string, walletId: string, pagination?: WalletHistoryPagination): Promise<WalletDetailRecord> {
     assertWalletAccess(userId, walletId);
-    return buildWalletDetail(walletId);
+    return buildWalletDetail(walletId, pagination);
   }
 
   async function deleteWallet(userId: string, walletId: string): Promise<void> {

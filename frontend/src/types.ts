@@ -104,6 +104,32 @@ export type WalletSettlement = {
 	created_at: string;
 };
 
+export type WalletAggregationMonthly = {
+	month: string;
+	total: string;
+	count: number;
+};
+
+export type WalletAggregationCategory = {
+	category: string;
+	total: string;
+	count: number;
+};
+
+export type WalletAggregationBudget = {
+	month: string;
+	category: string | null;
+	total: string;
+};
+
+export type WalletAggregation = {
+	total_amount: string;
+	expense_count: number;
+	monthly_totals: WalletAggregationMonthly[];
+	category_totals: WalletAggregationCategory[];
+	budget_totals: WalletAggregationBudget[];
+};
+
 export type WalletDetail = {
 	wallet: Wallet;
 	members: WalletMember[];
@@ -111,6 +137,7 @@ export type WalletDetail = {
 	expenses: WalletExpense[];
 	balances: WalletBalance[];
 	settlements: WalletSettlement[];
+	walletAggregation: WalletAggregation;
 	expensePagination?: WalletHistoryPagination;
 	settlementPagination?: WalletHistoryPagination;
 };

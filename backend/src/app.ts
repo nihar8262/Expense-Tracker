@@ -159,7 +159,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       request,
       response,
       async (user) => {
-        const result = await handleGetWalletForUser(request.params.walletId, user, store);
+        const result = await handleGetWalletForUser(request.params.walletId, user, store, request.query);
         return response.status(result.status).json(result.body);
       },
       "Failed to load wallet."

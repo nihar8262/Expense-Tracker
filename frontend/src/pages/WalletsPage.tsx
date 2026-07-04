@@ -134,6 +134,7 @@ type WalletsPageProps = {
     settlementId: string,
   ) => Promise<boolean>;
   currencySymbol?: string;
+  onLoadMoreExpenses?: () => Promise<void>;
 };
 
 function getTodayIsoDate(baseDate = new Date()): string {
@@ -274,7 +275,8 @@ export function WalletsPage({
   onCreateWalletSettlement,
   onUpdateWalletSettlement,
   onDeleteWalletSettlement,
-  currencySymbol = "₹"
+  currencySymbol = "₹",
+  onLoadMoreExpenses
 }: WalletsPageProps) {
   const [walletName, setWalletName] = useState("");
   const [walletDescription, setWalletDescription] = useState("");
@@ -650,7 +652,7 @@ export function WalletsPage({
     expenseFilterCategory,
     expenseFilterPlatform,
     expenseFilterAmount,
-    selectedWallet,
+    selectedWalletId,
   ]);
 
   const filteredSettlements = useMemo(() => {
@@ -2209,16 +2211,43 @@ export function WalletsPage({
                     </button>
                   </div>
                 ) : null}
+                {selectedWallet.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
+                  <div className="rounded-[22px] border border-amber-100 bg-amber-50/50 px-4 py-3 text-xs text-amber-800 font-medium">
+                    Showing only the latest {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please load more to see older data.
+                  </div>
+                ) : null}
                 {selectedWallet.expenses.length === 0 ? (
                   <EmptyState
                     title="No shared expenses yet"
                     description="Add the first group transaction to start tracking how this wallet is being used."
                   />
                 ) : filteredExpenses.length === 0 ? (
-                  <EmptyState
-                    title="No expenses match the current filters"
-                    description="Adjust the platform, category, or date filters to find what you're looking for."
-                  />
+                  selectedWallet.expensePagination?.hasMore ? (
+                    <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-12">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                        </svg>
+                      </div>
+                      <h3 className="mt-4 text-base font-semibold text-ink">No matches in loaded data</h3>
+                      <p className="mt-2 max-w-sm text-sm text-secondary">
+                        None of the currently loaded {selectedWallet.expenses.length} expenses match these filters. You can load older data to search further back.
+                      </p>
+                      <button
+                        type="button"
+                        className="ui-button-secondary mt-6 flex items-center gap-2"
+                        onClick={onLoadMoreExpenses}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? "Loading older history..." : "Load older history"}
+                      </button>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="No expenses match the current filters"
+                      description="Adjust the platform, category, or date filters to find what you're looking for."
+                    />
+                  )
                 ) : (
                   <>
                     {filteredExpenses.length > 0 ? (
@@ -2246,16 +2275,94 @@ export function WalletsPage({
                             {selectedExpenseIds.length > 0 ? `(${selectedExpenseIds.length} selected)` : ""}
                           </span>
                         </div>
-                        {selectedExpenseIds.length > 0 ? (
-                          <button
-                            type="button"
-                            className="ui-button-danger !py-1.5 !px-3 text-xs"
-                            disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
-                            onClick={handleDeleteSelectedExpensesClick}
-                          >
-                            {selectedExpenseIds.some((id) => deletingExpenseIds.includes(id)) ? "Deleting..." : "Delete selected"}
-                          </button>
-                        ) : null}
+                        <div className="flex items-center gap-2">
+                          {selectedExpenseIds.length > 0 ? (
+                            <button
+                              type="button"
+                              className="ui-button-danger !py-1.5 !px-3 text-xs"
+                              disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
+                              onClick={handleDeleteSelectedExpensesClick}
+                            >
+                              {selectedExpenseIds.some((id) => deletingExpenseIds.includes(id)) ? "Deleting..." : "Delete selected"}
+                            </button>
+                          ) : null}
+
+                          {(() => {
+                            const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
+                            const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
+
+                            if (!showPagination) return null;
+
+                            return (
+                              <div className="flex items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
+                                  disabled={currentWalletExpensesPage === 1 || isLoading}
+                                  onClick={() =>
+                                    setCurrentWalletExpensesPage(
+                                      currentWalletExpensesPage - 1,
+                                    )
+                                  }
+                                  title="Previous Page"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
+                                    <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                                  </svg>
+                                  <span className="hidden sm:inline">Prev</span>
+                                </button>
+                                <span className="text-xs font-semibold text-secondary px-1 text-center min-w-[40px] sm:min-w-[50px]">
+                                  {currentWalletExpensesPage}/{totalWalletExpensePages}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
+                                  disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                                  onClick={async () => {
+                                    if (isLoadMoreMode) {
+                                      if (onLoadMoreExpenses) {
+                                        try {
+                                          await onLoadMoreExpenses();
+                                          setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                        } catch (err) {}
+                                      }
+                                    } else {
+                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                    }
+                                  }}
+                                  title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
+                                >
+                                  {isLoadMoreMode ? (
+                                    isLoading ? (
+                                      <>
+                                        <span className="hidden sm:inline">Loading...</span>
+                                        <span className="inline sm:hidden">...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="hidden sm:inline">Load More</span>
+                                        <span className="inline sm:hidden">Load</span>
+                                      </>
+                                    )
+                                  ) : (
+                                    <>
+                                      <span className="hidden sm:inline">Next</span>
+                                    </>
+                                  )}
+                                  {!isLoading && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
+                                      {isLoadMoreMode ? (
+                                        <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                                      ) : (
+                                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                                      )}
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
                     ) : null}
                     {/* Desktop View */}
@@ -2412,42 +2519,85 @@ export function WalletsPage({
                         </article>
                       ))}
                     </div>
-                    {totalWalletExpensePages > 1 ? (
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4">
-                        <p className="text-sm text-secondary">
-                          Page {currentWalletExpensesPage} of {totalWalletExpensePages}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className="ui-button-secondary"
-                            disabled={currentWalletExpensesPage === 1}
-                            onClick={() =>
-                              setCurrentWalletExpensesPage(
-                                currentWalletExpensesPage - 1,
-                              )
-                            }
-                          >
-                            Previous
-                          </button>
-                          <button
-                            type="button"
-                            className="ui-button-secondary"
-                            disabled={
-                              currentWalletExpensesPage ===
-                              totalWalletExpensePages
-                            }
-                            onClick={() =>
-                              setCurrentWalletExpensesPage(
-                                currentWalletExpensesPage + 1,
-                              )
-                            }
-                          >
-                            Next
-                          </button>
+                    {(() => {
+                      const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
+                      const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
+
+                      if (!showPagination) return null;
+
+                      return (
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4">
+                          <p className="text-sm text-secondary">
+                            Page {currentWalletExpensesPage} of {totalWalletExpensePages}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
+                              disabled={currentWalletExpensesPage === 1 || isLoading}
+                              onClick={() =>
+                                setCurrentWalletExpensesPage(
+                                  currentWalletExpensesPage - 1,
+                                )
+                              }
+                              title="Previous Page"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
+                                <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                              </svg>
+                              <span className="hidden sm:inline">Previous</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
+                              disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                              onClick={async () => {
+                                if (isLoadMoreMode) {
+                                  if (onLoadMoreExpenses) {
+                                    try {
+                                      await onLoadMoreExpenses();
+                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                    } catch (err) {
+                                      // Do not navigate to next page if request failed
+                                    }
+                                  }
+                                } else {
+                                  setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                }
+                              }}
+                              title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
+                            >
+                              {isLoadMoreMode ? (
+                                isLoading ? (
+                                  <>
+                                    <span className="hidden sm:inline">Loading...</span>
+                                    <span className="inline sm:hidden">...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="hidden sm:inline">Load More</span>
+                                    <span className="inline sm:hidden">Load</span>
+                                  </>
+                                )
+                              ) : (
+                                <>
+                                  <span className="hidden sm:inline">Next</span>
+                                </>
+                              )}
+                              {!isLoading && (
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
+                                  {isLoadMoreMode ? (
+                                    <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                                  ) : (
+                                    <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                                  )}
+                                </svg>
+                              )}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
+                      );
+                    })()}
                   </>
                 ) }
               </SurfaceCard>
@@ -2464,8 +2614,12 @@ export function WalletsPage({
                           All shared expenses
                         </h2>
                         <p className="text-sm leading-7 text-secondary">
-                          {filteredExpenses.length} expense
-                          {filteredExpenses.length !== 1 ? "s" : ""} found
+                          {filteredExpenses.length} expense{filteredExpenses.length !== 1 ? "s" : ""} found
+                          {selectedWallet?.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
+                            <span className="block text-xs text-amber-600 font-semibold mt-1">
+                              Showing only {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please close filters and load more to see older data.
+                            </span>
+                          ) : null}
                         </p>
                       </div>
                       <button

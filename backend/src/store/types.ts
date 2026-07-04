@@ -102,6 +102,39 @@ export type WalletSettlementRecord = {
   created_at: string;
 };
 
+export type WalletAggregationMonthlyRecord = {
+  month: string;
+  total: string;
+  count: number;
+};
+
+export type WalletAggregationCategoryRecord = {
+  category: string;
+  total: string;
+  count: number;
+};
+
+export type WalletAggregationBudgetRecord = {
+  month: string;
+  category: string | null;
+  total: string;
+};
+
+export type WalletAggregationRecord = {
+  total_amount: string;
+  expense_count: number;
+  monthly_totals: WalletAggregationMonthlyRecord[];
+  category_totals: WalletAggregationCategoryRecord[];
+  budget_totals: WalletAggregationBudgetRecord[];
+};
+
+export type WalletHistoryPagination = {
+  expenseLimit: number;
+  expenseOffset: number;
+  settlementLimit: number;
+  settlementOffset: number;
+};
+
 export type WalletDetailRecord = {
   wallet: WalletRecord;
   members: WalletMemberRecord[];
@@ -109,9 +142,11 @@ export type WalletDetailRecord = {
   expenses: WalletExpenseRecord[];
   balances: WalletBalanceRecord[];
   settlements: WalletSettlementRecord[];
+  walletAggregation: WalletAggregationRecord;
   expensePagination?: WalletHistoryPaginationRecord;
   settlementPagination?: WalletHistoryPaginationRecord;
 };
+
 
 export type WalletHistoryPaginationRecord = {
   limit: number;
@@ -185,7 +220,7 @@ export interface ExpenseStore {
   createWallet(userId: string, ownerProfile: { name: string | null; email: string | null }, input: CreateWalletInput): Promise<WalletDetailRecord>;
   updateWallet(userId: string, walletId: string, input: CreateWalletInput): Promise<WalletDetailRecord>;
   listWallets(userId: string): Promise<WalletRecord[]>;
-  getWallet(userId: string, walletId: string): Promise<WalletDetailRecord>;
+  getWallet(userId: string, walletId: string, pagination?: WalletHistoryPagination): Promise<WalletDetailRecord>;
   deleteWallet(userId: string, walletId: string): Promise<void>;
   leaveWallet(userId: string, walletId: string): Promise<void>;
   createWalletBudget(userId: string, walletId: string, input: CreateBudgetInput): Promise<WalletDetailRecord>;

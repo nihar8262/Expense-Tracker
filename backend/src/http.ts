@@ -534,9 +534,26 @@ export async function handleDeleteWalletBudget(walletId: string, walletBudgetId:
   }
 }
 
-export async function handleGetWalletForUser(walletId: string, user: { id: string; name?: string | null; email?: string | null }, store: ExpenseStore): Promise<HandlerResponse> {
+export async function handleGetWalletForUser(
+  walletId: string,
+  user: { id: string; name?: string | null; email?: string | null },
+  store: ExpenseStore,
+  query?: any
+): Promise<HandlerResponse> {
   try {
-    const wallet = await store.getWallet(user.id, walletId);
+    const expenseLimit = query && query.expenseLimit ? parseInt(String(query.expenseLimit), 10) : undefined;
+    const expenseOffset = query && query.expenseOffset ? parseInt(String(query.expenseOffset), 10) : undefined;
+    const settlementLimit = query && query.settlementLimit ? parseInt(String(query.settlementLimit), 10) : undefined;
+    const settlementOffset = query && query.settlementOffset ? parseInt(String(query.settlementOffset), 10) : undefined;
+
+    const pagination = (expenseLimit !== undefined || expenseOffset !== undefined || settlementLimit !== undefined || settlementOffset !== undefined) ? {
+      expenseLimit: !isNaN(expenseLimit!) ? expenseLimit! : 50,
+      expenseOffset: !isNaN(expenseOffset!) ? expenseOffset! : 0,
+      settlementLimit: !isNaN(settlementLimit!) ? settlementLimit! : 50,
+      settlementOffset: !isNaN(settlementOffset!) ? settlementOffset! : 0
+    } : undefined;
+
+    const wallet = await store.getWallet(user.id, walletId, pagination);
     return {
       status: 200,
       body: { wallet }

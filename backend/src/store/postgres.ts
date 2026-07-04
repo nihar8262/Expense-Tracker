@@ -40,7 +40,8 @@ import {
   type WalletRecord,
   WalletSettlementNotFoundError,
   type WalletSettlementRecord,
-  WalletValidationError
+  WalletValidationError,
+  type WalletHistoryPagination
 } from "./types.js";
 
 type DbClient = Sql | TransactionSql;
@@ -62,6 +63,7 @@ type IdempotencyRow = {
 
 type BudgetRow = {
   id: string;
+  user_id: string;
   amount_minor: number | string;
   budget_scope: "monthly" | "category";
   category: string | null;
@@ -71,6 +73,7 @@ type BudgetRow = {
 
 type WalletRow = {
   id: string;
+  owner_user_id: string;
   name: string;
   description: string | null;
   default_split_rule: "equal" | "fixed" | "percentage";
@@ -97,6 +100,8 @@ type WalletMemberRow = {
   member_role: "owner" | "member";
   invite_status: "linked" | "pending" | "declined";
   joined_at: string | Date;
+  budget_alerts_enabled?: boolean;
+  budget_alert_threshold?: number;
 };
 
 type WalletExpenseRow = {
@@ -446,12 +451,7 @@ function buildPercentageSplits(totalAmount: number, splits: CreateWalletExpenseI
   }));
 }
 
-type WalletHistoryPagination = {
-  expenseLimit: number;
-  expenseOffset: number;
-  settlementLimit: number;
-  settlementOffset: number;
-};
+
 
 function getDefaultWalletHistoryPagination(): WalletHistoryPagination {
   return {
@@ -997,6 +997,90 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
   const expenseTotal = Number(expenseCountRows[0]?.total ?? 0);
   const settlementTotal = Number(settlementCountRows[0]?.total ?? 0);
 
+  const walletAggregationRows = await db<{
+    total_amount_minor: string | number;
+    expense_count: string | number;
+  }[]>`
+    SELECT
+      COALESCE(SUM(amount_minor), 0) AS total_amount_minor,
+      COUNT(*)::int AS expense_count
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+  `;
+
+  const monthlyTotalsRows = await db<{
+    month: string;
+    total_minor: string | number;
+    expense_count: string | number;
+  }[]>`
+    SELECT
+      TO_CHAR(expense_date, 'YYYY-MM') AS month,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY TO_CHAR(expense_date, 'YYYY-MM')
+    ORDER BY month ASC
+  `;
+
+  const categoryTotalsRows = await db<{
+    category: string;
+    total_minor: string | number;
+    expense_count: string | number;
+  }[]>`
+    SELECT
+      category,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY category
+    ORDER BY total_minor DESC
+  `;
+
+  const budgetTotalsRows = await db<{
+    month: string;
+    category: string | null;
+    total_minor: string | number;
+  }[]>`
+    SELECT
+      TO_CHAR(expense_date, 'YYYY-MM') AS month,
+      category,
+      COALESCE(SUM(amount_minor), 0) AS total_minor
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY TO_CHAR(expense_date, 'YYYY-MM'), category
+  `;
+
+  const totalAmount = formatMinorUnits(Number(walletAggregationRows[0]?.total_amount_minor ?? 0));
+  const totalCount = Number(walletAggregationRows[0]?.expense_count ?? 0);
+
+  const monthlyTotals = monthlyTotalsRows.map((r) => ({
+    month: r.month,
+    total: formatMinorUnits(Number(r.total_minor)),
+    count: Number(r.expense_count)
+  }));
+
+  const categoryTotals = categoryTotalsRows.map((r) => ({
+    category: r.category,
+    total: formatMinorUnits(Number(r.total_minor)),
+    count: Number(r.expense_count)
+  }));
+
+  const budgetTotals = budgetTotalsRows.map((r) => ({
+    month: r.month,
+    category: r.category,
+    total: formatMinorUnits(Number(r.total_minor))
+  }));
+
+  const walletAggregation = {
+    total_amount: totalAmount,
+    expense_count: totalCount,
+    monthly_totals: monthlyTotals,
+    category_totals: categoryTotals,
+    budget_totals: budgetTotals
+  };
+
   return {
     wallet: mapWallet(wallet),
     members: members.map(mapWalletMember),
@@ -1004,6 +1088,7 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     expenses,
     balances,
     settlements,
+    walletAggregation,
     expensePagination: {
       limit: pagination.expenseLimit,
       offset: pagination.expenseOffset,
@@ -1651,10 +1736,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
       return rows.map(mapWallet);
     },
 
-    async getWallet(userId: string, walletId: string): Promise<WalletDetailRecord> {
+    async getWallet(userId: string, walletId: string, pagination?: WalletHistoryPagination): Promise<WalletDetailRecord> {
       await ensureSchema(sql);
       await ensureWalletAccess(sql, userId, walletId);
-      return loadWalletDetail(sql, walletId);
+      return loadWalletDetail(sql, walletId, pagination);
     },
 
     async deleteWallet(userId: string, walletId: string): Promise<void> {

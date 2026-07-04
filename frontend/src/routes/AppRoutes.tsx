@@ -430,6 +430,7 @@ export function AppRoutes() {
   const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
   const [currentExpensesPage, setCurrentExpensesPage] = useState(1);
+  const [walletExpenseOffset, setWalletExpenseOffset] = useState(0);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
@@ -556,8 +557,45 @@ export function AppRoutes() {
   const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
   const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
 
-  const spendTrend = useMemo(() => buildTrendPoints(dashboardVisibleExpenses, chartGranularity), [dashboardVisibleExpenses, chartGranularity]);
-  const trendDetailLookup = useMemo(() => buildTrendDetailLookup(dashboardVisibleExpenses, chartGranularity), [dashboardVisibleExpenses, chartGranularity]);
+  const spendTrend = useMemo(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
+    }
+
+    if (chartGranularity === "monthly") {
+      const today = new Date();
+      const currentYear = today.getFullYear().toString();
+
+      let filteredTotals = dashboardWallet.walletAggregation.monthly_totals;
+      if (selectedTimeRange === "year") {
+        filteredTotals = filteredTotals.filter(m => m.month.startsWith(currentYear));
+      }
+
+      return filteredTotals.map(m => {
+        const [year, monthNum] = m.month.split("-").map(Number);
+        const parsedDate = new Date(year, monthNum - 1, 1);
+        const label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(parsedDate);
+        const shortLabel = new Intl.DateTimeFormat("en-IN", { month: "short" }).format(parsedDate);
+        return {
+          key: m.month,
+          label,
+          shortLabel,
+          total: Number(m.total),
+          count: m.count,
+          order: parsedDate.getTime()
+        };
+      });
+    }
+
+    return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
+  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, chartGranularity, selectedTimeRange]);
+
+  const trendDetailLookup = useMemo(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return buildTrendDetailLookup(dashboardVisibleExpenses, chartGranularity);
+    }
+    return buildTrendDetailLookup(dashboardWallet.expenses, chartGranularity);
+  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, chartGranularity]);
 
   const chartSummary = useMemo(() => {
     const peakValue = spendTrend.reduce((currentMax, point) => Math.max(currentMax, point.total), 0);
@@ -587,43 +625,169 @@ export function AppRoutes() {
     };
   }, [spendTrend]);
 
-  const total = useMemo(() => formatCurrency(dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2)), [dashboardVisibleExpenses, formatCurrency]);
+  const totalVal = useMemo(() => {
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+    }
+     
+    const today = new Date();
+    const currentYear = today.getFullYear().toString();
+    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+     
+    if (selectedTimeRange === "all") {
+      return Number(dashboardWallet.walletAggregation.total_amount).toFixed(2);
+    } else if (selectedTimeRange === "month") {
+      const monthData = dashboardWallet.walletAggregation.monthly_totals.find(m => m.month === currentMonthStr);
+      return Number(monthData?.total ?? 0).toFixed(2);
+    } else if (selectedTimeRange === "year") {
+      const yearTotal = dashboardWallet.walletAggregation.monthly_totals
+        .filter(m => m.month.startsWith(currentYear))
+        .reduce((sum, m) => sum + Number(m.total), 0);
+      return yearTotal.toFixed(2);
+    } else {
+      return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+    }
+  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, selectedTimeRange]);
+
+  const total = useMemo(() => {
+    const currency = (dashboardViewMode === "wallet" && dashboardWallet) ? dashboardWallet.wallet.currency : undefined;
+    return formatCurrency(totalVal, currency);
+  }, [totalVal, dashboardViewMode, dashboardWallet, formatCurrency]);
 
   const dashboardStats = useMemo<DashboardStats>(() => {
-    const expenseCount = dashboardVisibleExpenses.length;
-    const rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+    if (dashboardViewMode === "personal" || !dashboardWallet) {
+      const expenseCount = dashboardVisibleExpenses.length;
+      const rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+      const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
+
+      const categoryTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
+        accumulator[expense.category] = (accumulator[expense.category] ?? 0) + Number(expense.amount);
+        return accumulator;
+      }, {});
+
+      const categoryBreakdown = Object.entries(categoryTotals)
+        .sort((left, right) => right[1] - left[1])
+        .map(([category, amount]) => {
+          const platforms = Array.from(
+            new Set(
+              dashboardVisibleExpenses
+                .filter((e) => e.category === category && e.platform)
+                .map((e) => e.platform as string)
+            )
+          );
+          return {
+            category,
+            amount,
+            formattedAmount: formatCurrency(amount.toFixed(2)),
+            share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
+            platforms
+          };
+        });
+
+      const latestExpense = [...dashboardVisibleExpenses].sort((left, right) => {
+        const byDate = right.date.localeCompare(left.date);
+        return byDate !== 0 ? byDate : right.created_at.localeCompare(left.created_at);
+      })[0] ?? null;
+
+      const platformTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
+        if (expense.platform) {
+          accumulator[expense.platform] = (accumulator[expense.platform] ?? 0) + Number(expense.amount);
+        }
+        return accumulator;
+      }, {});
+
+      const sortedPlatforms = Object.entries(platformTotals).sort((left, right) => right[1] - left[1]);
+      const topPlatform = sortedPlatforms[0] ? {
+        platform: sortedPlatforms[0][0],
+        amount: sortedPlatforms[0][1],
+        formattedAmount: formatCurrency(sortedPlatforms[0][1].toFixed(2))
+      } : null;
+
+      return {
+        expenseCount,
+        average: formatCurrency(average.toFixed(2)),
+        topCategory: categoryBreakdown[0] ?? null,
+        latestExpense,
+        categoryBreakdown,
+        topPlatform
+      };
+    }
+
+    const agg = dashboardWallet.walletAggregation;
+    let activeCategories = agg.category_totals;
+    let expenseCount = agg.expense_count;
+    let rawTotal = Number(agg.total_amount);
+    
+    const today = new Date();
+    const currentYear = today.getFullYear().toString();
+    const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    
+    if (selectedTimeRange === "month") {
+      const currentMonthExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentMonthStr));
+      expenseCount = currentMonthExpenses.length;
+      rawTotal = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      
+      const categoryTotals: Record<string, number> = {};
+      for (const e of currentMonthExpenses) {
+        categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
+      }
+      activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
+        category,
+        total: amount.toFixed(2),
+        count: 0
+      })).sort((a, b) => Number(b.total) - Number(a.total));
+    } else if (selectedTimeRange === "year") {
+      const currentYearExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentYear));
+      expenseCount = currentYearExpenses.length;
+      rawTotal = currentYearExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      
+      const categoryTotals: Record<string, number> = {};
+      for (const e of currentYearExpenses) {
+        categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
+      }
+      activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
+        category,
+        total: amount.toFixed(2),
+        count: 0
+      })).sort((a, b) => Number(b.total) - Number(a.total));
+    } else if (selectedTimeRange === "week") {
+      expenseCount = dashboardVisibleExpenses.length;
+      rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+      
+      const categoryTotals: Record<string, number> = {};
+      for (const e of dashboardVisibleExpenses) {
+        categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
+      }
+      activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
+        category,
+        total: amount.toFixed(2),
+        count: 0
+      })).sort((a, b) => Number(b.total) - Number(a.total));
+    }
+
     const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
 
-    const categoryTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
-      accumulator[expense.category] = (accumulator[expense.category] ?? 0) + Number(expense.amount);
-      return accumulator;
-    }, {});
+    const categoryBreakdown = activeCategories.map((c) => {
+      const amt = Number(c.total);
+      const platforms = Array.from(
+        new Set(
+          dashboardWallet.expenses
+            .filter((e) => e.category === c.category && e.platform)
+            .map((e) => e.platform as string)
+        )
+      );
+      return {
+        category: c.category,
+        amount: amt,
+        formattedAmount: formatCurrency(amt.toFixed(2), dashboardWallet.wallet.currency),
+        share: rawTotal > 0 ? (amt / rawTotal) * 100 : 0,
+        platforms
+      };
+    });
 
-    const categoryBreakdown = Object.entries(categoryTotals)
-      .sort((left, right) => right[1] - left[1])
-      .map(([category, amount]) => {
-        const platforms = Array.from(
-          new Set(
-            dashboardVisibleExpenses
-              .filter((e) => e.category === category && e.platform)
-              .map((e) => e.platform as string)
-          )
-        );
-        return {
-          category,
-          amount,
-          formattedAmount: formatCurrency(amount.toFixed(2)),
-          share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
-          platforms
-        };
-      });
+    const latestExpense = dashboardWallet.expenses[0] ?? null;
 
-    const latestExpense = [...dashboardVisibleExpenses].sort((left, right) => {
-      const byDate = right.date.localeCompare(left.date);
-      return byDate !== 0 ? byDate : right.created_at.localeCompare(left.created_at);
-    })[0] ?? null;
-
-    const platformTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
+    const platformTotals = dashboardWallet.expenses.reduce<Record<string, number>>((accumulator, expense) => {
       if (expense.platform) {
         accumulator[expense.platform] = (accumulator[expense.platform] ?? 0) + Number(expense.amount);
       }
@@ -634,18 +798,18 @@ export function AppRoutes() {
     const topPlatform = sortedPlatforms[0] ? {
       platform: sortedPlatforms[0][0],
       amount: sortedPlatforms[0][1],
-      formattedAmount: formatCurrency(sortedPlatforms[0][1].toFixed(2))
+      formattedAmount: formatCurrency(sortedPlatforms[0][1].toFixed(2), dashboardWallet.wallet.currency)
     } : null;
 
     return {
       expenseCount,
-      average: formatCurrency(average.toFixed(2)),
+      average: formatCurrency(average.toFixed(2), dashboardWallet.wallet.currency),
       topCategory: categoryBreakdown[0] ?? null,
       latestExpense,
       categoryBreakdown,
       topPlatform
     };
-  }, [dashboardVisibleExpenses, formatCurrency]);
+  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, selectedTimeRange, formatCurrency]);
 
   const budgetSummaries = useMemo<BudgetSummary[]>(() => {
     return budgets
@@ -689,18 +853,12 @@ export function AppRoutes() {
       return budgetSummaries;
     }
 
-    const walletExpensesAsBudgetExpenses = dashboardWallet.expenses.map((we) => ({
-      amount: we.amount,
-      category: we.category,
-      date: we.date
-    }));
-
     return dashboardWallet.budgets
       .map((budget) => {
-        const spent = walletExpensesAsBudgetExpenses
-          .filter((expense) => getExpenseMonth(expense.date) === budget.month)
-          .filter((expense) => (budget.scope === "category" ? expense.category === budget.category : true))
-          .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        const spent = dashboardWallet.walletAggregation.budget_totals
+          .filter((entry) => entry.month === budget.month)
+          .filter((entry) => (budget.scope === "category" ? entry.category === budget.category : true))
+          .reduce((sum, entry) => sum + Number(entry.total), 0);
         const totalBudgetAmount = Number(budget.amount);
         const remaining = totalBudgetAmount - spent;
 
@@ -996,6 +1154,7 @@ export function AppRoutes() {
   }, [authLoading, currentUser]);
 
   useEffect(() => {
+    setWalletExpenseOffset(0);
     if (!currentUser || !selectedWalletId) {
       setSelectedWallet(null);
       return;
@@ -1513,6 +1672,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await createSharedWalletExpense(inputWalletId, input, currentUser);
+      setWalletExpenseOffset(0);
       await loadWallets(currentUser);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Shared expense added.");
@@ -1535,7 +1695,9 @@ export function AppRoutes() {
     startWalletSubmit("expense");
 
     try {
-      const wallet = await updateSharedWalletExpense(inputWalletId, walletExpenseId, input, currentUser);
+      await updateSharedWalletExpense(inputWalletId, walletExpenseId, input, currentUser);
+      const limit = walletExpenseOffset + 50;
+      const wallet = await getWalletDetail(inputWalletId, currentUser, 0, limit);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Shared expense updated.");
       return true;
@@ -1558,11 +1720,12 @@ export function AppRoutes() {
     startWalletSubmit("expense");
 
     try {
-      let finalWallet = selectedWallet;
       for (const expenseId of walletExpenseIds) {
-        finalWallet = await deleteSharedWalletExpense(inputWalletId, expenseId, currentUser);
+        await deleteSharedWalletExpense(inputWalletId, expenseId, currentUser);
       }
-      setSelectedWallet(finalWallet);
+      const limit = walletExpenseOffset + 50;
+      const wallet = await getWalletDetail(inputWalletId, currentUser, 0, limit);
+      setSelectedWallet(wallet);
       setWalletStatusMessage(`${walletExpenseIds.length} shared ${walletExpenseIds.length === 1 ? "expense" : "expenses"} deleted.`);
       return true;
     } catch (error) {
@@ -1583,6 +1746,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await createWalletSettlement(inputWalletId, input, currentUser);
+      setWalletExpenseOffset(0);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Settlement recorded.");
       return true;
@@ -1603,7 +1767,9 @@ export function AppRoutes() {
     startWalletSubmit("settlement");
 
     try {
-      const wallet = await updateWalletSettlementEntry(inputWalletId, settlementId, input, currentUser);
+      await updateWalletSettlementEntry(inputWalletId, settlementId, input, currentUser);
+      const limit = walletExpenseOffset + 50;
+      const wallet = await getWalletDetail(inputWalletId, currentUser, 0, limit);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Settlement updated.");
       return true;
@@ -1624,7 +1790,9 @@ export function AppRoutes() {
     startWalletSubmit("settlement");
 
     try {
-      const wallet = await deleteWalletSettlementEntry(inputWalletId, settlementId, currentUser);
+      await deleteWalletSettlementEntry(inputWalletId, settlementId, currentUser);
+      const limit = walletExpenseOffset + 50;
+      const wallet = await getWalletDetail(inputWalletId, currentUser, 0, limit);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Settlement deleted.");
       return true;
@@ -1633,6 +1801,29 @@ export function AppRoutes() {
       return false;
     } finally {
       endWalletSubmit();
+    }
+  }
+
+  async function handleLoadMoreWalletExpenses() {
+    if (!currentUser || !selectedWalletId || !selectedWallet) {
+      return;
+    }
+
+    const nextOffset = walletExpenseOffset + 50;
+    try {
+      setIsWalletLoading(true);
+      const moreData = await getWalletDetail(selectedWalletId, currentUser, nextOffset);
+      setSelectedWallet((prev) => prev ? {
+        ...prev,
+        expenses: [...prev.expenses, ...moreData.expenses],
+        expensePagination: moreData.expensePagination
+      } : null);
+      setWalletExpenseOffset(nextOffset);
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load more expenses.");
+      throw error;
+    } finally {
+      setIsWalletLoading(false);
     }
   }
 
@@ -2391,6 +2582,7 @@ export function AppRoutes() {
               onCreateWalletSettlement={handleCreateWalletSettlement}
               onUpdateWalletSettlement={handleUpdateWalletSettlement}
               onDeleteWalletSettlement={handleDeleteWalletSettlement}
+              onLoadMoreExpenses={handleLoadMoreWalletExpenses}
             />
           ) : page === "alerts" ? (
             <AlertsPage

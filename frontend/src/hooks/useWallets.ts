@@ -6,7 +6,7 @@ import * as api from "../services/api";
 export function useWallets() {
   return {
     listWallets: useCallback((user: User) => api.listWallets(user), []),
-    getWalletDetail: useCallback((walletId: string, user: User) => api.getWalletDetail(walletId, user), []),
+    getWalletDetail: useCallback((walletId: string, user: User, expenseOffset?: number, expenseLimit?: number) => api.getWalletDetail(walletId, user, expenseOffset, expenseLimit), []),
     createWallet: useCallback((input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }, user: User) => api.createWallet(input, user), []),
     updateWallet: useCallback((walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; members: Array<{ displayName: string; email?: string }> }, user: User) => api.updateWallet(walletId, input, user), []),
     deleteWalletGroup: useCallback((walletId: string, user: User) => api.deleteWalletGroup(walletId, user), []),
