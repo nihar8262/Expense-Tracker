@@ -5,6 +5,7 @@ import { PlatformPicker } from "../components/PlatformPicker";
 import { PLATFORMS } from "../lib/platforms";
 import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
 import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
+import { formatBudgetMonth } from "../utils/format";
 
 type ExpensesPageProps = {
   currentUserPresent: boolean;
@@ -20,6 +21,7 @@ type ExpensesPageProps = {
   selectedPlatform: string;
   sortNewestFirst: boolean;
   categories: string[];
+  expenseMonthOptions: string[];
   visibleExpenses: Expense[];
   totalVisibleExpenses: number;
   currentExpensesPage: number;
@@ -79,6 +81,7 @@ export function ExpensesPage({
   selectedPlatform,
   sortNewestFirst,
   categories,
+  expenseMonthOptions,
   visibleExpenses,
   totalVisibleExpenses,
   currentExpensesPage,
@@ -177,7 +180,11 @@ export function ExpensesPage({
   const hasValidationErrors = Object.values(validationErrors).some(Boolean);
   const activeFilters = [
     selectedCategory ? `Category: ${selectedCategory}` : null,
-    selectedTimeRange !== "all" ? `Range: ${selectedTimeRange}` : null,
+    selectedTimeRange !== "all"
+      ? /^\d{4}-\d{2}$/.test(selectedTimeRange)
+        ? `Month: ${formatBudgetMonth(selectedTimeRange)}`
+        : `Range: ${selectedTimeRange}`
+      : null,
     selectedPlatform ? `Platform: ${selectedPlatform === "none" ? "None" : (PLATFORMS.find(p => p.id === selectedPlatform)?.name ?? selectedPlatform)}` : null,
     !sortNewestFirst ? "Sort: created order" : null
   ].filter(Boolean) as string[];
@@ -436,18 +443,29 @@ export function ExpensesPage({
           </label>
 
           <label className="grid gap-2 text-sm font-medium text-secondary">
-            Range
-            <select value={selectedTimeRange} disabled={!currentUserPresent} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
-              <option value="all">All time</option>
-              <option value="week">This week</option>
-              <option value="month">This month</option>
-              <option value="year">This year</option>
+            Month
+            <select
+              value={selectedTimeRange}
+              disabled={!currentUserPresent}
+              onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}
+            >
+              <option value="all">All months</option>
+              {expenseMonthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {formatBudgetMonth(m)}
+                </option>
+              ))}
             </select>
           </label>
         </div>
         <div className="flex flex-col gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-6 text-secondary">{activeFilters.length > 0 ? `Showing: ${activeFilters.join(" • ")}` : "Showing: All categories • All time • Newest first"}</p>
-          <button type="button" className="ui-button-ghost" disabled={activeFilters.length === 0} onClick={onClearFilters}>
+          <button
+            type="button"
+            className={activeFilters.length > 0 ? "ui-button-primary" : "ui-button-ghost"}
+            disabled={activeFilters.length === 0}
+            onClick={onClearFilters}
+          >
             Clear filters
           </button>
         </div>

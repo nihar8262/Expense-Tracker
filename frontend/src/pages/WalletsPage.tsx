@@ -2616,19 +2616,36 @@ export function WalletsPage({
                         <p className="text-sm leading-7 text-secondary">
                           {filteredExpenses.length} expense{filteredExpenses.length !== 1 ? "s" : ""} found
                           {selectedWallet?.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
-                            <span className="block text-xs text-amber-600 font-semibold mt-1">
-                              Showing only {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please close filters and load more to see older data.
+                            <span className="block text-xs text-amber-600 font-medium mt-1">
+                              Showing {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses.
                             </span>
                           ) : null}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="ui-button-secondary shrink-0"
-                        onClick={() => setIsExpenseModalOpen(false)}
-                      >
-                        Close
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {selectedWallet?.expensePagination?.hasMore ? (
+                          <button
+                            type="button"
+                            className="ui-button-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
+                            onClick={onLoadMoreExpenses}
+                            disabled={isLoading}
+                            title="Load 50 more older expenses"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
+                              <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                            </svg>
+                            <span className="hidden sm:inline">{isLoading ? "Loading..." : "Load More"}</span>
+                            <span className="inline sm:hidden">{isLoading ? "..." : "+50"}</span>
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="ui-button-secondary shrink-0"
+                          onClick={() => setIsExpenseModalOpen(false)}
+                        >
+                          Close
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
@@ -2703,9 +2720,33 @@ export function WalletsPage({
                   </div>
                   <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
                     {filteredExpenses.length === 0 ? (
-                      <p className="py-8 text-center text-sm text-muted">
-                        No expenses match the current filters.
-                      </p>
+                      <div className="flex flex-col items-center justify-center py-10 text-center">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-amber-50 text-amber-500 mb-4">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                          </svg>
+                        </div>
+                        <p className="text-sm font-semibold text-ink">No matches in loaded data</p>
+                        <p className="mt-1 max-w-xs text-xs text-secondary">
+                          None of the {selectedWallet.expenses.length} loaded expenses match these filters.
+                          {selectedWallet.expensePagination?.hasMore
+                            ? " Use \"Load More\" above to fetch older data and search further back."
+                            : " All available data has been loaded."}
+                        </p>
+                        {selectedWallet.expensePagination?.hasMore ? (
+                          <button
+                            type="button"
+                            className="ui-button-secondary mt-5 flex items-center gap-2 text-sm"
+                            onClick={onLoadMoreExpenses}
+                            disabled={isLoading}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                              <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                            </svg>
+                            {isLoading ? "Loading older history..." : "Load older history"}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : (
                       <>
                         {/* Desktop View */}

@@ -139,6 +139,11 @@ function isExpenseInTimeRange(expenseDate: string, timeRange: TimeRangeFilter): 
     return false;
   }
 
+  // Exact YYYY-MM calendar month match (new month picker)
+  if (/^\d{4}-\d{2}$/.test(timeRange)) {
+    return expenseDate.slice(0, 7) === timeRange;
+  }
+
   if (timeRange === "week") {
     const startOfWeek = new Date(today);
     const day = startOfWeek.getDay();
@@ -556,6 +561,12 @@ export function AppRoutes() {
   const allVisibleExpenseIds = useMemo(() => paginatedExpenses.map((expense) => expense.id), [paginatedExpenses]);
   const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
   const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
+
+  // Derive sorted unique YYYY-MM month strings from all expenses for the month picker
+  const expenseMonthOptions = useMemo(() => {
+    const months = [...new Set(expenses.map((e) => e.date.slice(0, 7)))].sort((a, b) => b.localeCompare(a));
+    return months;
+  }, [expenses]);
 
   const spendTrend = useMemo(() => {
     if (dashboardViewMode === "personal" || !dashboardWallet) {
@@ -2518,6 +2529,7 @@ export function AppRoutes() {
               selectedPlatform={selectedPlatform}
               sortNewestFirst={sortNewestFirst}
               categories={categories}
+              expenseMonthOptions={expenseMonthOptions}
               visibleExpenses={paginatedExpenses}
               totalVisibleExpenses={visibleExpenses.length}
               currentExpensesPage={currentExpensesPage}

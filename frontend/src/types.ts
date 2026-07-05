@@ -218,7 +218,8 @@ export type ProviderOption = {
 	provider: AuthProvider;
 };
 
-export type TimeRangeFilter = "all" | "week" | "month" | "year";
+/** "all" = no filter; "week"/"month"/"year" = relative ranges; "YYYY-MM" = exact calendar month */
+export type TimeRangeFilter = "all" | "week" | "month" | "year" | (string & {});
 export type ChartGranularity = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 export type ChartDisplayType = "area" | "bar";
 export type CategoryIconId = string;
