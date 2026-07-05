@@ -148,6 +148,20 @@ export function DashboardPage({
   const pieChartData = useMemo(() => {
     if (!selectedCategoryBreakdown) return [];
 
+    const catItem = dashboardStats.categoryBreakdown.find((item) => item.category === selectedCategoryBreakdown);
+    if (catItem && catItem.platformShares) {
+      const data = catItem.platformShares.map((share) => {
+        const platform = PLATFORMS.find((p) => p.id === share.platform);
+        return {
+          id: share.platform,
+          name: platform ? platform.name : share.platform,
+          value: share.amount,
+          logo: platform?.logo || null
+        };
+      });
+      return data.sort((a, b) => b.value - a.value);
+    }
+
     const categoryExpenses = activeExpenses.filter((e) => e.category === selectedCategoryBreakdown);
     const platformSums: Record<string, number> = {};
     let othersSum = 0;
@@ -181,7 +195,7 @@ export function DashboardPage({
     }
 
     return data.sort((a, b) => b.value - a.value);
-  }, [activeExpenses, selectedCategoryBreakdown]);
+  }, [activeExpenses, selectedCategoryBreakdown, dashboardStats.categoryBreakdown]);
 
   const pieChartColors = ["#1e7a53", "#d4a857", "#2e9a6e", "#e2b86c", "#41b585", "#5ca890", "#829085"];
 

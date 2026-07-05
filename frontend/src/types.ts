@@ -115,6 +115,7 @@ export type WalletAggregationCategory = {
 	total: string;
 	count: number;
 	platforms?: string[];
+	platform_shares?: { platform: string; total: string }[];
 };
 
 export type WalletAggregationBudget = {
@@ -253,6 +254,7 @@ export type CategoryBreakdownItem = {
 	formattedAmount: string;
 	share: number;
 	platforms: string[];
+	platformShares?: { platform: string; amount: number }[];
 };
 
 export type TopPlatformItem = {

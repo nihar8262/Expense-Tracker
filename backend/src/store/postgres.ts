@@ -1040,6 +1040,30 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     ORDER BY total_minor DESC
   `;
 
+  const categoryPlatformRows = await db<{
+    category: string;
+    platform: string;
+    total_minor: string | number;
+  }[]>`
+    SELECT
+      category,
+      COALESCE(NULLIF(platform, ''), 'others') AS platform,
+      COALESCE(SUM(amount_minor), 0) AS total_minor
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY category, platform
+  `;
+
+  const platformSharesByCategory = new Map<string, { platform: string; total: string }[]>();
+  for (const r of categoryPlatformRows) {
+    const shares = platformSharesByCategory.get(r.category) ?? [];
+    shares.push({
+      platform: r.platform,
+      total: formatMinorUnits(Number(r.total_minor))
+    });
+    platformSharesByCategory.set(r.category, shares);
+  }
+
   const budgetTotalsRows = await db<{
     month: string;
     category: string | null;
@@ -1067,7 +1091,8 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     category: r.category,
     total: formatMinorUnits(Number(r.total_minor)),
     count: Number(r.expense_count),
-    platforms: r.platforms_str ? r.platforms_str.split(",") : []
+    platforms: r.platforms_str ? r.platforms_str.split(",") : [],
+    platform_shares: platformSharesByCategory.get(r.category) ?? []
   }));
 
   const budgetTotals = budgetTotalsRows.map((r) => ({

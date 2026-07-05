@@ -587,6 +587,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       }));
 
     const categoryMap = new Map<string, { totalMinor: number; count: number; platforms: Set<string> }>();
+    const categoryPlatformMap = new Map<string, Map<string, number>>();
     for (const exp of allExpenses) {
       const category = exp.category;
       const curr = categoryMap.get(category) ?? { totalMinor: 0, count: 0, platforms: new Set<string>() };
@@ -594,15 +595,30 @@ export function createMemoryExpenseStore(): ExpenseStore {
       curr.count += 1;
       curr.platforms.add(exp.platform || "others");
       categoryMap.set(category, curr);
+
+      const catPlats = categoryPlatformMap.get(category) ?? new Map<string, number>();
+      const plat = exp.platform || "others";
+      catPlats.set(plat, (catPlats.get(plat) ?? 0) + exp.amountMinor);
+      categoryPlatformMap.set(category, catPlats);
     }
     const categoryTotals = [...categoryMap.entries()]
       .sort((a, b) => b[1].totalMinor - a[1].totalMinor)
-      .map(([category, data]) => ({
-        category,
-        total: formatMinorUnits(data.totalMinor),
-        count: data.count,
-        platforms: Array.from(data.platforms)
-      }));
+      .map(([category, data]) => {
+        const sharesMap = categoryPlatformMap.get(category);
+        const platform_shares = sharesMap
+          ? [...sharesMap.entries()].map(([platform, amountMinor]) => ({
+              platform,
+              total: formatMinorUnits(amountMinor)
+            }))
+          : [];
+        return {
+          category,
+          total: formatMinorUnits(data.totalMinor),
+          count: data.count,
+          platforms: Array.from(data.platforms),
+          platform_shares
+        };
+      });
 
     // Group by month and category
     const budgetMap = new Map<string, number>(); // key: "month:category"

@@ -824,12 +824,16 @@ export function AppRoutes() {
                 .map((e) => e.platform || "others")
             )
           );
+      const platformShares = c.platform_shares && c.platform_shares.length > 0
+        ? c.platform_shares.map(p => ({ platform: p.platform, amount: Number(p.total) }))
+        : undefined;
       return {
         category: c.category,
         amount: amt,
         formattedAmount: formatCurrency(amt.toFixed(2), dashboardWallet.wallet.currency),
         share: rawTotal > 0 ? (amt / rawTotal) * 100 : 0,
-        platforms
+        platforms,
+        platformShares
       };
     });
 
