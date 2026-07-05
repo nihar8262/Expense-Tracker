@@ -640,6 +640,98 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     ORDER BY net_amount_minor DESC
   `;
 
+  const walletAggregationRows = await sql`
+    SELECT
+      COALESCE(SUM(amount_minor), 0) AS total_amount_minor,
+      COUNT(*)::int AS expense_count
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+  `;
+
+  const monthlyTotalsRows = await sql`
+    SELECT
+      TO_CHAR(expense_date, 'YYYY-MM') AS month,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY TO_CHAR(expense_date, 'YYYY-MM')
+    ORDER BY month ASC
+  `;
+
+  const categoryTotalsRows = await sql`
+    SELECT
+      category,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count,
+      ARRAY_TO_STRING(ARRAY_AGG(DISTINCT COALESCE(NULLIF(platform, ''), 'others')), ',') AS platforms_str
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY category
+    ORDER BY total_minor DESC
+  `;
+
+  const categoryPlatformRows = await sql`
+    SELECT
+      category,
+      COALESCE(NULLIF(platform, ''), 'others') AS platform,
+      COALESCE(SUM(amount_minor), 0) AS total_minor
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY category, platform
+  `;
+
+  const platformSharesByCategory = new Map();
+  for (const r of categoryPlatformRows) {
+    const shares = platformSharesByCategory.get(r.category) ?? [];
+    shares.push({
+      platform: r.platform,
+      total: formatMinorUnits(Number(r.total_minor))
+    });
+    platformSharesByCategory.set(r.category, shares);
+  }
+
+  const budgetTotalsRows = await sql`
+    SELECT
+      TO_CHAR(expense_date, 'YYYY-MM') AS month,
+      category,
+      COALESCE(SUM(amount_minor), 0) AS total_minor
+    FROM wallet_expenses
+    WHERE wallet_id = ${walletId}
+    GROUP BY TO_CHAR(expense_date, 'YYYY-MM'), category
+  `;
+
+  const totalAmount = formatMinorUnits(Number(walletAggregationRows[0]?.total_amount_minor ?? 0));
+  const totalCount = Number(walletAggregationRows[0]?.expense_count ?? 0);
+
+  const monthlyTotals = monthlyTotalsRows.map((r) => ({
+    month: r.month,
+    total: formatMinorUnits(Number(r.total_minor)),
+    count: Number(r.expense_count)
+  }));
+
+  const categoryTotals = categoryTotalsRows.map((r) => ({
+    category: r.category,
+    total: formatMinorUnits(Number(r.total_minor)),
+    count: Number(r.expense_count),
+    platforms: r.platforms_str ? r.platforms_str.split(",") : [],
+    platform_shares: platformSharesByCategory.get(r.category) ?? []
+  }));
+
+  const budgetTotals = budgetTotalsRows.map((r) => ({
+    month: r.month,
+    category: r.category,
+    total: formatMinorUnits(Number(r.total_minor))
+  }));
+
+  const walletAggregation = {
+    total_amount: totalAmount,
+    expense_count: totalCount,
+    monthly_totals: monthlyTotals,
+    category_totals: categoryTotals,
+    budget_totals: budgetTotals
+  };
+
   return {
     wallet: mapWallet(walletRows[0]),
     members: members.map(mapWalletMember),
@@ -647,6 +739,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), platform: expense.platform ?? null, splits: splitMap.get(expense.id) ?? [] })),
     balances: balanceRows.map((balance) => ({ member_id: balance.member_id, member_name: balance.member_name, net_amount: formatMinorUnits(Number(balance.net_amount_minor)) })),
     settlements: settlementRows.map((settlement) => ({ id: settlement.id, wallet_id: settlement.wallet_id, from_member_id: settlement.from_member_id, from_member_name: settlement.from_member_name, to_member_id: settlement.to_member_id, to_member_name: settlement.to_member_name, amount: formatMinorUnits(Number(settlement.amount_minor)), date: asIsoDate(settlement.settlement_date), note: settlement.note, created_at: asIsoTimestamp(settlement.created_at) })),
+    walletAggregation,
     expensePagination: {
       limit: pagination.expenseLimit,
       offset: pagination.expenseOffset,
