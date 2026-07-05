@@ -586,12 +586,13 @@ export function createMemoryExpenseStore(): ExpenseStore {
         count: data.count
       }));
 
-    const categoryMap = new Map<string, { totalMinor: number; count: number }>();
+    const categoryMap = new Map<string, { totalMinor: number; count: number; platforms: Set<string> }>();
     for (const exp of allExpenses) {
       const category = exp.category;
-      const curr = categoryMap.get(category) ?? { totalMinor: 0, count: 0 };
+      const curr = categoryMap.get(category) ?? { totalMinor: 0, count: 0, platforms: new Set<string>() };
       curr.totalMinor += exp.amountMinor;
       curr.count += 1;
+      curr.platforms.add(exp.platform || "others");
       categoryMap.set(category, curr);
     }
     const categoryTotals = [...categoryMap.entries()]
@@ -599,7 +600,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       .map(([category, data]) => ({
         category,
         total: formatMinorUnits(data.totalMinor),
-        count: data.count
+        count: data.count,
+        platforms: Array.from(data.platforms)
       }));
 
     // Group by month and category

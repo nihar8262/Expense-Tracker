@@ -112,6 +112,7 @@ export type WalletAggregationCategoryRecord = {
   category: string;
   total: string;
   count: number;
+  platforms?: string[];
 };
 
 export type WalletAggregationBudgetRecord = {

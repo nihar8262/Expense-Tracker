@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Component } from "react";
+import type { ReactNode } from "react";
 import { updateProfile, type User } from "firebase/auth";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useAuth, providerOptions } from "../hooks/useAuth";
@@ -125,6 +126,40 @@ function isBudgetMonthInRange(month: string, range: BudgetHistoryRange): boolean
   }
 
   return monthDiff <= 11;
+}
+
+// ── Error boundary to surface render crashes instead of showing a blank page ──
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4 p-8 text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-10 text-amber-500">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+          </svg>
+          <h2 className="text-lg font-semibold text-ink">Something went wrong</h2>
+          <p className="text-sm text-secondary max-w-sm">{this.state.error.message}</p>
+          <button
+            type="button"
+            className="ui-button-secondary mt-2"
+            onClick={() => this.setState({ error: null })}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function isExpenseInTimeRange(expenseDate: string, timeRange: TimeRangeFilter): boolean {
@@ -573,7 +608,7 @@ export function AppRoutes() {
       return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
     }
 
-    if (chartGranularity === "monthly") {
+    if (chartGranularity === "monthly" && dashboardWallet.walletAggregation?.monthly_totals) {
       const today = new Date();
       const currentYear = today.getFullYear().toString();
 
@@ -637,7 +672,7 @@ export function AppRoutes() {
   }, [spendTrend]);
 
   const totalVal = useMemo(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
     }
      
@@ -666,7 +701,7 @@ export function AppRoutes() {
   }, [totalVal, dashboardViewMode, dashboardWallet, formatCurrency]);
 
   const dashboardStats = useMemo<DashboardStats>(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
       const expenseCount = dashboardVisibleExpenses.length;
       const rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
       const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
@@ -682,8 +717,8 @@ export function AppRoutes() {
           const platforms = Array.from(
             new Set(
               dashboardVisibleExpenses
-                .filter((e) => e.category === category && e.platform)
-                .map((e) => e.platform as string)
+                .filter((e) => e.category === category)
+                .map((e) => e.platform || "others")
             )
           );
           return {
@@ -780,13 +815,15 @@ export function AppRoutes() {
 
     const categoryBreakdown = activeCategories.map((c) => {
       const amt = Number(c.total);
-      const platforms = Array.from(
-        new Set(
-          dashboardWallet.expenses
-            .filter((e) => e.category === c.category && e.platform)
-            .map((e) => e.platform as string)
-        )
-      );
+      const platforms = c.platforms && c.platforms.length > 0
+        ? c.platforms
+        : Array.from(
+            new Set(
+              dashboardWallet.expenses
+                .filter((e) => e.category === c.category)
+                .map((e) => e.platform || "others")
+            )
+          );
       return {
         category: c.category,
         amount: amt,
@@ -860,7 +897,7 @@ export function AppRoutes() {
   const currentBudgetMonth = getCurrentMonthValue();
 
   const dashboardBudgetSummaries = useMemo<BudgetSummary[]>(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
       return budgetSummaries;
     }
 
@@ -1179,14 +1216,9 @@ export function AppRoutes() {
       setDashboardWallet(null);
       return;
     }
-
-    if (selectedWallet && selectedWallet.wallet.id === dashboardWalletId) {
-      setDashboardWallet(selectedWallet);
-      return;
-    }
-
+    // Always fetch fresh from API for dashboard — ensures walletAggregation is present
     getWalletDetail(dashboardWalletId, currentUser).then(setDashboardWallet).catch(() => setDashboardWallet(null));
-  }, [currentUser, dashboardViewMode, dashboardWalletId, selectedWallet]);
+  }, [currentUser, dashboardViewMode, dashboardWalletId]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
@@ -2465,7 +2497,8 @@ export function AppRoutes() {
         onDeleteAccount={handleDeleteAccount}
       >
         {page === "dashboard" ? (
-          <DashboardPage
+          <ErrorBoundary>
+            <DashboardPage
             activeExpenses={dashboardVisibleExpenses}
             categories={dashboardViewMode === "wallet" ? dashboardCategories : categories}
             dashboardInsights={dashboardInsights}
@@ -2514,6 +2547,7 @@ export function AppRoutes() {
             onChartDisplayTypeChange={setChartDisplayType}
             onChartGranularityChange={setChartGranularity}
           />
+          </ErrorBoundary>
         ) : page === "expenses" ? (
             <ExpensesPage
               currentUserPresent={Boolean(currentUser)}

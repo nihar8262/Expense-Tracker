@@ -1027,11 +1027,13 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     category: string;
     total_minor: string | number;
     expense_count: string | number;
+    platforms_str: string | null;
   }[]>`
     SELECT
       category,
       COALESCE(SUM(amount_minor), 0) AS total_minor,
-      COUNT(*)::int AS expense_count
+      COUNT(*)::int AS expense_count,
+      ARRAY_TO_STRING(ARRAY_AGG(DISTINCT COALESCE(NULLIF(platform, ''), 'others')), ',') AS platforms_str
     FROM wallet_expenses
     WHERE wallet_id = ${walletId}
     GROUP BY category
@@ -1064,7 +1066,8 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
   const categoryTotals = categoryTotalsRows.map((r) => ({
     category: r.category,
     total: formatMinorUnits(Number(r.total_minor)),
-    count: Number(r.expense_count)
+    count: Number(r.expense_count),
+    platforms: r.platforms_str ? r.platforms_str.split(",") : []
   }));
 
   const budgetTotals = budgetTotalsRows.map((r) => ({
