@@ -1,5 +1,5 @@
 const { listExpenses, createExpense } = require("./personal-expenses");
-const { listWalletsForUser, getWalletForUser } = require("./finance");
+const { listWalletsForUser, getWalletForUser, getWalletExpensesForUser } = require("./finance");
 const { randomUUID } = require("node:crypto");
 
 const tools = [
@@ -155,6 +155,126 @@ const tools = [
           date: e.date,
           paid_by: e.paid_by_member_name
         }))
+      };
+    }
+  },
+  {
+    name: "list_wallet_expenses",
+    description: "Retrieve a list of expenses for a specific shared wallet, optionally filtered by category and/or date range (startDate/endDate).",
+    parameters: {
+      type: "object",
+      properties: {
+        walletId: {
+          type: "string",
+          description: "The unique UUID of the shared wallet."
+        },
+        category: {
+          type: "string",
+          description: "Optional category to filter expenses by."
+        },
+        startDate: {
+          type: "string",
+          description: "Optional start date in YYYY-MM-DD format."
+        },
+        endDate: {
+          type: "string",
+          description: "Optional end date in YYYY-MM-DD format."
+        }
+      },
+      required: ["walletId"]
+    },
+    handler: async (args, userId) => {
+      const result = await getWalletExpensesForUser(userId, args.walletId);
+      if (result.status !== 200) {
+        throw new Error(result.body?.error || "Failed to retrieve wallet expenses.");
+      }
+      let expenses = result.body.expenses || [];
+      if (args.category) {
+        expenses = expenses.filter(e => e.category?.toLowerCase() === args.category.toLowerCase());
+      }
+      if (args.startDate) {
+        expenses = expenses.filter(e => e.date >= args.startDate);
+      }
+      if (args.endDate) {
+        expenses = expenses.filter(e => e.date <= args.endDate);
+      }
+      return { expenses };
+    }
+  },
+  {
+    name: "get_wallet_expense_summary",
+    description: "Retrieve aggregated spending statistics (total spent, category breakdown, count, platform spends) for a specific shared wallet, optionally filtered by date range and/or category.",
+    parameters: {
+      type: "object",
+      properties: {
+        walletId: {
+          type: "string",
+          description: "The unique UUID of the shared wallet."
+        },
+        category: {
+          type: "string",
+          description: "Optional category to filter summary by."
+        },
+        startDate: {
+          type: "string",
+          description: "Optional start date in YYYY-MM-DD format."
+        },
+        endDate: {
+          type: "string",
+          description: "Optional end date in YYYY-MM-DD format."
+        }
+      },
+      required: ["walletId"]
+    },
+    handler: async (args, userId) => {
+      const result = await getWalletExpensesForUser(userId, args.walletId);
+      if (result.status !== 200) {
+        throw new Error(result.body?.error || "Failed to retrieve wallet expenses for summary.");
+      }
+      let expenses = result.body.expenses || [];
+      if (args.category) {
+        expenses = expenses.filter(e => e.category?.toLowerCase() === args.category.toLowerCase());
+      }
+      if (args.startDate) {
+        expenses = expenses.filter(e => e.date >= args.startDate);
+      }
+      if (args.endDate) {
+        expenses = expenses.filter(e => e.date <= args.endDate);
+      }
+
+      let totalCents = 0;
+      const categoryBreakdown = {};
+      const platformBreakdown = {};
+
+      for (const e of expenses) {
+        const amountNum = parseFloat(e.amount);
+        if (!isNaN(amountNum)) {
+          totalCents += Math.round(amountNum * 100);
+          const cat = e.category || "Uncategorized";
+          categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + amountNum;
+          if (e.platform) {
+            platformBreakdown[e.platform] = (platformBreakdown[e.platform] || 0) + amountNum;
+          }
+        }
+      }
+
+      const total = (totalCents / 100).toFixed(2);
+      for (const cat in categoryBreakdown) {
+        categoryBreakdown[cat] = categoryBreakdown[cat].toFixed(2);
+      }
+      for (const plat in platformBreakdown) {
+        platformBreakdown[plat] = platformBreakdown[plat].toFixed(2);
+      }
+
+      return {
+        total,
+        count: expenses.length,
+        categoryBreakdown,
+        platformBreakdown,
+        period: {
+          startDate: args.startDate || "all time",
+          endDate: args.endDate || "present"
+        }
       };
     }
   },

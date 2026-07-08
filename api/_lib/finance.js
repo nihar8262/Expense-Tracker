@@ -886,6 +886,38 @@ async function getWalletForUser(userId, walletId, query = {}) {
   return { status: 200, body: { wallet: await loadWalletDetail(sql, walletId, parseWalletHistoryPagination(query)) } };
 }
 
+async function getWalletExpensesForUser(userId, walletId, filters = {}) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  await ensureWalletAccess(sql, userId, walletId);
+
+  const query = sql`
+    SELECT wallet_expenses.id, wallet_expenses.wallet_id, payer.display_name AS paid_by_member_name, 
+           wallet_expenses.amount_minor, wallet_expenses.category, wallet_expenses.description, 
+           wallet_expenses.expense_date, wallet_expenses.split_rule, wallet_expenses.platform
+    FROM wallet_expenses
+    INNER JOIN wallet_members AS payer ON payer.id = wallet_expenses.paid_by_member_id
+    WHERE wallet_expenses.wallet_id = ${walletId}
+    ORDER BY wallet_expenses.expense_date DESC, wallet_expenses.created_at DESC
+  `;
+
+  const rows = await query;
+  return {
+    status: 200,
+    body: {
+      expenses: rows.map(r => ({
+        id: r.id,
+        amount: (Number(r.amount_minor) / 100).toFixed(2),
+        category: r.category,
+        description: r.description,
+        date: r.expense_date,
+        paid_by: r.paid_by_member_name,
+        platform: r.platform
+      }))
+    }
+  };
+}
+
 async function deleteWalletForUser(userId, walletId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
@@ -1746,6 +1778,7 @@ module.exports = {
   createWalletForUser,
   updateWalletForUser,
   getWalletForUser,
+  getWalletExpensesForUser,
   deleteWalletForUser,
   leaveWalletForUser,
   createWalletBudgetForUser,

@@ -151,6 +151,137 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
       }
     },
     {
+      name: "list_wallet_expenses",
+      description: "Retrieve a list of expenses for a specific shared wallet, optionally filtered by category and/or date range (startDate/endDate).",
+      parameters: {
+        type: "object",
+        properties: {
+          walletId: {
+            type: "string",
+            description: "The unique UUID of the shared wallet."
+          },
+          category: {
+            type: "string",
+            description: "Optional category to filter expenses by."
+          },
+          startDate: {
+            type: "string",
+            description: "Optional start date in YYYY-MM-DD format."
+          },
+          endDate: {
+            type: "string",
+            description: "Optional end date in YYYY-MM-DD format."
+          }
+        },
+        required: ["walletId"]
+      },
+      handler: async (args: any, userId: string) => {
+        const wDetail = await store.getWallet(userId, args.walletId, {
+          expenseLimit: 100,
+          expenseOffset: 0,
+          settlementLimit: 1,
+          settlementOffset: 0
+        });
+        let expenses = wDetail.expenses || [];
+        if (args.category) {
+          expenses = expenses.filter(e => e.category?.toLowerCase() === args.category.toLowerCase());
+        }
+        if (args.startDate) {
+          expenses = expenses.filter(e => e.date >= args.startDate);
+        }
+        if (args.endDate) {
+          expenses = expenses.filter(e => e.date <= args.endDate);
+        }
+        return {
+          expenses: expenses.map(e => ({
+            id: e.id,
+            amount: e.amount,
+            category: e.category,
+            description: e.description,
+            date: e.date,
+            paid_by: e.paid_by_member_name,
+            platform: e.platform
+          }))
+        };
+      }
+    },
+    {
+      name: "get_wallet_expense_summary",
+      description: "Retrieve aggregated spending statistics (total spent, category breakdown, count, platform spends) for a specific shared wallet, optionally filtered by date range and/or category.",
+      parameters: {
+        type: "object",
+        properties: {
+          walletId: {
+            type: "string",
+            description: "The unique UUID of the shared wallet."
+          },
+          category: {
+            type: "string",
+            description: "Optional category to filter summary by."
+          },
+          startDate: {
+            type: "string",
+            description: "Optional start date in YYYY-MM-DD format."
+          },
+          endDate: {
+            type: "string",
+            description: "Optional end date in YYYY-MM-DD format."
+          }
+        },
+        required: ["walletId"]
+      },
+      handler: async (args: any, userId: string) => {
+        const wDetail = await store.getWallet(userId, args.walletId, {
+          expenseLimit: 100,
+          expenseOffset: 0,
+          settlementLimit: 1,
+          settlementOffset: 0
+        });
+        let expenses = wDetail.expenses || [];
+        if (args.category) {
+          expenses = expenses.filter(e => e.category?.toLowerCase() === args.category.toLowerCase());
+        }
+        if (args.startDate) {
+          expenses = expenses.filter(e => e.date >= args.startDate);
+        }
+        if (args.endDate) {
+          expenses = expenses.filter(e => e.date <= args.endDate);
+        }
+
+        let totalCents = 0;
+        const categoryBreakdown: Record<string, string> = {};
+        const platformBreakdown: Record<string, string> = {};
+
+        for (const e of expenses) {
+          const amountNum = parseFloat(e.amount);
+          if (!isNaN(amountNum)) {
+            totalCents += Math.round(amountNum * 100);
+            const cat = e.category || "Uncategorized";
+            const currentCatTotal = parseFloat(categoryBreakdown[cat] || "0");
+            categoryBreakdown[cat] = (currentCatTotal + amountNum).toFixed(2);
+
+            if (e.platform) {
+              const currentPlatTotal = parseFloat(platformBreakdown[e.platform] || "0");
+              platformBreakdown[e.platform] = (currentPlatTotal + amountNum).toFixed(2);
+            }
+          }
+        }
+
+        const total = (totalCents / 100).toFixed(2);
+
+        return {
+          total,
+          count: expenses.length,
+          categoryBreakdown,
+          platformBreakdown,
+          period: {
+            startDate: args.startDate || "all time",
+            endDate: args.endDate || "present"
+          }
+        };
+      }
+    },
+    {
       name: "create_expense",
       description: "Create a new personal expense. This is a write operation and requires confirmation.",
       parameters: {
