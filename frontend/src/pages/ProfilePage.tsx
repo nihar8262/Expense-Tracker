@@ -617,7 +617,7 @@ export function ProfilePage({
                         </td>
                         <td className="py-3 pr-4">
                           {tok.last_used_at
-                            ? new Date(tok.last_used_at).toLocaleDateString(undefined, {
+                            ? new Date(tok.last_used_at).toLocaleString(undefined, {
                                 dateStyle: "medium",
                                 timeStyle: "short"
                               })
