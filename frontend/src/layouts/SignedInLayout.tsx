@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from "react";
+import { useState, type ReactNode, RefObject } from "react";
 import { NavLink } from "react-router-dom";
 import type { User } from "firebase/auth";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -99,9 +99,12 @@ export function SignedInLayout({
   onDeleteAccount,
   children
 }: SignedInLayoutProps) {
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+
   const handleNavClick = () => {
     onCloseProfileMenu();
     onCloseNotificationPanel();
+    setIsAssistantOpen(false); // Auto-close assistant on navigation
   };
 
   return (
@@ -129,15 +132,20 @@ export function SignedInLayout({
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <NavLink
-              to="/alerts"
-              onClick={handleNavClick}
-              className={({ isActive }) => cn("relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-[color:var(--border)] bg-white/75 text-secondary shadow-sm backdrop-blur-sm hover:bg-white lg:hidden", isActive && "bg-white text-primary")}
-              aria-label="Notifications"
+            <button
+              onClick={() => {
+                onCloseProfileMenu();
+                onCloseNotificationPanel();
+                setIsAssistantOpen(!isAssistantOpen);
+              }}
+              className={cn(
+                "relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-[color:var(--border)] bg-white/75 shadow-sm backdrop-blur-sm hover:bg-white lg:hidden overflow-hidden shrink-0 transition-all active:scale-95",
+                isAssistantOpen && "bg-white ring-2 ring-primary"
+              )}
+              aria-label="Ask assistant"
             >
-              <BellIcon className="h-5 w-5" />
-              {unreadNotificationCount > 0 ? <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-[#d63b3b] ring-2 ring-white" aria-hidden="true" /> : null}
-            </NavLink>
+              <img src="/ai-chatbot.jpg" alt="AI Chatbot" className="h-full w-full object-cover" />
+            </button>
 
             <NotificationCenter
               notifications={notifications}
@@ -210,7 +218,12 @@ export function SignedInLayout({
         onConfirm={() => void onDeleteAccount()}
       />
 
-      <AssistantPanel currentUser={currentUser} />
+      <AssistantPanel
+        currentUser={currentUser}
+        isOpen={isAssistantOpen}
+        onToggle={() => setIsAssistantOpen(!isAssistantOpen)}
+        onClose={() => setIsAssistantOpen(false)}
+      />
     </main>
   );
 }

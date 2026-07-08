@@ -22,6 +22,9 @@ type PendingAction = {
 
 type AssistantPanelProps = {
   currentUser: User;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
 };
 
 const SUGGESTIONS = [
@@ -31,8 +34,7 @@ const SUGGESTIONS = [
   "Log an expense of 15.00 for lunch today"
 ];
 
-export function AssistantPanel({ currentUser }: AssistantPanelProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: AssistantPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -120,13 +122,17 @@ export function AssistantPanel({ currentUser }: AssistantPanelProps) {
 
   return (
     <>
-      {/* Floating Action Button (FAB) */}
+      {/* Floating Action Button (FAB) - Desktop only (hidden on mobile) */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-24 right-6 lg:bottom-6 lg:right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer"
+        onClick={onToggle}
+        className="hidden lg:flex fixed bottom-6 right-6 z-40 h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer overflow-hidden border border-white/20"
         aria-label="Ask assistant"
       >
-        {isOpen ? <X className="h-6 w-6" /> : <Sparkles className="h-6 w-6" />}
+        {isOpen ? (
+          <X className="h-6 w-6" />
+        ) : (
+          <img src="/ai-chatbot.jpg" alt="AI Chatbot" className="h-full w-full object-cover" />
+        )}
       </button>
 
       {/* Chat Panel */}
@@ -136,8 +142,8 @@ export function AssistantPanel({ currentUser }: AssistantPanelProps) {
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 bg-white/50 px-5 py-4">
             <div className="flex items-center gap-2.5">
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Sparkles className="h-4.5 w-4.5" />
+              <div className="relative flex h-8 w-8 items-center justify-center rounded-full overflow-hidden shrink-0">
+                <img src="/ai-chatbot.jpg" alt="AI Chatbot" className="h-full w-full object-cover" />
                 <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-white animate-pulse" />
               </div>
               <div>
@@ -146,7 +152,7 @@ export function AssistantPanel({ currentUser }: AssistantPanelProps) {
               </div>
             </div>
             <button
-              onClick={() => setIsOpen(false)}
+              onClick={onClose}
               className="rounded-full p-1.5 text-muted hover:bg-slate-100 active:scale-95 transition-transform"
             >
               <X className="h-4 w-4" />
