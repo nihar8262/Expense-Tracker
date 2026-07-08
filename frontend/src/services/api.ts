@@ -459,3 +459,73 @@ export async function updateWalletReminderPreferences(
   }, "Failed to update wallet reminder preferences.");
   return body.preferences;
 }
+
+export async function queryAssistant(
+  messages: Array<{ role: string; content: string | null; tool_calls?: any[] }>,
+  confirmedAction: { tool: string; args: any } | null,
+  user: User
+): Promise<{ answer: string; pendingAction?: { tool: string; args: any } }> {
+  const endpoint = API_BASE_URL ? new URL("/api/assistant/query", API_BASE_URL).toString() : "/api/assistant/query";
+  return apiRequest<{ answer: string; pendingAction?: { tool: string; args: any } }>(
+    user,
+    {
+      method: "POST",
+      url: endpoint,
+      data: { messages, confirmedAction }
+    },
+    "Failed to query assistant."
+  );
+}
+
+export interface Token {
+  id: string;
+  label: string;
+  token_prefix: string;
+  token_suffix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export async function listTokens(user: User): Promise<Token[]> {
+  const endpoint = API_BASE_URL ? new URL("/api/tokens", API_BASE_URL).toString() : "/api/tokens";
+  const body = await apiRequest<{ tokens: Token[] }>(
+    user,
+    {
+      method: "GET",
+      url: endpoint
+    },
+    "Failed to load access tokens."
+  );
+  return body.tokens;
+}
+
+export async function createToken(label: string, user: User): Promise<{ id: string; label: string; token: string; created_at: string }> {
+  const endpoint = API_BASE_URL ? new URL("/api/tokens", API_BASE_URL).toString() : "/api/tokens";
+  return apiRequest<{ id: string; label: string; token: string; created_at: string }>(
+    user,
+    {
+      method: "POST",
+      url: endpoint,
+      data: { label }
+    },
+    "Failed to generate access token."
+  );
+}
+
+export async function revokeToken(tokenId: string, user: User, purge = false): Promise<void> {
+  const query = purge ? "?purge=true" : "";
+  const endpoint = API_BASE_URL 
+    ? new URL(`/api/tokens/${tokenId}${query}`, API_BASE_URL).toString() 
+    : `/api/tokens/${tokenId}${query}`;
+  await apiRequest<void>(
+    user,
+    {
+      method: "DELETE",
+      url: endpoint
+    },
+    purge ? "Failed to delete access token." : "Failed to revoke access token."
+  );
+}
+
+

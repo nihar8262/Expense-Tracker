@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import type { User } from "firebase/auth";
 import type { ReminderPreferences } from "../types";
 import { SurfaceCard, StatusNotice, PageHero } from "../components/ui";
+import { listTokens, createToken, revokeToken, type Token } from "../services/api";
+import { TokenRevealModal } from "../components/TokenRevealModal";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -190,6 +193,125 @@ export function ProfilePage({
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [profileMessage, setProfileMessage] = useState<{ tone: "success" | "error" | "neutral"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [tokens, setTokens] = useState<Token[]>([]);
+  const [isLoadingTokens, setIsLoadingTokens] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [newTokenLabel, setNewTokenLabel] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null);
+
+  // For Token Reveal Modal
+  const [revealModalOpen, setRevealModalOpen] = useState(false);
+  const [revealToken, setRevealToken] = useState<string | null>(null);
+  const [revealTokenLabel, setRevealTokenLabel] = useState("");
+
+  const loadTokens = async () => {
+    setIsLoadingTokens(true);
+    setTokenError(null);
+    try {
+      const data = await listTokens(currentUser);
+      setTokens(data);
+    } catch (err: any) {
+      console.error(err);
+      setTokenError(err.message || "Failed to load access tokens.");
+    } finally {
+      setIsLoadingTokens(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTokens();
+  }, [currentUser]);
+
+  const handleGenerateToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTokenLabel.trim()) return;
+
+    setIsGenerating(true);
+    setTokenError(null);
+    try {
+      const result = await createToken(newTokenLabel.trim(), currentUser);
+      setNewTokenLabel("");
+      
+      // Store raw token and label for the reveal modal
+      setRevealToken(result.token);
+      setRevealTokenLabel(result.label);
+      setRevealModalOpen(true);
+
+      // Refresh list
+      await loadTokens();
+    } catch (err: any) {
+      console.error(err);
+      setTokenError(err.message || "Failed to generate token.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    description: "",
+    confirmLabel: "",
+    onConfirm: () => {}
+  });
+
+  const executeRevokeToken = async (tokenId: string) => {
+    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+    setRevokingTokenId(tokenId);
+    setTokenError(null);
+    try {
+      await revokeToken(tokenId, currentUser);
+      await loadTokens();
+    } catch (err: any) {
+      console.error(err);
+      setTokenError(err.message || "Failed to revoke token.");
+    } finally {
+      setRevokingTokenId(null);
+    }
+  };
+
+  const executeDeleteToken = async (tokenId: string) => {
+    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+    setRevokingTokenId(tokenId);
+    setTokenError(null);
+    try {
+      await revokeToken(tokenId, currentUser, true);
+      await loadTokens();
+    } catch (err: any) {
+      console.error(err);
+      setTokenError(err.message || "Failed to delete token.");
+    } finally {
+      setRevokingTokenId(null);
+    }
+  };
+
+  const handleRevokeToken = (tokenId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Revoke Token",
+      description: "This can't be undone — any app using this token will lose access immediately. Are you sure you want to revoke this token?",
+      confirmLabel: "Revoke",
+      onConfirm: () => executeRevokeToken(tokenId)
+    });
+  };
+
+  const handleDeleteToken = (tokenId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Delete Token",
+      description: "Are you sure you want to permanently delete this token from your audit trail? This action is permanent and cannot be undone.",
+      confirmLabel: "Delete",
+      onConfirm: () => executeDeleteToken(tokenId)
+    });
+  };
 
   // Sync state if preferences load
   useEffect(() => {
@@ -420,6 +542,123 @@ export function ProfilePage({
         </SurfaceCard>
       </div>
 
+      {/* AI Tools Access (MCP) Section */}
+      <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
+        <div>
+          <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">AI Tools Access (MCP)</h2>
+          <p className="text-xs text-secondary mt-0.5">
+            Generate and manage personal access tokens to connect external AI tools (like Claude Desktop, Cursor, or Claude Code) to your Expense-Tracker data.
+          </p>
+        </div>
+
+        {tokenError && (
+          <StatusNotice tone="error">{tokenError}</StatusNotice>
+        )}
+
+        <form onSubmit={handleGenerateToken} className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-3 items-end">
+            <label className="flex-1 grid gap-1.5 text-xs font-semibold text-secondary">
+              Token Label / Name
+              <input
+                type="text"
+                placeholder="e.g. Claude Desktop, Work Laptop"
+                className="px-3 py-2 text-sm rounded-xl"
+                value={newTokenLabel}
+                onChange={(e) => setNewTokenLabel(e.target.value)}
+                maxLength={50}
+                required
+                disabled={isGenerating}
+              />
+            </label>
+            <button
+              type="submit"
+              className="ui-button-primary text-xs px-4 py-2 shrink-0 h-10 w-full sm:w-auto"
+              disabled={isGenerating || !newTokenLabel.trim()}
+            >
+              {isGenerating ? "Generating..." : "Generate Token"}
+            </button>
+          </div>
+        </form>
+
+        <div className="pt-2">
+          <h3 className="text-xs font-bold text-secondary mb-2">Active Tokens</h3>
+          {isLoadingTokens ? (
+            <p className="text-xs text-muted py-2 animate-pulse">Loading tokens...</p>
+          ) : tokens.length === 0 ? (
+            <div className="text-center py-6 border border-dashed border-[color:var(--border)] rounded-2xl bg-white/20">
+              <p className="text-xs text-muted">No active API tokens found.</p>
+              <p className="text-[10px] text-muted/80 mt-1">Generate a token above to connect external tools.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[color:var(--border)] text-muted font-semibold">
+                    <th className="py-2.5 pr-4">Label</th>
+                    <th className="py-2.5 pr-4">Token</th>
+                    <th className="py-2.5 pr-4">Created</th>
+                    <th className="py-2.5 pr-4">Last Used</th>
+                    <th className="py-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[color:var(--border)]">
+                  {tokens.map((tok) => {
+                    const isRevoked = tok.revoked_at !== null;
+                    return (
+                      <tr key={tok.id} className={isRevoked ? "text-muted/60 opacity-60" : "text-ink"}>
+                        <td className="py-3 pr-4 font-semibold">{tok.label}</td>
+                        <td className="py-3 pr-4 font-mono select-all">
+                          {tok.token_prefix}••••••••••••{tok.token_suffix}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {new Date(tok.created_at).toLocaleDateString(undefined, {
+                            dateStyle: "medium"
+                          })}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {tok.last_used_at
+                            ? new Date(tok.last_used_at).toLocaleDateString(undefined, {
+                                dateStyle: "medium",
+                                timeStyle: "short"
+                              })
+                            : "Never used"}
+                        </td>
+                        <td className="py-3 text-right">
+                          {isRevoked ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-[10px] bg-muted/10 text-muted px-2 py-1 rounded-md font-medium">
+                                Revoked on {new Date(tok.revoked_at!).toLocaleDateString(undefined, { dateStyle: "short" })}
+                              </span>
+                              <button
+                                type="button"
+                                className="ui-button-secondary text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2.5 py-1"
+                                onClick={() => handleDeleteToken(tok.id)}
+                                disabled={revokingTokenId === tok.id}
+                              >
+                                {revokingTokenId === tok.id ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="ui-button-secondary text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2.5 py-1"
+                              onClick={() => handleRevokeToken(tok.id)}
+                              disabled={revokingTokenId === tok.id}
+                            >
+                              {revokingTokenId === tok.id ? "Revoking..." : "Revoke"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </SurfaceCard>
+
       {/* Danger Zone Row (Z-Index is set lower so timezone dropdown can overlay it perfectly) */}
       <div className="relative z-0">
         <SurfaceCard className="border border-red-500/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.7),rgba(254,242,242,0.3))] shadow-[0_12px_40px_rgba(239,68,68,0.04)] p-4 sm:p-5 flex flex-col justify-between space-y-4">
@@ -467,6 +706,27 @@ export function ProfilePage({
           </div>
         </SurfaceCard>
       </div>
+
+      <TokenRevealModal
+        isOpen={revealModalOpen}
+        token={revealToken}
+        label={revealTokenLabel}
+        onClose={() => {
+          setRevealModalOpen(false);
+          setRevealToken(null);
+          setRevealTokenLabel("");
+        }}
+      />
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        confirmLabel={confirmModal.confirmLabel}
+        cancelLabel="Cancel"
+        onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+      />
     </div>
   );
 }

@@ -45,6 +45,9 @@ import {
   handleUpsertWalletReminderPreferences
 } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
+import { handleAssistantQuery } from "./assistant/assistantService.js";
+import { getTokenStore } from "./mcp/tokenStore.js";
+import { registerMcpRoutes } from "./mcp/server.js";
 
 type RequestAuthenticator = (authorizationHeader: string | undefined) => Promise<AuthenticatedUser>;
 type AccountDeleter = (userId: string) => Promise<void>;
@@ -660,6 +663,92 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to delete account data."
+    );
+  });
+
+  app.post("/api/assistant/query", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        try {
+          const result = await handleAssistantQuery(request.body || {}, user.id, store);
+          return response.status(200).json(result);
+        } catch (error: any) {
+          console.error("Local dev assistant query failed:", error);
+          return response.status(500).json({ error: error.message || "Failed to process assistant query." });
+        }
+      },
+      "Failed to query assistant."
+    );
+  });
+
+  const tokenStore = getTokenStore(store);
+  registerMcpRoutes(app, store);
+
+  app.get("/api/tokens", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        try {
+          const tokens = await tokenStore.listTokens(user.id);
+          return response.status(200).json({ tokens });
+        } catch (error: any) {
+          console.error("Failed to list tokens:", error);
+          return response.status(500).json({ error: error.message || "Failed to list tokens." });
+        }
+      },
+      "Failed to list tokens."
+    );
+  });
+
+  app.post("/api/tokens", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        try {
+          const { label } = request.body || {};
+          if (!label || typeof label !== "string" || !label.trim()) {
+            return response.status(400).json({ error: "Label is required." });
+          }
+          const token = await tokenStore.createToken(user.id, label.trim());
+          return response.status(201).json(token);
+        } catch (error: any) {
+          console.error("Failed to create token:", error);
+          return response.status(500).json({ error: error.message || "Failed to create token." });
+        }
+      },
+      "Failed to create token."
+    );
+  });
+
+  app.delete("/api/tokens/:tokenId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        try {
+          const tokenId = request.params.tokenId;
+          const purge = request.query.purge === "true";
+          if (!tokenId) {
+            return response.status(400).json({ error: "Token ID is required." });
+          }
+          const success = purge
+            ? await tokenStore.deleteToken(user.id, tokenId)
+            : await tokenStore.revokeToken(user.id, tokenId);
+
+          if (!success) {
+            return response.status(404).json({ error: "Token not found." });
+          }
+          return response.sendStatus(204);
+        } catch (error: any) {
+          console.error("Failed to delete/revoke token:", error);
+          return response.status(500).json({ error: error.message || "Failed to delete/revoke token." });
+        }
+      },
+      "Failed to delete/revoke token."
     );
   });
 

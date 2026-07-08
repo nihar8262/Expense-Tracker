@@ -24,6 +24,7 @@ A full-stack personal finance application for tracking daily spending, managing 
   - [Notifications & Alerts](#notifications--alerts)
   - [Bill Reminders](#bill-reminders)
   - [Dashboard](#dashboard)
+  - [AI Chatbot & MCP Server](#ai-chatbot--mcp-server)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Scripts](#scripts)
@@ -41,6 +42,8 @@ A full-stack personal finance application for tracking daily spending, managing 
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
 - **Account management & profile editing** — Profile customization menu supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
+- **In-App AI Chatbot** — Interactive finance assistant scoped strictly to user expenses and wallets. Prompts are sanitized and monitored by strict guardrails. Incorporates a human-in-the-loop approval confirmation dialog for write operations (such as expense creation) and self-healing rate limit retry handlers on NVIDIA NIM.
+- **Model Context Protocol (MCP) Server** — Connect external tools (Cursor, Claude Desktop, etc.) to your expense tracker data using the standard Streamable HTTP SSE transport. Fully secured via user-managed SHA-256 hashed personal access tokens.
 - **Responsive design** — Desktop navigation bar with bottom tab navigation on mobile.
 - **Dark-mode-ready surface system** — Tailwind CSS v4 with CSS custom properties for theming.
 
@@ -57,6 +60,8 @@ A full-stack personal finance application for tracking daily spending, managing 
 | Auth Client  | Firebase Auth (`signInWithPopup` for Google, GitHub, Facebook) |
 | Auth Server  | Firebase Admin SDK (ID token verification)                   |
 | Testing      | Vitest (backend unit tests with in-memory store)             |
+| AI Inference | NVIDIA NIM API (`nvidia/nemotron-3-ultra-550b-a55b` model)    |
+| MCP Transport| Server-Sent Events (SSE) + HTTP POST JSON-RPC 2.0             |
 | Monorepo     | npm workspaces (`backend/`, `frontend/`)                     |
 
 ---
@@ -251,6 +256,11 @@ All endpoints require authentication except `GET /api/health`.
 | GET/POST | `/api/bill-reminders`                             | List / create bill reminders     |
 | PUT      | `/api/bill-reminders/:id`                         | Update bill reminder             |
 | DELETE   | `/api/bill-reminders/:id`                         | Delete bill reminder             |
+| POST     | `/api/assistant/query`                            | In-app AI chatbot query (confirms write actions) |
+| GET      | `/api/tokens`                                     | List user's active access tokens |
+| POST     | `/api/tokens`                                     | Generate a new access token (one-time reveal)  |
+| DELETE   | `/api/tokens/:tokenId`                            | Revoke or permanently delete (purge) token    |
+| GET/POST | `/api/mcp`                                        | Standard streamable HTTP SSE MCP transport    |
 | DELETE   | `/api/account`                                    | Delete user account + all data   |
 | GET      | `/api/health`                                     | Health check                     |
 
@@ -297,6 +307,15 @@ Vercel
 - Budget tracker section showing spent, remaining, and overspend status.
 - Budget history grouped by month with range filters (quarter, half-year, year, all).
 - Edit and delete with inline status messages.
+
+### AI Chatbot & MCP Server
+
+- **Strict Topic Scope**: System prompt enforces domain constraints (expenses, budgeting, wallets). General knowledge, creative writing, or injection attempts are deflected into positive finance suggestions.
+- **No Private IDs Exposure**: Database UUID keys (`expenseid`, `userid`, `walletid`) are stripped from chatbot text responses to keep messages clean and focused on user-facing descriptions.
+- **Write Actions Confirmation**: Triggering a write tool (e.g. `create_expense`) stops execution and renders a custom confirmation UI card inline in the chat bubble. The expense is committed only if the user explicitly approves.
+- **NIM Worker Rate-Limits Recovery**: Backed by a 3-attempt backoff handler catching HTTP 503 limits from NVIDIA's model hosting.
+- **External Integration (MCP)**: Standards-compliant Server-Sent Events (SSE) server allows external IDEs/clients (Cursor, Claude Desktop) to invoke read-only tracker tools (`list_expenses`, `get_expense_summary`, `list_wallets`, `get_wallet_balance`) with secure user scopes.
+- **Personal Access Tokens Control**: Generated from the Settings profile card. Utilizes cryptographic SHA-256 hashing. Active tokens support soft **Revocation**; soft-revoked tokens display a **Delete** button to permanently clean up the audit trail via a React-based confirmation modal.
 
 ### Shared Wallets
 
@@ -356,6 +375,7 @@ Copy `.env.example` to `.env` and fill in the values:
 | `FIREBASE_PROJECT_ID`               | Yes      | Firebase Admin project ID (backend token verification)   |
 | `FIREBASE_CLIENT_EMAIL`             | Yes      | Firebase Admin client email                              |
 | `FIREBASE_PRIVATE_KEY`              | Yes      | Firebase Admin private key (use `\n` escapes in `.env`)  |
+| `NIM_API_KEY`                       | Yes      | NVIDIA NIM API key forNemotron-3-Ultra model inference   |
 | `VITE_API_BASE_URL`                 | No       | Override API base URL (leave empty for same-origin/proxy) |
 
 ---

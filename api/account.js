@@ -1,6 +1,7 @@
 const { cert, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { AuthenticationConfigurationError, AuthenticationError, authenticateRequest, deleteUserData } = require("./_lib/finance");
+const { createToken, listTokens, revokeToken, deleteToken } = require("./_lib/account-tokens");
 
 function readFirebaseAdminCredentials() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -65,6 +66,60 @@ module.exports = async function handler(request, response) {
     }
 
     return response.status(500).json({ error: "Failed to authenticate request." });
+  }
+
+  const isTokensRequest = request.query.tokens === "true" || request.query.tokensRoute !== undefined;
+
+  if (isTokensRequest) {
+    const method = request.method;
+
+    if (method === "GET") {
+      try {
+        const tokens = await listTokens(user.id);
+        return response.status(200).json({ tokens });
+      } catch (err) {
+        console.error("Failed to list tokens:", err);
+        return response.status(500).json({ error: "Failed to list tokens." });
+      }
+    }
+
+    if (method === "POST") {
+      try {
+        const { label } = request.body || {};
+        if (!label || typeof label !== "string" || !label.trim()) {
+          return response.status(400).json({ error: "Label is required." });
+        }
+        const token = await createToken(user.id, label.trim());
+        return response.status(201).json(token);
+      } catch (err) {
+        console.error("Failed to create token:", err);
+        return response.status(500).json({ error: "Failed to create token." });
+      }
+    }
+
+    if (method === "DELETE") {
+      try {
+        const tokenId = request.query.tokensRoute;
+        const purge = request.query.purge === "true";
+        if (!tokenId) {
+          return response.status(400).json({ error: "Token ID is required." });
+        }
+        const success = purge
+          ? await deleteToken(user.id, tokenId)
+          : await revokeToken(user.id, tokenId);
+
+        if (!success) {
+          return response.status(404).json({ error: "Token not found." });
+        }
+        return response.status(204).end();
+      } catch (err) {
+        console.error("Failed to delete/revoke token:", err);
+        return response.status(500).json({ error: "Failed to delete/revoke token." });
+      }
+    }
+
+    response.setHeader("Allow", "GET, POST, DELETE");
+    return response.status(405).end("Method Not Allowed");
   }
 
   if (request.method === "DELETE") {

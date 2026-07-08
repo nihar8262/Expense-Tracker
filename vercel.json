@@ -4,6 +4,22 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api/tokens",
+      "destination": "/api/account?tokens=true"
+    },
+    {
+      "source": "/api/tokens/:route*",
+      "destination": "/api/account?tokensRoute=:route*"
+    },
+    {
+      "source": "/api/mcp/:route*",
+      "destination": "/api/mcp?route=:route*"
+    },
+    {
+      "source": "/api/assistant/:route*",
+      "destination": "/api/assistant?route=:route*"
+    },
+    {
       "source": "/api/expenses/:route*",
       "destination": "/api/expenses?route=:route*"
     },

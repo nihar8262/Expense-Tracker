@@ -687,6 +687,19 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
       await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
       await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS mcp_access_tokens (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          label VARCHAR(255) NOT NULL,
+          token_hash VARCHAR(255) NOT NULL UNIQUE,
+          token_prefix VARCHAR(16) NOT NULL,
+          token_suffix VARCHAR(16) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          last_used_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ
+        )
+      `;
     })();
   }
 

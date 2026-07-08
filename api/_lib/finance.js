@@ -497,6 +497,19 @@ async function ensureSchema(sql) {
         await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
         await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
       });
+      await safeSchemaStep("create mcp_access_tokens table", () => sql`
+        CREATE TABLE IF NOT EXISTS mcp_access_tokens (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          label VARCHAR(255) NOT NULL,
+          token_hash VARCHAR(255) NOT NULL UNIQUE,
+          token_prefix VARCHAR(16) NOT NULL,
+          token_suffix VARCHAR(16) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          last_used_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ
+        )
+      `);
     })().catch((error) => {
       schemaReady = null;
       throw error;

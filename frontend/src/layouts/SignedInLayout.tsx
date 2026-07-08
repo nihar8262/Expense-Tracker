@@ -4,6 +4,7 @@ import type { User } from "firebase/auth";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
+import { AssistantPanel } from "../components/AssistantPanel";
 import { BellIcon, cn } from "../components/ui";
 import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
 
@@ -208,6 +209,8 @@ export function SignedInLayout({
         onCancel={onCloseDeleteAccountModal}
         onConfirm={() => void onDeleteAccount()}
       />
+
+      <AssistantPanel currentUser={currentUser} />
     </main>
   );
 }
