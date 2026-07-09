@@ -84,6 +84,10 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
         }
       ]);
 
+      if (confirmedAction && confirmedAction.tool === "create_expense") {
+        window.dispatchEvent(new CustomEvent("expense-added"));
+      }
+
       if (result.pendingAction) {
         setPendingAction(result.pendingAction as PendingAction);
       }

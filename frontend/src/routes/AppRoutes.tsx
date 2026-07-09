@@ -1170,6 +1170,15 @@ export function AppRoutes() {
   }, [authLoading, currentUser, selectedCategory, sortNewestFirst]);
 
   useEffect(() => {
+    if (!currentUser) return;
+    const handleExpenseAdded = () => {
+      void loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+    };
+    window.addEventListener("expense-added", handleExpenseAdded);
+    return () => window.removeEventListener("expense-added", handleExpenseAdded);
+  }, [currentUser, selectedCategory, sortNewestFirst]);
+
+  useEffect(() => {
     if (authLoading) {
       return;
     }
