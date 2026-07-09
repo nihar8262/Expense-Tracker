@@ -91,15 +91,27 @@ module.exports = async function handler(request, response) {
         if (!tool) {
           error = { code: -32601, message: `Tool ${name} not found.` };
         } else {
-          const toolResult = await tool.handler(args || {}, user.id);
-          result = {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(toolResult, null, 2)
-              }
-            ]
-          };
+          try {
+            const toolResult = await tool.handler(args || {}, user.id);
+            result = {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(toolResult, null, 2)
+                }
+              ]
+            };
+          } catch (err) {
+            console.error(`MCP tool execution error (${name}):`, err);
+            result = {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ error: `Tool execution failed: ${err.message}` }, null, 2)
+                }
+              ]
+            };
+          }
         }
       } else {
         if (id === undefined) {
