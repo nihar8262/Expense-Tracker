@@ -20,6 +20,10 @@
       "destination": "/api/assistant?route=:route*"
     },
     {
+      "source": "/api/receipts",
+      "destination": "/api/expenses?receipts=true"
+    },
+    {
       "source": "/api/expenses/:route*",
       "destination": "/api/expenses?route=:route*"
     },
