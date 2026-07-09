@@ -557,7 +557,7 @@ export function ProfilePage({
 
         <form onSubmit={handleGenerateToken} className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-3 items-end">
-            <label className="flex-1 grid gap-1.5 text-xs font-semibold text-secondary">
+            <label className="flex-1 w-full grid gap-1.5 text-xs font-semibold text-secondary">
               Token Label / Name
               <input
                 type="text"

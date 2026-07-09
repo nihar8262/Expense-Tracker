@@ -137,7 +137,7 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
 
       {/* Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-24 right-4 left-4 w-auto h-[520px] md:left-auto md:right-6 md:w-96 md:h-[580px] lg:bottom-24 lg:right-6 z-40 flex flex-col overflow-hidden rounded-[28px] border border-white/60 bg-white/90 shadow-[0_30px_80px_rgba(40,44,35,0.18)] backdrop-blur-2xl transition-all duration-300">
+        <div className="fixed inset-0 z-50 md:inset-auto md:bottom-24 md:right-6 md:w-96 md:h-[580px] lg:bottom-24 lg:right-6 flex flex-col overflow-hidden rounded-none md:rounded-[28px] border-0 md:border border-white/60 bg-white md:bg-white/90 shadow-2xl md:shadow-[0_30px_80px_rgba(40,44,35,0.18)] md:backdrop-blur-2xl transition-all duration-300">
           
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 bg-white/50 px-5 py-4">
