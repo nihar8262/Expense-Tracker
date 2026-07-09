@@ -6,14 +6,15 @@ export interface RateLimitResult {
 }
 
 export interface RateLimiter {
-  checkRateLimit(key: string, type: "mcp" | "chat"): Promise<RateLimitResult>;
+  checkRateLimit(key: string, type: "mcp" | "chat" | "scan"): Promise<RateLimitResult>;
 }
 
 export class PostgresRateLimiter implements RateLimiter {
   private sql: postgres.Sql;
   private limits = {
     mcp: { maxTokens: 60, refillRate: 1.0 },
-    chat: { maxTokens: 10, refillRate: 10 / 60 }
+    chat: { maxTokens: 10, refillRate: 10 / 60 },
+    scan: { maxTokens: 5, refillRate: 5 / 60 }
   };
 
   constructor() {
@@ -27,7 +28,7 @@ export class PostgresRateLimiter implements RateLimiter {
     });
   }
 
-  async checkRateLimit(key: string, type: "mcp" | "chat"): Promise<RateLimitResult> {
+  async checkRateLimit(key: string, type: "mcp" | "chat" | "scan"): Promise<RateLimitResult> {
     const limit = this.limits[type];
     if (!limit) {
       throw new Error(`Invalid rate limit type: ${type}`);
@@ -87,12 +88,13 @@ export class PostgresRateLimiter implements RateLimiter {
 export class MemoryRateLimiter implements RateLimiter {
   private limits = {
     mcp: { maxTokens: 60, refillRate: 1.0 },
-    chat: { maxTokens: 10, refillRate: 10 / 60 }
+    chat: { maxTokens: 10, refillRate: 10 / 60 },
+    scan: { maxTokens: 5, refillRate: 5 / 60 }
   };
 
   private buckets = new Map<string, { tokens: number; lastRefilledAt: Date }>();
 
-  async checkRateLimit(key: string, type: "mcp" | "chat"): Promise<RateLimitResult> {
+  async checkRateLimit(key: string, type: "mcp" | "chat" | "scan"): Promise<RateLimitResult> {
     const limit = this.limits[type];
     if (!limit) {
       throw new Error(`Invalid rate limit type: ${type}`);

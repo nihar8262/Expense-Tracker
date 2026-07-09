@@ -252,6 +252,7 @@ export interface ExpenseStore {
   upsertWalletReminderPreferences(userId: string, walletId: string, input: { budgetAlertsEnabled: boolean; budgetAlertThreshold: number }): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }>;
   runNotificationChecks(userId?: string, now?: Date): Promise<NotificationCheckResult>;
   deleteUserData(userId: string): Promise<void>;
+  searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]>;
 }
 
 export class IdempotencyConflictError extends Error {

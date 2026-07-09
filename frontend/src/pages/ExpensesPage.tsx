@@ -4,6 +4,7 @@ import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
 import { PLATFORMS } from "../lib/platforms";
 import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
+import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 import { formatBudgetMonth } from "../utils/format";
 
@@ -136,6 +137,23 @@ export function ExpensesPage({
     setIsExpenseSheetOpen(false);
     setShowValidation(false);
   }
+
+  function handleScanComplete(data: { amount: string; description: string; date: string; category?: string; platform?: string }) {
+    onFormChange((current) => ({
+      ...current,
+      amount: data.amount,
+      description: data.description,
+      date: data.date,
+      platform: data.platform || ""
+    }));
+    if (data.category) {
+      const match = availableCategoryOptions.find((opt) => opt.label.toLowerCase() === data.category!.toLowerCase());
+      if (match) {
+        onCategorySelect(match);
+      }
+    }
+  }
+
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const pageStart = totalVisibleExpenses === 0 ? 0 : (currentExpensesPage - 1) * expensesPageSize + 1;
@@ -252,6 +270,12 @@ export function ExpensesPage({
           title={editingExpenseId ? "Edit expense" : "Add expense"}
           description={editingExpenseId ? "Update the selected expense and save the revised amount, category, description, or date." : "Capture a new expense with tactile category chips, quick dates, and clear validation."}
         />
+
+        {!editingExpenseId && (
+          <ReceiptScanPanel
+            onScanComplete={handleScanComplete}
+          />
+        )}
 
         <form className="grid gap-4" onSubmit={(event) => void handleFormSubmit(event)} noValidate>
           <label className="grid gap-2 text-sm font-medium text-secondary">

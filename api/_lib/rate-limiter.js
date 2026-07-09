@@ -17,7 +17,8 @@ function getSql() {
 // Config limits
 const LIMITS = {
   mcp: { maxTokens: 60, refillRate: 1.0 },       // 60 tokens per minute = 1.0 token/sec
-  chat: { maxTokens: 10, refillRate: 10 / 60 }    // 10 tokens per minute = 0.1667 token/sec
+  chat: { maxTokens: 10, refillRate: 10 / 60 },   // 10 tokens per minute = 0.1667 token/sec
+  scan: { maxTokens: 5, refillRate: 5 / 60 }      // 5 tokens per minute = 0.0833 token/sec
 };
 
 /**

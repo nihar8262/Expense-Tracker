@@ -13,6 +13,7 @@ import {
   SurfaceCard,
   cn,
 } from "../components/ui";
+import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import type {
   BudgetForm,
   BudgetHistoryRange,
@@ -1335,6 +1336,21 @@ export function WalletsPage({
     }
   }
 
+  function handleScanComplete(data: { amount: string; description: string; date: string; category?: string; platform?: string }) {
+    setExpenseAmount(data.amount);
+    setExpenseDescription(data.description);
+    setExpenseDate(data.date);
+    if (data.platform) {
+      setExpensePlatform(data.platform);
+    }
+    if (data.category) {
+      const match = budgetCategoryOptions.find((opt) => opt.label.toLowerCase() === data.category!.toLowerCase());
+      if (match) {
+        setExpenseCategory(match.label);
+      }
+    }
+  }
+
   function renderWalletExpenseForm() {
     return (
       <form
@@ -1342,6 +1358,11 @@ export function WalletsPage({
         onSubmit={handleCreateWalletExpenseSubmit}
         noValidate
       >
+        {!editingWalletExpenseId && (
+          <ReceiptScanPanel
+            onScanComplete={handleScanComplete}
+          />
+        )}
         <label className="grid gap-2 text-sm font-medium text-secondary">
           Paid by
           <select

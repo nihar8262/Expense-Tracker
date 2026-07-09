@@ -2070,6 +2070,10 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
   }
 
+  async function searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]> {
+    return [];
+  }
+
   return {
     createExpense,
     listExpenses,
@@ -2111,6 +2115,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     getWalletReminderPreferences,
     upsertWalletReminderPreferences,
     runNotificationChecks,
-    deleteUserData
+    deleteUserData,
+    searchExpensesSemantic
   };
 }

@@ -326,6 +326,28 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
           created: result.created
         };
       }
+    },
+    {
+      name: "search_expenses_semantic",
+      description: "Search across all user expenses (both personal and shared-wallet) semantically. Use this when the user asks questions that require matching meanings rather than exact words, e.g., 'find my coffee purchases', 'where did I spend money on cabs', or similar conceptual searches.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The search query, e.g. 'cabs' or 'restaurants'."
+          },
+          limit: {
+            type: "integer",
+            description: "Optional maximum number of results to return (default 5)."
+          }
+        },
+        required: ["query"]
+      },
+      handler: async (args: any, userId: string) => {
+        const results = await store.searchExpensesSemantic(userId, args.query, args.limit || 5);
+        return { results };
+      }
     }
   ];
 }

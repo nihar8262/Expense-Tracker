@@ -1,5 +1,6 @@
 import postgres, { type Sql, type TransactionSql } from "postgres";
 import { randomUUID } from "node:crypto";
+import { saveEmbedding, deleteEmbedding } from "../mcp/embeddingsHelper.js";
 import { formatMinorUnits } from "../lib/money.js";
 import { createExpenseRequestHash } from "../lib/request-hash.js";
 import type {
@@ -707,6 +708,21 @@ async function ensureSchema(sql: Sql): Promise<void> {
           last_refilled_at TIMESTAMPTZ NOT NULL
         )
       `;
+      await sql`CREATE EXTENSION IF NOT EXISTS vector`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS content_embeddings (
+          id UUID PRIMARY KEY,
+          owner_type VARCHAR(20) NOT NULL CHECK (owner_type IN ('expense', 'wallet_expense')),
+          owner_id UUID NOT NULL,
+          user_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          embedding vector(768),
+          content_hash VARCHAR(64) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          embedding_pending BOOLEAN NOT NULL DEFAULT FALSE
+        )
+      `;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS content_embeddings_owner_idx ON content_embeddings (owner_id, owner_type)`;
     })();
   }
 
@@ -1159,7 +1175,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
     async createExpense(userId: string, input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult> {
       await ensureSchema(sql);
 
-      return sql.begin(async (tx) => {
+      const res = await sql.begin(async (tx) => {
         const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
         const requestHash = createExpenseRequestHash(input);
         const existingExpense = await getExistingExpense(tx, scopedIdempotencyKey, requestHash);
@@ -1187,6 +1203,12 @@ export function createPostgresExpenseStore(): ExpenseStore {
           created: true
         };
       });
+
+      if (res.created) {
+        await saveEmbedding(sql, userId, res.expense.id, "expense", res.expense.category, res.expense.description, input.amount, res.expense.date, res.expense.platform);
+      }
+
+      return res;
     },
 
     async listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]> {
@@ -1223,7 +1245,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
         throw new ExpenseNotFoundError();
       }
 
-      return mapExpense(updatedRows[0]);
+      const updated = mapExpense(updatedRows[0]);
+      await saveEmbedding(sql, userId, updated.id, "expense", updated.category, updated.description, input.amount, updated.date, updated.platform);
+      return updated;
     },
 
     async deleteExpense(userId: string, expenseId: string): Promise<void> {
@@ -1243,6 +1267,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
         await tx`DELETE FROM idempotency_requests WHERE expense_id = ${expenseId}`;
         await tx`DELETE FROM expenses WHERE id = ${expenseId} AND user_id = ${userId}`;
       });
+
+      await deleteEmbedding(sql, expenseId, "expense");
     },
 
     async createBudget(userId: string, input: CreateBudgetInput): Promise<BudgetRecord> {
@@ -1944,7 +1970,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
     async createWalletExpense(userId: string, walletId: string, input: CreateWalletExpenseInput): Promise<WalletDetailRecord> {
       await ensureSchema(sql);
 
-      return sql.begin(async (tx) => {
+      const expenseId = randomUUID();
+      const wallet = await sql.begin(async (tx) => {
         await ensureWalletAccess(tx, userId, walletId);
 
         const members = await loadWalletMembers(tx, walletId);
@@ -1960,7 +1987,6 @@ export function createPostgresExpenseStore(): ExpenseStore {
           }
         }
 
-        const expenseId = randomUUID();
         const createdAt = new Date().toISOString();
 
         await tx`
@@ -1995,12 +2021,15 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
         return loadWalletDetail(tx, walletId);
       });
+
+      await saveEmbedding(sql, userId, expenseId, "wallet_expense", input.category, input.description, input.amount, input.date, input.platform ?? null);
+      return wallet;
     },
 
     async updateWalletExpense(userId: string, walletId: string, walletExpenseId: string, input: CreateWalletExpenseInput): Promise<WalletDetailRecord> {
       await ensureSchema(sql);
 
-      return sql.begin(async (tx) => {
+      const wallet = await sql.begin(async (tx) => {
         await ensureWalletAccess(tx, userId, walletId);
 
         const expenseRows = await tx<{ id: string }[]>`SELECT id FROM wallet_expenses WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}`;
@@ -2039,12 +2068,15 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
         return loadWalletDetail(tx, walletId);
       });
+
+      await saveEmbedding(sql, userId, walletExpenseId, "wallet_expense", input.category, input.description, input.amount, input.date, input.platform ?? null);
+      return wallet;
     },
 
     async deleteWalletExpense(userId: string, walletId: string, walletExpenseId: string): Promise<WalletDetailRecord> {
       await ensureSchema(sql);
 
-      return sql.begin(async (tx) => {
+      const wallet = await sql.begin(async (tx) => {
         await ensureWalletAccess(tx, userId, walletId);
 
         const deletedRows = await tx<{ id: string }[]>`DELETE FROM wallet_expenses WHERE id = ${walletExpenseId} AND wallet_id = ${walletId} RETURNING id`;
@@ -2054,6 +2086,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
         return loadWalletDetail(tx, walletId);
       });
+
+      await deleteEmbedding(sql, walletExpenseId, "wallet_expense");
+      return wallet;
     },
 
     async createWalletSettlement(userId: string, walletId: string, input: CreateSettlementInput): Promise<WalletDetailRecord> {
@@ -2797,6 +2832,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
           await tx`DELETE FROM expenses WHERE user_id = ${userId}`;
         }
       });
+    },
+
+    async searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]> {
+      const { searchExpensesSemantic } = await import("../mcp/semanticSearch.js");
+      return searchExpensesSemantic(sql, userId, query, limit);
     }
   };
 }

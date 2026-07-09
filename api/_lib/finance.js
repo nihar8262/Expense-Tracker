@@ -1,4 +1,5 @@
 const { randomUUID } = require("node:crypto");
+const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
 const { cert, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const postgres = require("postgres");
@@ -516,6 +517,25 @@ async function ensureSchema(sql) {
           tokens DOUBLE PRECISION NOT NULL,
           last_refilled_at TIMESTAMPTZ NOT NULL
         )
+      `);
+      await safeSchemaStep("create pgvector extension", () => sql`
+        CREATE EXTENSION IF NOT EXISTS vector
+      `);
+      await safeSchemaStep("create content_embeddings table", () => sql`
+        CREATE TABLE IF NOT EXISTS content_embeddings (
+          id UUID PRIMARY KEY,
+          owner_type VARCHAR(20) NOT NULL CHECK (owner_type IN ('expense', 'wallet_expense')),
+          owner_id UUID NOT NULL,
+          user_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          embedding vector(768),
+          content_hash VARCHAR(64) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          embedding_pending BOOLEAN NOT NULL DEFAULT FALSE
+        )
+      `);
+      await safeSchemaStep("create content_embeddings owner index", () => sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS content_embeddings_owner_idx ON content_embeddings (owner_id, owner_type)
       `);
     })().catch((error) => {
       schemaReady = null;
@@ -1313,6 +1333,7 @@ async function createWalletExpenseForUser(userId, walletId, rawBody) {
   }
   const sql = getSqlClient();
   await ensureSchema(sql);
+  const expenseId = randomUUID();
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
     const memberRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId}`;
@@ -1320,7 +1341,6 @@ async function createWalletExpenseForUser(userId, walletId, rawBody) {
     if (!memberIds.has(result.data.paidByMemberId) || result.data.splits.some((split) => !memberIds.has(split.memberId))) {
       throw new Error("One or more members do not belong to this wallet.");
     }
-    const expenseId = randomUUID();
     await tx`INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at, platform) VALUES (${expenseId}, ${walletId}, ${result.data.paidByMemberId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${result.data.splitRule}, ${new Date().toISOString()}, ${result.data.platform ?? null})`;
     const splits = result.data.splitRule === "equal" ? buildEqualSplits(result.data.amount, result.data.splits.map((split) => split.memberId)) : result.data.splitRule === "fixed" ? result.data.splits.map((split) => ({ memberId: split.memberId, amountMinor: split.value ?? 0, percentageBasisPoints: null })) : buildPercentageSplits(result.data.amount, result.data.splits);
     for (const split of splits) {
@@ -1328,6 +1348,7 @@ async function createWalletExpenseForUser(userId, walletId, rawBody) {
     }
     return loadWalletDetail(tx, walletId);
   });
+  await saveEmbedding(sql, userId, expenseId, "wallet_expense", result.data.category, result.data.description, result.data.amount, result.data.date, result.data.platform);
   return { status: 201, body: { wallet } };
 }
 
@@ -1362,6 +1383,7 @@ async function updateWalletExpenseForUser(userId, walletId, walletExpenseId, raw
     }
     return loadWalletDetail(tx, walletId);
   });
+  await saveEmbedding(sql, userId, walletExpenseId, "wallet_expense", result.data.category, result.data.description, result.data.amount, result.data.date, result.data.platform);
   return { status: 200, body: { wallet } };
 }
 
@@ -1376,6 +1398,7 @@ async function deleteWalletExpenseForUser(userId, walletId, walletExpenseId) {
     }
     return loadWalletDetail(tx, walletId);
   });
+  await deleteEmbedding(sql, walletExpenseId, "wallet_expense");
   return { status: 200, body: { wallet } };
 }
 

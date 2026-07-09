@@ -110,6 +110,59 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
     );
   });
 
+  app.post("/api/receipts", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        try {
+          const rateLimiter = getRateLimiter();
+          const limitResult = await rateLimiter.checkRateLimit(`scan:${user.id}`, "scan");
+          if (!limitResult.allowed) {
+            return response.status(429).json({ error: "Too many scan requests. Please wait a minute before scanning again." });
+          }
+        } catch (err) {
+          console.error("Local rate limiter error in receipts route:", err);
+        }
+
+        const { images } = request.body || {};
+        if (!Array.isArray(images) || images.length === 0) {
+          return response.status(400).json({ error: "Invalid payload: 'images' must be a non-empty array." });
+        }
+
+        if (images.length > 3) {
+          return response.status(400).json({ error: "Max 3 images are allowed per single bill scan." });
+        }
+
+        const validatedImages = [];
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
+            return response.status(400).json({ error: `Image at index ${i} is invalid. Required keys: 'data' and 'mimeType'.` });
+          }
+          const cleanMime = img.mimeType.toLowerCase().trim();
+          if (!["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(cleanMime)) {
+            return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'.` });
+          }
+          validatedImages.push({
+            data: img.data,
+            mimeType: cleanMime
+          });
+        }
+
+        try {
+          const { extractReceipt } = await import("./mcp/geminiOcr.js");
+          const result = await extractReceipt(validatedImages);
+          return response.status(200).json({ draft: result });
+        } catch (error: any) {
+          console.error("Receipt extraction failed:", error);
+          return response.status(500).json({ error: error.message || "Failed to scan receipt image." });
+        }
+      },
+      "Failed to process receipt scan."
+    );
+  });
+
   app.get("/api/budgets", async (request, response) => {
     return withAuthenticatedUser(
       request,

@@ -1,6 +1,7 @@
 const { createHash, randomUUID } = require("node:crypto");
 const postgres = require("postgres");
 const { z } = require("zod");
+const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
 
 function parseAmountToMinorUnits(value) {
   const raw = typeof value === "number" ? value.toString() : String(value ?? "");
@@ -289,6 +290,10 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
       };
     });
 
+    if (created.created) {
+      await saveEmbedding(sql, userId, created.expense.id, "expense", created.expense.category, created.expense.description, created.expense.amount, created.expense.date, created.expense.platform);
+    }
+
     return {
       status: created.created ? 201 : 200,
       body: created
@@ -342,9 +347,12 @@ async function updateExpense(rawBody, expenseId, userId) {
     };
   }
 
+  const updatedExpense = mapExpense(rows[0]);
+  await saveEmbedding(sql, userId, updatedExpense.id, "expense", updatedExpense.category, updatedExpense.description, updatedExpense.amount, updatedExpense.date, updatedExpense.platform);
+
   return {
     status: 200,
-    body: { expense: mapExpense(rows[0]) }
+    body: { expense: updatedExpense }
   };
 }
 
@@ -382,6 +390,8 @@ async function deleteExpense(expenseId, userId) {
       body: { error: "Expense not found." }
     };
   }
+
+  await deleteEmbedding(sql, expenseId, "expense");
 
   return {
     status: 204,
