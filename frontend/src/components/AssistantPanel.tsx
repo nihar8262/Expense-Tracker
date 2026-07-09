@@ -92,11 +92,22 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
         setPendingAction(result.pendingAction as PendingAction);
       }
     } catch (error: any) {
+      let friendlyMessage = "Sorry, I am currently having trouble connecting to my AI service. Please try again in a moment!";
+      const errMsg = String(error.message || "").toLowerCase();
+      
+      if (errMsg.includes("degraded") || errMsg.includes("invoked") || errMsg.includes("llm api error") || errMsg.includes("400") || errMsg.includes("500")) {
+        friendlyMessage = "Sorry, my AI service is currently down or undergoing maintenance. Please try again in a short while!";
+      } else if (errMsg.includes("network") || errMsg.includes("failed to fetch") || errMsg.includes("timeout") || errMsg.includes("network error")) {
+        friendlyMessage = "Sorry, I had trouble connecting to the server. Please check your network connection and try again!";
+      } else if (error.message && error.message.length < 100) {
+        friendlyMessage = `Sorry, I ran into an error: ${error.message}`;
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `Sorry, I ran into an error: ${error.message || "Failed to contact service."}`
+          content: friendlyMessage
         }
       ]);
     } finally {
