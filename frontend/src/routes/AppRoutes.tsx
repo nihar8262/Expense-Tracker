@@ -369,8 +369,6 @@ export function AppRoutes() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
-  const [selectedWallet, setSelectedWallet] = useState<WalletDetail | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
@@ -490,6 +488,18 @@ export function AppRoutes() {
   const [dashboardViewMode, setDashboardViewMode] = useState<"personal" | "wallet">("personal");
   const [dashboardWalletId, setDashboardWalletId] = useState<string | null>(null);
   const [dashboardWallet, setDashboardWallet] = useState<WalletDetail | null>(null);
+  const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
+  const [selectedWallet, _setSelectedWallet] = useState<WalletDetail | null>(null);
+
+  const setSelectedWallet = useCallback((val: WalletDetail | null | ((prev: WalletDetail | null) => WalletDetail | null)) => {
+    _setSelectedWallet((prev) => {
+      const next = typeof val === "function" ? val(prev) : val;
+      if (next && dashboardWalletId === next.wallet.id) {
+        setDashboardWallet(next);
+      }
+      return next;
+    });
+  }, [dashboardWalletId]);
   const [isSavingReminderPreferences, setIsSavingReminderPreferences] = useState(false);
   const [isSavingBillReminder, setIsSavingBillReminder] = useState(false);
   const [isRunningNotificationChecks, setIsRunningNotificationChecks] = useState(false);
@@ -1226,12 +1236,14 @@ export function AppRoutes() {
 
   useEffect(() => {
     if (!currentUser || !dashboardWalletId || dashboardViewMode !== "wallet") {
-      setDashboardWallet(null);
       return;
     }
-    // Always fetch fresh from API for dashboard — ensures walletAggregation is present
+    // Only fetch if we don't have the current wallet loaded
+    if (dashboardWallet && dashboardWallet.wallet.id === dashboardWalletId) {
+      return;
+    }
     getWalletDetail(dashboardWalletId, currentUser).then(setDashboardWallet).catch(() => setDashboardWallet(null));
-  }, [currentUser, dashboardViewMode, dashboardWalletId]);
+  }, [currentUser, dashboardViewMode, dashboardWalletId, dashboardWallet]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
