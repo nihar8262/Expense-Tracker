@@ -700,6 +700,13 @@ async function ensureSchema(sql: Sql): Promise<void> {
           revoked_at TIMESTAMPTZ
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS rate_limits (
+          key VARCHAR(255) PRIMARY KEY,
+          tokens DOUBLE PRECISION NOT NULL,
+          last_refilled_at TIMESTAMPTZ NOT NULL
+        )
+      `;
     })();
   }
 

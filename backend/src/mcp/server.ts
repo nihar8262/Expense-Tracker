@@ -4,6 +4,7 @@ import type { ExpenseStore } from "../store/types.js";
 import { getTools } from "../assistant/tools.js";
 import { getTokenStore } from "./tokenStore.js";
 import { authenticateMcpRequest, McpAuthenticationError } from "./auth.js";
+import { getRateLimiter } from "./rateLimiter.js";
 
 const sessions = new Map<string, express.Response>();
 
@@ -43,6 +44,17 @@ export function registerMcpRoutes(app: express.Express, store: ExpenseStore) {
         return response.status(401).json({ error: error.message });
       }
       return response.status(500).json({ error: "Authentication failed." });
+    }
+
+    const rateLimiter = getRateLimiter();
+    try {
+      const rateLimitKey = `mcp:${user.id}`;
+      const limitResult = await rateLimiter.checkRateLimit(rateLimitKey, "mcp");
+      if (!limitResult.allowed) {
+        return response.status(429).json({ error: "Too many requests. Please try again later." });
+      }
+    } catch (err: any) {
+      console.error("Rate limit check error:", err);
     }
 
     const { jsonrpc, id, method: mcpMethod, params } = request.body || {};

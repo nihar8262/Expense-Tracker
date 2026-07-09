@@ -16,6 +16,17 @@ module.exports = async function handler(request, response) {
     }
 
     try {
+      const { checkRateLimit } = require("./_lib/rate-limiter");
+      const rateLimitKey = `chat:${user.id}`;
+      const limitResult = await checkRateLimit(rateLimitKey, "chat");
+      if (!limitResult.allowed) {
+        return response.status(429).json({ error: "Too many messages. Please wait before sending more." });
+      }
+    } catch (err) {
+      console.error("Rate limit check error:", err);
+    }
+
+    try {
       const result = await handleAssistantQuery(request.body || {}, user.id);
       return sendResult(response, {
         status: 200,

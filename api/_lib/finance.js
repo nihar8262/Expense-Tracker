@@ -510,6 +510,13 @@ async function ensureSchema(sql) {
           revoked_at TIMESTAMPTZ
         )
       `);
+      await safeSchemaStep("create rate_limits table", () => sql`
+        CREATE TABLE IF NOT EXISTS rate_limits (
+          key VARCHAR(255) PRIMARY KEY,
+          tokens DOUBLE PRECISION NOT NULL,
+          last_refilled_at TIMESTAMPTZ NOT NULL
+        )
+      `);
     })().catch((error) => {
       schemaReady = null;
       throw error;

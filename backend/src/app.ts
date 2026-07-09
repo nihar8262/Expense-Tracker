@@ -48,6 +48,7 @@ import type { ExpenseStore } from "./store/types.js";
 import { handleAssistantQuery } from "./assistant/assistantService.js";
 import { getTokenStore } from "./mcp/tokenStore.js";
 import { registerMcpRoutes } from "./mcp/server.js";
+import { getRateLimiter } from "./mcp/rateLimiter.js";
 
 type RequestAuthenticator = (authorizationHeader: string | undefined) => Promise<AuthenticatedUser>;
 type AccountDeleter = (userId: string) => Promise<void>;
@@ -671,6 +672,17 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       request,
       response,
       async (user) => {
+        const rateLimiter = getRateLimiter();
+        try {
+          const rateLimitKey = `chat:${user.id}`;
+          const limitResult = await rateLimiter.checkRateLimit(rateLimitKey, "chat");
+          if (!limitResult.allowed) {
+            return response.status(429).json({ error: "Too many messages. Please wait before sending more." });
+          }
+        } catch (err) {
+          console.error("Rate limit check error:", err);
+        }
+
         try {
           const result = await handleAssistantQuery(request.body || {}, user.id, store);
           return response.status(200).json(result);

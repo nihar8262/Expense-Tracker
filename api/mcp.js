@@ -1,5 +1,6 @@
 const { authenticateMcpRequest, McpAuthenticationError } = require("./_lib/mcp-auth");
 const { tools } = require("./_lib/assistant-tools");
+const { checkRateLimit } = require("./_lib/rate-limiter");
 
 const readOnlyTools = tools.filter(t => t.name !== "create_expense");
 
@@ -42,6 +43,16 @@ module.exports = async function handler(request, response) {
         return response.status(401).json({ error: error.message });
       }
       return response.status(500).json({ error: "Authentication failed." });
+    }
+
+    try {
+      const rateLimitKey = `mcp:${user.id}`;
+      const limitResult = await checkRateLimit(rateLimitKey, "mcp");
+      if (!limitResult.allowed) {
+        return response.status(429).json({ error: "Too many requests. Please try again later." });
+      }
+    } catch (err) {
+      console.error("Rate limit check error:", err);
     }
 
     const { jsonrpc, id, method: mcpMethod, params } = request.body || {};
