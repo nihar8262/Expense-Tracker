@@ -12,7 +12,7 @@ CRITICAL FORMATTING RULES:
 2. Do NOT use any markdown formatting, including bold marks (like **), italic marks (like *), or bullet points (like *). Output your responses in clean, simple plain text. Use newlines and standard spacing for lists or breakdowns.
 3. Keep your responses concise, clear, and professional.`;
 
-const MODEL_NAME = "nvidia/nemotron-3-ultra-550b-a55b";
+const MODEL_NAME = "meta/llama-3.1-70b-instruct";
 const API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
 async function callLLM(messages: any[], toolsList: any[]) {
