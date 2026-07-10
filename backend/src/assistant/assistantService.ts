@@ -105,7 +105,21 @@ export async function handleAssistantQuery(
   store: ExpenseStore
 ) {
   const tools = getTools(store);
-  const currentMessages = [...(body.messages || [])];
+  
+  // Guard against missing messages payload
+  const rawMessages = body.messages || [];
+  if (!Array.isArray(rawMessages)) {
+    throw new Error("Invalid payload: 'messages' must be an array.");
+  }
+
+  // Cost & abuse control: limit to last 15 messages and truncate content to 1000 chars
+  const currentMessages = rawMessages.slice(-15).map((msg: any) => ({
+    role: msg.role,
+    content: typeof msg.content === "string" ? msg.content.slice(0, 1000) : msg.content,
+    ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+    ...(msg.tool_call_id ? { tool_call_id: msg.tool_call_id } : {}),
+    ...(msg.name ? { name: msg.name } : {})
+  }));
 
   // 1. If there's a confirmed write action, execute it first
   if (body.confirmedAction) {
