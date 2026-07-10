@@ -9,11 +9,21 @@ async function searchExpensesSemantic(sql, userId, query, limit = 5) {
     }
     const vectorStr = `[${embedding.join(",")}]`;
 
-    // Query pgvector cosine distance
+    // Query pgvector cosine distance, scoping search results based on ownership/membership
     const rows = await sql`
-      SELECT owner_id, owner_type, content, (embedding <-> ${vectorStr}::vector(768)) AS distance
-      FROM content_embeddings
-      WHERE user_id = ${userId} AND embedding IS NOT NULL
+      SELECT ce.owner_id, ce.owner_type, ce.content, (ce.embedding <-> ${vectorStr}::vector(768)) AS distance
+      FROM content_embeddings ce
+      WHERE ce.embedding IS NOT NULL
+        AND (
+          (ce.owner_type = 'expense' AND ce.user_id = ${userId})
+          OR
+          (ce.owner_type = 'wallet_expense' AND EXISTS (
+            SELECT 1
+            FROM wallet_expenses we
+            INNER JOIN wallet_members wm ON wm.wallet_id = we.wallet_id
+            WHERE we.id = ce.owner_id AND wm.user_id = ${userId}
+          ))
+        )
       ORDER BY distance ASC
       LIMIT ${limit}
     `;
