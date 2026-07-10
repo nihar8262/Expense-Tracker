@@ -36,6 +36,12 @@ module.exports = async function handler(request, response) {
     }
 
     const validatedImages = [];
+    // Magic byte signatures for verifiable image types
+    const MAGIC_BYTES = {
+      "image/jpeg": [0xFF, 0xD8, 0xFF],
+      "image/png":  [0x89, 0x50, 0x4E, 0x47],
+      "image/webp": [0x52, 0x49, 0x46, 0x46]  // "RIFF" — WebP container
+    };
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
       if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
@@ -44,6 +50,14 @@ module.exports = async function handler(request, response) {
       const cleanMime = img.mimeType.toLowerCase().trim();
       if (!["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(cleanMime)) {
         return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'.` });
+      }
+      // Validate actual file content matches declared MIME type (magic bytes)
+      const magic = MAGIC_BYTES[cleanMime];
+      if (magic) {
+        const buf = Buffer.from(img.data, "base64");
+        if (buf.length < magic.length || !magic.every((byte, j) => buf[j] === byte)) {
+          return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
+        }
       }
       validatedImages.push({
         data: img.data,

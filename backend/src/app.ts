@@ -134,7 +134,13 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
           return response.status(400).json({ error: "Max 3 images are allowed per single bill scan." });
         }
 
-        const validatedImages = [];
+        const validatedImages: { data: string; mimeType: string }[] = [];
+        // Magic byte signatures for verifiable image types
+        const MAGIC_BYTES: Record<string, number[]> = {
+          "image/jpeg": [0xFF, 0xD8, 0xFF],
+          "image/png":  [0x89, 0x50, 0x4E, 0x47],
+          "image/webp": [0x52, 0x49, 0x46, 0x46]  // "RIFF" — WebP container
+        };
         for (let i = 0; i < images.length; i++) {
           const img = images[i];
           if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
@@ -143,6 +149,14 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
           const cleanMime = img.mimeType.toLowerCase().trim();
           if (!["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(cleanMime)) {
             return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'.` });
+          }
+          // Validate actual file content matches declared MIME type (magic bytes)
+          const magic = MAGIC_BYTES[cleanMime];
+          if (magic) {
+            const buf = Buffer.from(img.data, "base64");
+            if (buf.length < magic.length || !magic.every((byte: number, j: number) => buf[j] === byte)) {
+              return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
+            }
           }
           validatedImages.push({
             data: img.data,

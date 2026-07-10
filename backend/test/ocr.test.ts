@@ -67,7 +67,8 @@ describe("Receipts OCR API Router", () => {
       .set("Authorization", "Bearer user-one")
       .send({
         images: [
-          { data: "dGVzdC1pbWFnZS1kYXRh", mimeType: "image/jpeg" }
+          // Minimal JPEG: starts with FF D8 FF magic bytes (base64: /9j/)
+          { data: "/9j/4AAQSkZJRgABAQ==", mimeType: "image/jpeg" }
         ]
       });
 

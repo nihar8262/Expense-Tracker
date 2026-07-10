@@ -64,6 +64,10 @@ export async function saveEmbedding(
 
   try {
     const embedding = await getEmbedding(content);
+    // Validate all values are safe finite floats before interpolating into SQL
+    if (!Array.isArray(embedding) || !embedding.every((v: unknown) => typeof v === "number" && isFinite(v as number))) {
+      throw new Error("Invalid embedding vector: contains non-numeric or non-finite values.");
+    }
     const vectorStr = `[${embedding.join(",")}]`;
 
     await sql`
