@@ -42,8 +42,9 @@ A full-stack personal finance application for tracking daily spending, managing 
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
 - **Account management & profile editing** — Profile customization menu supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
-- **In-App AI Chatbot** — Interactive finance assistant scoped strictly to user expenses and wallets. Prompts are sanitized and monitored by strict guardrails. Incorporates a human-in-the-loop approval confirmation dialog for write operations (such as expense creation) and self-healing rate limit retry handlers on NVIDIA NIM.
-- **Model Context Protocol (MCP) Server** — Connect external tools (Cursor, Claude Desktop, etc.) to your expense tracker data using the standard Streamable HTTP SSE transport. Fully secured via user-managed SHA-256 hashed personal access tokens.
+- **In-App AI Chatbot** — Interactive finance assistant scoped strictly to user expenses and wallets. Features semantic query searching across your entire transaction history. Prompts are monitored by strict guardrails, tool outputs are recursively sanitized to prevent prompt injections, and conversation histories are bounded to control costs. Incorporates a human-in-the-loop approval confirmation dialog for write operations (such as expense creation) and self-healing rate limit retry handlers.
+- **Receipt Scanning (OCR)** — Upload single or multiple receipt photos to automatically extract details (merchant, amount, category, date, item breakdown description) in real-time, pre-filling a draft transaction form (personal or wallet) for user review. Validated by file magic-byte signatures and redacted for credit card numbers.
+- **Model Context Protocol (MCP) Server** — Connect external tools (Cursor, Claude Desktop, etc.) to your expense tracker data using the standard Streamable HTTP SSE transport. Exposes semantic search (`search_expenses_semantic`) and structured retrieval tools, secured via user-managed SHA-256 hashed personal access tokens.
 - **Responsive design** — Desktop navigation bar with bottom tab navigation on mobile.
 - **Dark-mode-ready surface system** — Tailwind CSS v4 with CSS custom properties for theming.
 
@@ -56,11 +57,11 @@ A full-stack personal finance application for tracking daily spending, managing 
 | Frontend     | React 19, TypeScript, Vite, Tailwind CSS v4                 |
 | Backend      | Node.js, TypeScript, Express (local dev)                    |
 | Production   | Vercel Serverless Functions (API routes under `api/`)        |
-| Database     | PostgreSQL via the `postgres` npm package (tagged templates) |
+| Database     | PostgreSQL with `pgvector` extension via `postgres` npm package |
 | Auth Client  | Firebase Auth (`signInWithPopup` for Google, GitHub, Facebook) |
 | Auth Server  | Firebase Admin SDK (ID token verification)                   |
 | Testing      | Vitest (backend unit tests with in-memory store)             |
-| AI Inference | NVIDIA NIM API (`nvidia/nemotron-3-ultra-550b-a55b` model)    |
+| AI Inference | Llama 3.1 70B (NVIDIA NIM) & Gemini 2.5 Flash / Embeddings     |
 | MCP Transport| Server-Sent Events (SSE) + HTTP POST JSON-RPC 2.0             |
 | Monorepo     | npm workspaces (`backend/`, `frontend/`)                     |
 
@@ -314,8 +315,15 @@ Vercel
 - **No Private IDs Exposure**: Database UUID keys (`expenseid`, `userid`, `walletid`) are stripped from chatbot text responses to keep messages clean and focused on user-facing descriptions.
 - **Write Actions Confirmation**: Triggering a write tool (e.g. `create_expense`) stops execution and renders a custom confirmation UI card inline in the chat bubble. The expense is committed only if the user explicitly approves.
 - **NIM Worker Rate-Limits Recovery**: Backed by a 3-attempt backoff handler catching HTTP 503 limits from NVIDIA's model hosting.
-- **External Integration (MCP)**: Standards-compliant Server-Sent Events (SSE) server allows external IDEs/clients (Cursor, Claude Desktop) to invoke read-only tracker tools (`list_expenses`, `get_expense_summary`, `list_wallets`, `get_wallet_balance`) with secure user scopes.
+- **External Integration (MCP)**: Standards-compliant Server-Sent Events (SSE) server allows external IDEs/clients (Cursor, Claude Desktop) to invoke read-only tracker tools (`list_expenses`, `get_expense_summary`, `list_wallets`, `get_wallet_balance`, `search_expenses_semantic`) with secure user scopes.
 - **Personal Access Tokens Control**: Generated from the Settings profile card. Utilizes cryptographic SHA-256 hashing. Active tokens support soft **Revocation**; soft-revoked tokens display a **Delete** button to permanently clean up the audit trail via a React-based confirmation modal.
+- **Semantic Search (`search_expenses_semantic`)**: Performs vector-based similarity queries (pgvector) on PostgreSQL to locate conceptual transactions matching semantic intent (e.g. searching for "sweet snacks" returns cake or cookies).
+- **Security & Abuse Protections**:
+  - **Tool Result Sanitization**: Recursively sanitizes and truncates tool-result objects to 500 characters per string field before injecting into the LLM context to block indirect injection vectors.
+  - **Context Window Bounds**: Limits conversation history to the last 15 messages and truncates message content to 1,000 characters to control token costs and prevent cost exhaustion.
+  - **Vector Query Float Guard**: Sanitizes and enforces strict float validation on vector arrays before pgvector query interpolation.
+  - **Mime Type Magic-Byte Check**: Verifies uploaded receipt file signatures (JPEG, PNG, WebP) to reject malicious files masquerading as images.
+  - **Multi-Layered Rate Limiting**: Enforces separate per-user bucket caps for assistant chat queries (10 RPM), receipt scans (5 RPM), and MCP connections (60 RPM).
 
 ### Shared Wallets
 
@@ -375,7 +383,8 @@ Copy `.env.example` to `.env` and fill in the values:
 | `FIREBASE_PROJECT_ID`               | Yes      | Firebase Admin project ID (backend token verification)   |
 | `FIREBASE_CLIENT_EMAIL`             | Yes      | Firebase Admin client email                              |
 | `FIREBASE_PRIVATE_KEY`              | Yes      | Firebase Admin private key (use `\n` escapes in `.env`)  |
-| `NIM_API_KEY`                       | Yes      | NVIDIA NIM API key forNemotron-3-Ultra model inference   |
+| `LLM_API_KEY`                       | Yes      | NVIDIA NIM API key for Llama 3.1 70B model inference     |
+| `GEMINI_API_KEY`                    | Yes      | Google Gemini API key for OCR and vector embeddings      |
 | `VITE_API_BASE_URL`                 | No       | Override API base URL (leave empty for same-origin/proxy) |
 
 ---
