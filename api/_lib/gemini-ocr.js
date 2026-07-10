@@ -75,19 +75,29 @@ async function extractReceipt(images) {
 
   const extractedData = JSON.parse(textResponse.trim());
 
-  const redact = (val) => {
+  const redactCardNumbers = (val) => {
     if (typeof val === "string") {
       return val.replace(/\b(?:\d[ -]*?){12,19}\b/g, "[REDACTED]");
     }
     return val;
   };
 
+  // Strip null bytes and non-printable control characters (except newlines/tabs),
+  // then apply card-number redaction, then cap per-field lengths.
+  const sanitizeField = (val, maxLen) => {
+    if (typeof val !== "string") return val;
+    const stripped = val
+      .replace(/\0/g, "")
+      .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    return redactCardNumbers(stripped).slice(0, maxLen);
+  };
+
   return {
-    merchant: redact(extractedData.merchant),
-    amount: redact(extractedData.amount),
-    date: redact(extractedData.date),
-    category: redact(extractedData.category),
-    description: redact(extractedData.description)
+    merchant: sanitizeField(extractedData.merchant, 100),
+    amount: sanitizeField(extractedData.amount, 20),
+    date: sanitizeField(extractedData.date, 10),
+    category: sanitizeField(extractedData.category, 64),
+    description: sanitizeField(extractedData.description, 280)
   };
 }
 
