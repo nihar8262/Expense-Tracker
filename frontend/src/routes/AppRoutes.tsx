@@ -327,7 +327,7 @@ export function AppRoutes() {
       delete window.showToast;
     };
   }, [addToast]);
-  const { authLoading, currentUser, authMessage, setAuthMessage, setCurrentUser, signIn, signOutCurrentUser } = useAuth();
+  const { authLoading, currentUser, authMessage, setAuthMessage, setCurrentUser, signIn, signOutCurrentUser, signInWithEmail, signUpWithEmail, sendPasswordReset } = useAuth();
   const { listExpenses, createExpense, updateExpense, deleteExpense } = useExpenses();
   const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
   const {
@@ -618,7 +618,7 @@ export function AppRoutes() {
       return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
     }
 
-    if (chartGranularity === "monthly" && dashboardWallet.walletAggregation?.monthly_totals) {
+    if (dashboardWallet.walletAggregation?.monthly_totals) {
       const today = new Date();
       const currentYear = today.getFullYear().toString();
 
@@ -627,20 +627,88 @@ export function AppRoutes() {
         filteredTotals = filteredTotals.filter(m => m.month.startsWith(currentYear));
       }
 
-      return filteredTotals.map(m => {
-        const [year, monthNum] = m.month.split("-").map(Number);
-        const parsedDate = new Date(year, monthNum - 1, 1);
-        const label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(parsedDate);
-        const shortLabel = new Intl.DateTimeFormat("en-IN", { month: "short" }).format(parsedDate);
-        return {
-          key: m.month,
-          label,
-          shortLabel,
-          total: Number(m.total),
-          count: m.count,
-          order: parsedDate.getTime()
-        };
-      });
+      if (chartGranularity === "monthly") {
+        return filteredTotals.map(m => {
+          const [year, monthNum] = m.month.split("-").map(Number);
+          const parsedDate = new Date(year, monthNum - 1, 1);
+          const label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(parsedDate);
+          const shortLabel = new Intl.DateTimeFormat("en-IN", { month: "short" }).format(parsedDate);
+          return {
+            key: m.month,
+            label,
+            shortLabel,
+            total: Number(m.total),
+            count: m.count,
+            order: parsedDate.getTime()
+          };
+        });
+      }
+
+      if (chartGranularity === "quarterly") {
+        const quarterBuckets = new Map<string, { total: number; count: number; order: number }>();
+        for (const m of filteredTotals) {
+          const [year, monthNum] = m.month.split("-").map(Number);
+          const quarter = Math.floor((monthNum - 1) / 3) + 1;
+          const key = `${year}-Q${quarter}`;
+          const existing = quarterBuckets.get(key);
+          if (existing) {
+            existing.total += Number(m.total);
+            existing.count += m.count;
+          } else {
+            quarterBuckets.set(key, {
+              total: Number(m.total),
+              count: m.count,
+              order: new Date(year, (quarter - 1) * 3, 1).getTime()
+            });
+          }
+        }
+
+        return [...quarterBuckets.entries()]
+          .sort((a, b) => a[1].order - b[1].order)
+          .map(([key, data]) => {
+            const [year, qStr] = key.split("-Q");
+            return {
+              key,
+              label: `Q${qStr} ${year}`,
+              shortLabel: `Q${qStr}`,
+              total: data.total,
+              count: data.count,
+              order: data.order
+            };
+          });
+      }
+
+      if (chartGranularity === "yearly") {
+        const yearBuckets = new Map<string, { total: number; count: number; order: number }>();
+        for (const m of filteredTotals) {
+          const [year] = m.month.split("-");
+          const key = year;
+          const existing = yearBuckets.get(key);
+          if (existing) {
+            existing.total += Number(m.total);
+            existing.count += m.count;
+          } else {
+            yearBuckets.set(key, {
+              total: Number(m.total),
+              count: m.count,
+              order: new Date(Number(year), 0, 1).getTime()
+            });
+          }
+        }
+
+        return [...yearBuckets.entries()]
+          .sort((a, b) => a[1].order - b[1].order)
+          .map(([key, data]) => {
+            return {
+              key,
+              label: key,
+              shortLabel: key,
+              total: data.total,
+              count: data.count,
+              order: data.order
+            };
+          });
+      }
     }
 
     return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
@@ -1242,7 +1310,7 @@ export function AppRoutes() {
     if (dashboardWallet && dashboardWallet.wallet.id === dashboardWalletId) {
       return;
     }
-    getWalletDetail(dashboardWalletId, currentUser).then(setDashboardWallet).catch(() => setDashboardWallet(null));
+    getWalletDetail(dashboardWalletId, currentUser, 0, 1000).then(setDashboardWallet).catch(() => setDashboardWallet(null));
   }, [currentUser, dashboardViewMode, dashboardWalletId, dashboardWallet]);
 
   useEffect(() => {
@@ -2723,8 +2791,8 @@ export function AppRoutes() {
         ) : (
           <>
             <Route path="/" element={<LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
-            <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
-            <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} />} />
+            <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} onSignInWithEmail={signInWithEmail} onSignUpWithEmail={signUpWithEmail} onSendPasswordReset={sendPasswordReset} />} />
+            <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} onSignInWithEmail={signInWithEmail} onSignUpWithEmail={signUpWithEmail} onSendPasswordReset={sendPasswordReset} />} />
             <Route path="/dashboard" element={<Navigate to="/" replace />} />
             <Route path="/expenses" element={<Navigate to="/" replace />} />
             <Route path="/wallets" element={<Navigate to="/" replace />} />

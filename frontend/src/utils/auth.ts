@@ -33,5 +33,25 @@ export function formatAuthError(error: unknown): string {
     return "An account already exists with the same email address but a different sign-in method. Sign in using the original provider (e.g. Google) linked to that email, then link additional providers from your profile.";
   }
 
+  if (message.includes("invalid-credential") || message.includes("user-not-found") || message.includes("wrong-password")) {
+    return "Incorrect email or password.";
+  }
+
+  if (message.includes("invalid-email")) {
+    return "The email address is invalid.";
+  }
+
+  if (message.includes("weak-password")) {
+    return "The password is too weak. It must be at least 6 characters.";
+  }
+
+  if (message.includes("email-already-in-use")) {
+    return "An account already exists with this email address.";
+  }
+
+  if (message.includes("too-many-requests")) {
+    return "Too many unsuccessful attempts. Please try again later.";
+  }
+
   return error.message;
 }

@@ -56,7 +56,7 @@ type AccountDeleter = (userId: string) => Promise<void>;
 export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthenticator = authenticateBearerToken, deleteUserAccount: AccountDeleter = deleteAuthenticatedUser) {
   const app = express();
 
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
 
   async function withAuthenticatedUser(
     request: express.Request,

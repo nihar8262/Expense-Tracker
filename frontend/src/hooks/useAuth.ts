@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AuthProvider, User } from "firebase/auth";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "../auth";
 import type { ProviderOption } from "../types";
 import { formatAuthError } from "../utils/auth";
@@ -85,6 +85,63 @@ export function useAuth() {
     setCurrentUser(null);
   }
 
+  async function signInWithEmail(email: string, password: string) {
+    if (!auth) {
+      setAuthMessage("Firebase is not configured. Add the Vite Firebase environment variables to enable sign-in.");
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthMessage("");
+
+    try {
+      await authPersistenceReady;
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      setAuthMessage(formatAuthError(error));
+      throw error;
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function signUpWithEmail(email: string, password: string) {
+    if (!auth) {
+      setAuthMessage("Firebase is not configured. Add the Vite Firebase environment variables to enable sign-in.");
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthMessage("");
+
+    try {
+      await authPersistenceReady;
+      await createUserWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      setAuthMessage(formatAuthError(error));
+      throw error;
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function sendPasswordReset(email: string) {
+    if (!auth) {
+      setAuthMessage("Firebase is not configured. Add the Vite Firebase environment variables to enable password reset.");
+      return;
+    }
+
+    setAuthMessage("");
+
+    try {
+      await authPersistenceReady;
+      await sendPasswordResetEmail(auth, email);
+    } catch (error) {
+      setAuthMessage(formatAuthError(error));
+      throw error;
+    }
+  }
+
   return {
     authLoading,
     currentUser,
@@ -92,6 +149,9 @@ export function useAuth() {
     setAuthMessage,
     setCurrentUser,
     signIn,
-    signOutCurrentUser
+    signOutCurrentUser,
+    signInWithEmail,
+    signUpWithEmail,
+    sendPasswordReset
   };
 }
