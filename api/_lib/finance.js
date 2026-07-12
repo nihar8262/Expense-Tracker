@@ -232,7 +232,11 @@ const reminderPreferencesSchema = z.object({
   dailyLoggingEnabled: z.boolean(),
   dailyLoggingHour: z.number().int().min(0).max(23),
   budgetAlertsEnabled: z.boolean(),
-  budgetAlertThreshold: z.number().int().min(1).max(100)
+  budgetAlertThreshold: z.number().int().min(1).max(100),
+  defaultCurrency: z.string().trim().min(1).max(10).optional(),
+  defaultTimezone: z.string().trim().min(1).max(100).optional(),
+  displayName: z.string().trim().max(120).nullable().optional(),
+  photoUrl: z.string().trim().nullable().optional()
 });
 
 const createBillReminderSchema = z.object({
@@ -498,6 +502,10 @@ async function ensureSchema(sql) {
         await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
         await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
       });
+      await safeSchemaStep("reminder preferences default_currency column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS default_currency VARCHAR(10) DEFAULT 'USD'`);
+      await safeSchemaStep("reminder preferences default_timezone column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS default_timezone VARCHAR(100) DEFAULT 'UTC'`);
+      await safeSchemaStep("reminder preferences display_name column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS display_name VARCHAR(120) DEFAULT NULL`);
+      await safeSchemaStep("reminder preferences photo_url column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS photo_url TEXT DEFAULT NULL`);
       await safeSchemaStep("create mcp_access_tokens table", () => sql`
         CREATE TABLE IF NOT EXISTS mcp_access_tokens (
           id UUID PRIMARY KEY,
@@ -1543,12 +1551,12 @@ async function markAllNotificationsReadForUser(userId) {
 async function getReminderPreferencesForUser(userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const rows = await sql`SELECT user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, updated_at FROM reminder_preferences WHERE user_id = ${userId}`;
+  const rows = await sql`SELECT user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, default_currency, default_timezone, display_name, photo_url, updated_at FROM reminder_preferences WHERE user_id = ${userId}`;
   if (!rows[0]) {
-    return { status: 200, body: { preferences: { daily_logging_enabled: true, daily_logging_hour: 20, budget_alerts_enabled: true, budget_alert_threshold: 80, updated_at: new Date().toISOString() } } };
+    return { status: 200, body: { preferences: { daily_logging_enabled: true, daily_logging_hour: 20, budget_alerts_enabled: true, budget_alert_threshold: 80, default_currency: "USD", default_timezone: "UTC", display_name: null, photo_url: null, updated_at: new Date().toISOString() } } };
   }
   const row = rows[0];
-  return { status: 200, body: { preferences: { daily_logging_enabled: row.daily_logging_enabled, daily_logging_hour: row.daily_logging_hour, budget_alerts_enabled: row.budget_alerts_enabled, budget_alert_threshold: row.budget_alert_threshold, updated_at: asIsoTimestamp(row.updated_at) } } };
+  return { status: 200, body: { preferences: { daily_logging_enabled: row.daily_logging_enabled, daily_logging_hour: row.daily_logging_hour, budget_alerts_enabled: row.budget_alerts_enabled, budget_alert_threshold: row.budget_alert_threshold, default_currency: row.default_currency || "USD", default_timezone: row.default_timezone || "UTC", display_name: row.display_name || null, photo_url: row.photo_url || null, updated_at: asIsoTimestamp(row.updated_at) } } };
 }
 
 async function updateReminderPreferencesForUser(userId, rawBody) {
@@ -1558,9 +1566,22 @@ async function updateReminderPreferencesForUser(userId, rawBody) {
   }
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const rows = await sql`INSERT INTO reminder_preferences (user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, updated_at) VALUES (${userId}, ${result.data.dailyLoggingEnabled}, ${result.data.dailyLoggingHour}, ${result.data.budgetAlertsEnabled}, ${result.data.budgetAlertThreshold}, ${new Date().toISOString()}) ON CONFLICT (user_id) DO UPDATE SET daily_logging_enabled = EXCLUDED.daily_logging_enabled, daily_logging_hour = EXCLUDED.daily_logging_hour, budget_alerts_enabled = EXCLUDED.budget_alerts_enabled, budget_alert_threshold = EXCLUDED.budget_alert_threshold, updated_at = EXCLUDED.updated_at RETURNING user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, updated_at`;
+
+  const defaultCurrency = result.data.defaultCurrency || "USD";
+  const defaultTimezone = result.data.defaultTimezone || "UTC";
+  const displayName = result.data.displayName !== undefined ? result.data.displayName : null;
+  const photoUrl = result.data.photoUrl !== undefined ? result.data.photoUrl : null;
+
+  if (displayName) {
+    const usernameConflict = await sql`SELECT COUNT(*)::text AS count FROM reminder_preferences WHERE display_name = ${displayName} AND user_id != ${userId}`;
+    if (Number(usernameConflict[0]?.count ?? "0") > 0) {
+      return { status: 400, body: { error: "Username is already taken by another user." } };
+    }
+  }
+
+  const rows = await sql`INSERT INTO reminder_preferences (user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, default_currency, default_timezone, display_name, photo_url, updated_at) VALUES (${userId}, ${result.data.dailyLoggingEnabled}, ${result.data.dailyLoggingHour}, ${result.data.budgetAlertsEnabled}, ${result.data.budgetAlertThreshold}, ${defaultCurrency}, ${defaultTimezone}, ${displayName}, ${photoUrl}, ${new Date().toISOString()}) ON CONFLICT (user_id) DO UPDATE SET daily_logging_enabled = EXCLUDED.daily_logging_enabled, daily_logging_hour = EXCLUDED.daily_logging_hour, budget_alerts_enabled = EXCLUDED.budget_alerts_enabled, budget_alert_threshold = EXCLUDED.budget_alert_threshold, default_currency = EXCLUDED.default_currency, default_timezone = EXCLUDED.default_timezone, display_name = EXCLUDED.display_name, photo_url = EXCLUDED.photo_url, updated_at = EXCLUDED.updated_at RETURNING user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, default_currency, default_timezone, display_name, photo_url, updated_at`;
   const row = rows[0];
-  return { status: 200, body: { preferences: { daily_logging_enabled: row.daily_logging_enabled, daily_logging_hour: row.daily_logging_hour, budget_alerts_enabled: row.budget_alerts_enabled, budget_alert_threshold: row.budget_alert_threshold, updated_at: asIsoTimestamp(row.updated_at) } } };
+  return { status: 200, body: { preferences: { daily_logging_enabled: row.daily_logging_enabled, daily_logging_hour: row.daily_logging_hour, budget_alerts_enabled: row.budget_alerts_enabled, budget_alert_threshold: row.budget_alert_threshold, default_currency: row.default_currency || "USD", default_timezone: row.default_timezone || "UTC", display_name: row.display_name || null, photo_url: row.photo_url || null, updated_at: asIsoTimestamp(row.updated_at) } } };
 }
 
 async function upsertNotification(sql, input) {
