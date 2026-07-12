@@ -6,3 +6,6 @@ backend/data
 .env
 .DS_Store
 frontend/.vite
+
+backend/scripts/test-gemini.ts
+backend/scripts/test-mcp-search.ts
