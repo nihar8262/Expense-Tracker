@@ -55,6 +55,51 @@ function getBudgetProgress(budget: BudgetSummary): number {
   return Math.min((budget.spent / total) * 100, 100);
 }
 
+/**
+ * Returns a gradient or solid color for the progress bar based on how much
+ * of the budget has been consumed.
+ *
+ * Thresholds (percentage of budget spent):
+ *   < 20%  → dark green
+ *   < 30%  → green
+ *   < 40%  → yellow
+ *   < 50%  → dark yellow / amber
+ *   < 60%  → orange
+ *   < 70%  → red
+ *   ≥ 70%  → dark red
+ */
+function getBudgetProgressColor(percent: number): string {
+  if (percent < 20) return "#15803d";   // dark green
+  if (percent < 30) return "#22c55e";   // green
+  if (percent < 40) return "#eab308";   // yellow
+  if (percent < 50) return "#ca8a04";   // dark yellow / amber
+  if (percent < 60) return "#f97316";   // orange
+  if (percent < 70) return "#ef4444";   // red
+  return "#991b1b";                     // dark red
+}
+
+function getBudgetStatusInfo(percent: number, isOverspent: boolean): { label: string; toneClass: string } {
+  if (isOverspent)  return { label: "Over budget", toneClass: "tone-danger" };
+  if (percent < 20) return { label: "On track",    toneClass: "tone-positive" };
+  if (percent < 30) return { label: "On track",    toneClass: "tone-positive" };
+  if (percent < 40) return { label: "Moderate",    toneClass: "tone-warning" };
+  if (percent < 50) return { label: "Moderate",    toneClass: "tone-warning" };
+  if (percent < 60) return { label: "High usage",  toneClass: "tone-warning" };
+  if (percent < 80) return { label: "High usage",  toneClass: "tone-warning" };
+  return                    { label: "Critical",    toneClass: "tone-danger" };
+}
+
+function getOverviewRemainingStyle(isOverspent: boolean, summaries: BudgetSummary[]): string {
+  if (isOverspent) return "border-[color:rgba(154,63,56,0.16)] bg-danger-tint";
+  if (summaries.length === 0) return "border-primary/10 bg-success-tint";
+
+  // Use the highest-usage budget to color the overview card
+  const maxPercent = Math.max(...summaries.map(getBudgetProgress));
+  if (maxPercent < 40) return "border-primary/10 bg-success-tint";
+  if (maxPercent < 60) return "border-[color:rgba(202,138,4,0.16)] bg-warning-tint";
+  return "border-[color:rgba(154,63,56,0.16)] bg-danger-tint";
+}
+
 export function BudgetTrackerSection({
   sectionTitle,
   sectionDescription,
@@ -207,7 +252,7 @@ export function BudgetTrackerSection({
               <p className="section-eyebrow">Spent</p>
               <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalSpent}</strong>
             </div>
-            <div className={cn("rounded-[22px] border p-4 shadow-sm", currentMonthBudgetOverview.isOverspent ? "border-[color:rgba(154,63,56,0.16)] bg-danger-tint" : "border-primary/10 bg-success-tint")}>
+            <div className={cn("rounded-[22px] border p-4 shadow-sm", getOverviewRemainingStyle(currentMonthBudgetOverview.isOverspent, currentMonthBudgetSummaries))}>
               <p className="section-eyebrow">Remaining</p>
               <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalRemaining}</strong>
             </div>
@@ -224,7 +269,7 @@ export function BudgetTrackerSection({
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-semibold text-ink">{getBudgetTitle(budget)}</h3>
-                        <span className={cn("data-pill", budget.isOverspent ? "tone-danger" : "tone-positive")}>{budget.isOverspent ? "Over budget" : "On track"}</span>
+                        <span className={cn("data-pill", getBudgetStatusInfo(getBudgetProgress(budget), budget.isOverspent).toneClass)}>{getBudgetStatusInfo(getBudgetProgress(budget), budget.isOverspent).label}</span>
                       </div>
                       <p className="text-sm leading-6 text-secondary">
                         {budget.scope === "monthly" ? `Applies to all categories in ${currentBudgetMonthLabel}.` : `Tracks ${budget.category} spend for ${currentBudgetMonthLabel}.`}
@@ -258,9 +303,9 @@ export function BudgetTrackerSection({
 
                   <div className="mt-5 space-y-2">
                     <div className="h-3 overflow-hidden rounded-full bg-[#edf1eb]">
-                      <div className="h-full rounded-full bg-[linear-gradient(90deg,var(--primary),var(--gold))]" style={{ width: `${Math.max(getBudgetProgress(budget), 6)}%` }} />
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(getBudgetProgress(budget), 6)}%`, backgroundColor: getBudgetProgressColor(getBudgetProgress(budget)) }} />
                     </div>
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted">{getBudgetProgress(budget).toFixed(0)}% used</p>
+                    <p className="text-xs font-medium uppercase tracking-[0.18em]" style={{ color: getBudgetProgressColor(getBudgetProgress(budget)) }}>{getBudgetProgress(budget).toFixed(0)}% used</p>
                   </div>
                 </article>
               ))}
