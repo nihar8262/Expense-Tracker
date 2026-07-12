@@ -117,7 +117,7 @@ export function AuthPage({
             type="button"
             disabled={isSubmitting || authLoading}
             onClick={onBack}
-            className="self-start text-zinc-400 hover:text-ink disabled:opacity-50 transition duration-150 text-xs flex items-center gap-1.5 font-medium cursor-pointer"
+            className="self-start text-zinc-800 p-2 rounded-full hover:bg-green-200/50 hover:backdrop-blur-md transition duration-200 text-xs flex items-center gap-1.5 font-medium cursor-pointer"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
@@ -126,7 +126,7 @@ export function AuthPage({
           </button>
 
           <div className="space-y-4">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">SECURE ACCESS</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-800">SECURE ACCESS</span>
             <h1 className="font-display text-[4.2rem] leading-[0.92] tracking-[-0.04em] text-ink max-w-xl">
               {localMode === "signin"
                 ? "Return to a finance space that stays quiet and precise."
@@ -172,7 +172,7 @@ export function AuthPage({
 
           {/* Tab Switcher (Only in signin/signup modes) */}
           {localMode !== "forgot" && (
-            <div className="inline-flex rounded-full border border-zinc-200 bg-zinc-50/70 p-1 shadow-sm mb-6" role="tablist" aria-label="Authentication mode">
+            <div className="inline-flex rounded-full border border-zinc-200 bg-zinc-800 p-1 shadow-sm mb-6" role="tablist" aria-label="Authentication mode">
               <button
                 type="button"
                 disabled={isSubmitting || authLoading}
@@ -184,7 +184,7 @@ export function AuthPage({
                   "px-5 py-1.5 text-xs font-semibold rounded-full transition-all duration-150 cursor-pointer disabled:opacity-50 min-w-[100px]",
                   localMode === "signin"
                     ? "bg-white text-ink shadow-sm"
-                    : "text-zinc-500 hover:text-ink"
+                    : "text-zinc-50 hover:text-zinc-400"
                 )}
               >
                 Sign in
@@ -200,7 +200,7 @@ export function AuthPage({
                   "px-5 py-1.5 text-xs font-semibold rounded-full transition-all duration-150 cursor-pointer disabled:opacity-50 min-w-[100px]",
                   localMode === "signup"
                     ? "bg-white text-ink shadow-sm"
-                    : "text-zinc-500 hover:text-ink"
+                    : "text-zinc-50 hover:text-zinc-400"
                 )}
               >
                 Sign up
