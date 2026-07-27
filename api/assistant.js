@@ -1,4 +1,4 @@
-const { handleAssistantQuery } = require("./_lib/assistant-service");
+const { handleAssistantQuery, handleAssistantQueryStream } = require("./_lib/assistant-service");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
@@ -10,7 +10,7 @@ module.exports = async function handler(request, response) {
 
   const segments = getRoutedSegments(request);
 
-  if (segments.length === 1 && segments[0] === "query") {
+  if (segments.length === 1 && (segments[0] === "query" || segments[0] === "stream")) {
     if (request.method !== "POST") {
       return methodNotAllowed(response, "POST");
     }
@@ -24,6 +24,34 @@ module.exports = async function handler(request, response) {
       }
     } catch (err) {
       console.error("Rate limit check error:", err);
+    }
+
+    if (segments[0] === "stream") {
+      response.setHeader("Content-Type", "text/event-stream");
+      response.setHeader("Cache-Control", "no-cache");
+      response.setHeader("Connection", "keep-alive");
+      if (typeof response.flushHeaders === "function") {
+        response.flushHeaders();
+      }
+
+      try {
+        await handleAssistantQueryStream(
+          request.body || {},
+          user.id,
+          (chunk) => {
+            response.write(`data: ${JSON.stringify({ type: "text", text: chunk })}\n\n`);
+          },
+          (pendingAction) => {
+            response.write(`data: ${JSON.stringify({ type: "action", pendingAction })}\n\n`);
+          }
+        );
+        response.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        return response.end();
+      } catch (error) {
+        console.error("Assistant streaming failed:", error);
+        response.write(`data: ${JSON.stringify({ type: "error", error: error.message || "Failed to process stream." })}\n\n`);
+        return response.end();
+      }
     }
 
     try {
@@ -40,3 +68,4 @@ module.exports = async function handler(request, response) {
 
   return notFound(response);
 };
+

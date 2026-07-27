@@ -239,4 +239,266 @@ async function handleAssistantQuery({ messages, confirmedAction }, userId) {
   };
 }
 
-module.exports = { handleAssistantQuery };
+async function callLLMStream(messages, toolsList, onChunk) {
+  const apiKey = process.env.LLM_API_KEY;
+  if (!apiKey) {
+    throw new Error("LLM_API_KEY environment variable is not set.");
+  }
+
+  const formattedTools = toolsList.map(t => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters
+    }
+  }));
+
+  const payload = {
+    model: MODEL_NAME,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...messages
+    ],
+    tools: formattedTools,
+    tool_choice: "auto",
+    stream: true
+  };
+
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM API error (${response.status}): ${errorText}`);
+  }
+
+  let fullContent = "";
+  let toolCalls = [];
+
+  if (response.body && response.body.getReader) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const dataStr = trimmed.replace(/^data:\s*/, "");
+        if (dataStr === "[DONE]") break;
+
+        try {
+          const parsed = JSON.parse(dataStr);
+          const delta = parsed.choices?.[0]?.delta;
+          if (!delta) continue;
+
+          if (delta.content) {
+            fullContent += delta.content;
+            onChunk(delta.content);
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const index = tc.index ?? 0;
+              if (!toolCalls[index]) {
+                toolCalls[index] = {
+                  id: tc.id || "call-" + Math.random().toString(36).substring(2, 11),
+                  type: "function",
+                  function: { name: "", arguments: "" }
+                };
+              }
+              if (tc.function?.name) toolCalls[index].function.name += tc.function.name;
+              if (tc.function?.arguments) toolCalls[index].function.arguments += tc.function.arguments;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  } else {
+    const text = await response.text();
+    const lines = text.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const dataStr = trimmed.replace(/^data:\s*/, "");
+      if (dataStr === "[DONE]") break;
+      try {
+        const parsed = JSON.parse(dataStr);
+        const delta = parsed.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.content) {
+          fullContent += delta.content;
+          onChunk(delta.content);
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const index = tc.index ?? 0;
+            if (!toolCalls[index]) {
+              toolCalls[index] = {
+                id: tc.id || "call-" + Math.random().toString(36).substring(2, 11),
+                type: "function",
+                function: { name: "", arguments: "" }
+              };
+            }
+            if (tc.function?.name) toolCalls[index].function.name += tc.function.name;
+            if (tc.function?.arguments) toolCalls[index].function.arguments += tc.function.arguments;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return {
+    role: "assistant",
+    content: fullContent || null,
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+  };
+}
+
+async function handleAssistantQueryStream({ messages, confirmedAction }, userId, onChunk, onPendingAction) {
+  const rawMessages = messages || [];
+  if (!Array.isArray(rawMessages)) {
+    throw new Error("Invalid payload: 'messages' must be an array.");
+  }
+
+  const currentMessages = rawMessages.slice(-15).map((msg) => ({
+    role: msg.role,
+    content: typeof msg.content === "string" ? msg.content.slice(0, 1000) : msg.content,
+    ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+    ...(msg.tool_call_id ? { tool_call_id: msg.tool_call_id } : {}),
+    ...(msg.name ? { name: msg.name } : {})
+  }));
+
+  if (confirmedAction) {
+    const tool = tools.find(t => t.name === confirmedAction.tool);
+    if (tool) {
+      try {
+        const result = await tool.handler(confirmedAction.args, userId);
+        const toolCallId = "call-" + Math.random().toString(36).substring(2, 11);
+
+        currentMessages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: toolCallId,
+              type: "function",
+              function: {
+                name: confirmedAction.tool,
+                arguments: JSON.stringify(confirmedAction.args)
+              }
+            }
+          ]
+        });
+
+        currentMessages.push({
+          role: "tool",
+          name: confirmedAction.tool,
+          tool_call_id: toolCallId,
+          content: JSON.stringify(sanitizeToolResult(result))
+        });
+      } catch (error) {
+        console.error("Error executing confirmed action:", error);
+        currentMessages.push({
+          role: "user",
+          content: `System Error: Failed to execute action: ${error.message}`
+        });
+      }
+    }
+  }
+
+  const maxIterations = 5;
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const message = await callLLMStream(currentMessages, tools, onChunk);
+
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      const toolCall = message.tool_calls[0];
+      const toolName = toolCall.function.name;
+      let toolArgs = {};
+      try {
+        toolArgs = typeof toolCall.function.arguments === "string"
+          ? JSON.parse(toolCall.function.arguments)
+          : toolCall.function.arguments;
+      } catch (e) {
+        console.error("Failed to parse tool arguments:", e);
+      }
+
+      const tool = tools.find(t => t.name === toolName);
+      if (!tool) {
+        currentMessages.push({
+          role: "assistant",
+          content: message.content || null,
+          tool_calls: message.tool_calls
+        });
+        currentMessages.push({
+          role: "tool",
+          name: toolName,
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({ error: `Tool ${toolName} is not available.` })
+        });
+        continue;
+      }
+
+      if (toolName === "create_expense") {
+        const defaultText = message.content || `I am ready to log a personal expense of $${toolArgs.amount} for "${toolArgs.description}" in the category "${toolArgs.category}" on ${toolArgs.date}. Please confirm if you want me to proceed.`;
+        if (!message.content) {
+          onChunk(defaultText);
+        }
+        if (onPendingAction) {
+          onPendingAction({ tool: toolName, args: toolArgs });
+        }
+        return;
+      }
+
+      try {
+        const result = await tool.handler(toolArgs, userId);
+        currentMessages.push({
+          role: "assistant",
+          content: message.content || null,
+          tool_calls: message.tool_calls
+        });
+        currentMessages.push({
+          role: "tool",
+          name: toolName,
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(sanitizeToolResult(result))
+        });
+      } catch (error) {
+        console.error(`Error running tool ${toolName}:`, error);
+        currentMessages.push({
+          role: "assistant",
+          content: message.content || null,
+          tool_calls: message.tool_calls
+        });
+        currentMessages.push({
+          role: "tool",
+          name: toolName,
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({ error: error.message })
+        });
+      }
+    } else {
+      if (!message.content) {
+        onChunk("I couldn't generate a response.");
+      }
+      return;
+    }
+  }
+}
+
+module.exports = { handleAssistantQuery, handleAssistantQueryStream };
+

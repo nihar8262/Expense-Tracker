@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { User } from "firebase/auth";
 import { Sparkles, X, SendHorizontal, Loader2, Calendar, Tag, FileText, Landmark } from "lucide-react";
-import { queryAssistant } from "../services/api";
+import { queryAssistant, queryAssistantStream } from "../services/api";
 
 type Message = {
   role: "user" | "assistant" | "system" | "tool";
@@ -61,55 +61,103 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
     if (!textToSend.trim() && !confirmedAction) return;
 
     let updatedMessages = [...messages];
-    
+
     // Add user's message to chat history
     if (textToSend.trim()) {
       updatedMessages.push({ role: "user", content: textToSend });
-      setMessages(updatedMessages);
     }
-    
+
+    // Add initial placeholder for streaming assistant response
+    const assistantIndex = updatedMessages.length;
+    updatedMessages.push({ role: "assistant", content: "" });
+    setMessages(updatedMessages);
+
     setInput("");
     setIsLoading(true);
     setPendingAction(null);
 
+    let hasStreamed = false;
+
     try {
-      // Exclude system message or formatting details if sending to API
-      const result = await queryAssistant(updatedMessages, confirmedAction, currentUser);
-      
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: result.answer
+      await queryAssistantStream(
+        updatedMessages.slice(0, assistantIndex),
+        confirmedAction,
+        currentUser,
+        (chunkText: string) => {
+          hasStreamed = true;
+          setIsLoading(false);
+          setMessages((prev) => {
+            const next = [...prev];
+            if (next[assistantIndex]) {
+              next[assistantIndex] = {
+                ...next[assistantIndex],
+                content: (next[assistantIndex].content || "") + chunkText
+              };
+            }
+            return next;
+          });
+        },
+        (action: { tool: string; args: any }) => {
+          setPendingAction(action as PendingAction);
         }
-      ]);
+      );
 
       if (confirmedAction && confirmedAction.tool === "create_expense") {
         window.dispatchEvent(new CustomEvent("expense-added"));
       }
+    } catch (streamError: any) {
+      console.warn("SSE Stream failed, falling back to queryAssistant:", streamError);
 
-      if (result.pendingAction) {
-        setPendingAction(result.pendingAction as PendingAction);
-      }
-    } catch (error: any) {
-      let friendlyMessage = "Sorry, I am currently having trouble connecting to my AI service. Please try again in a moment!";
-      const errMsg = String(error.message || "").toLowerCase();
-      
-      if (errMsg.includes("degraded") || errMsg.includes("invoked") || errMsg.includes("llm api error") || errMsg.includes("400") || errMsg.includes("500")) {
-        friendlyMessage = "Sorry, my AI service is currently down or undergoing maintenance. Please try again in a short while!";
-      } else if (errMsg.includes("network") || errMsg.includes("failed to fetch") || errMsg.includes("timeout") || errMsg.includes("network error")) {
-        friendlyMessage = "Sorry, I had trouble connecting to the server. Please check your network connection and try again!";
-      } else if (error.message && error.message.length < 100) {
-        friendlyMessage = `Sorry, I ran into an error: ${error.message}`;
-      }
+      if (!hasStreamed) {
+        try {
+          const result = await queryAssistant(
+            updatedMessages.slice(0, assistantIndex),
+            confirmedAction,
+            currentUser
+          );
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: friendlyMessage
+          setMessages((prev) => {
+            const next = [...prev];
+            if (next[assistantIndex]) {
+              next[assistantIndex] = {
+                role: "assistant",
+                content: result.answer
+              };
+            }
+            return next;
+          });
+
+          if (confirmedAction && confirmedAction.tool === "create_expense") {
+            window.dispatchEvent(new CustomEvent("expense-added"));
+          }
+
+          if (result.pendingAction) {
+            setPendingAction(result.pendingAction as PendingAction);
+          }
+        } catch (error: any) {
+          let friendlyMessage = "Sorry, I am currently having trouble connecting to my AI service. Please try again in a moment!";
+          const errMsg = String(error.message || "").toLowerCase();
+
+          if (errMsg.includes("degraded") || errMsg.includes("invoked") || errMsg.includes("llm api error") || errMsg.includes("400") || errMsg.includes("500")) {
+            friendlyMessage = "Sorry, my AI service is currently down or undergoing maintenance. Please try again in a short while!";
+          } else if (errMsg.includes("network") || errMsg.includes("failed to fetch") || errMsg.includes("timeout") || errMsg.includes("network error")) {
+            friendlyMessage = "Sorry, I had trouble connecting to the server. Please check your network connection and try again!";
+          } else if (error.message && error.message.length < 100) {
+            friendlyMessage = `Sorry, I ran into an error: ${error.message}`;
+          }
+
+          setMessages((prev) => {
+            const next = [...prev];
+            if (next[assistantIndex]) {
+              next[assistantIndex] = {
+                role: "assistant",
+                content: friendlyMessage
+              };
+            }
+            return next;
+          });
         }
-      ]);
+      }
     } finally {
       setIsLoading(false);
     }

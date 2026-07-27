@@ -45,7 +45,7 @@ import {
   handleUpsertWalletReminderPreferences
 } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
-import { handleAssistantQuery } from "./assistant/assistantService.js";
+import { handleAssistantQuery, handleAssistantQueryStream } from "./assistant/assistantService.js";
 import { getTokenStore } from "./mcp/tokenStore.js";
 import { registerMcpRoutes } from "./mcp/server.js";
 import { getRateLimiter } from "./mcp/rateLimiter.js";
@@ -759,6 +759,53 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         }
       },
       "Failed to query assistant."
+    );
+  });
+
+  app.post("/api/assistant/stream", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const rateLimiter = getRateLimiter();
+        try {
+          const rateLimitKey = `chat:${user.id}`;
+          const limitResult = await rateLimiter.checkRateLimit(rateLimitKey, "chat");
+          if (!limitResult.allowed) {
+            return response.status(429).json({ error: "Too many messages. Please wait before sending more." });
+          }
+        } catch (err) {
+          console.error("Rate limit check error:", err);
+        }
+
+        response.setHeader("Content-Type", "text/event-stream");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+        if (typeof (response as any).flushHeaders === "function") {
+          (response as any).flushHeaders();
+        }
+
+        try {
+          await handleAssistantQueryStream(
+            request.body || {},
+            user.id,
+            store,
+            (chunk: string) => {
+              response.write(`data: ${JSON.stringify({ type: "text", text: chunk })}\n\n`);
+            },
+            (pendingAction: { tool: string; args: any }) => {
+              response.write(`data: ${JSON.stringify({ type: "action", pendingAction })}\n\n`);
+            }
+          );
+          response.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          return response.end();
+        } catch (error: any) {
+          console.error("Local dev assistant query stream failed:", error);
+          response.write(`data: ${JSON.stringify({ type: "error", error: error.message || "Failed to process stream." })}\n\n`);
+          return response.end();
+        }
+      },
+      "Failed to stream assistant query."
     );
   });
 

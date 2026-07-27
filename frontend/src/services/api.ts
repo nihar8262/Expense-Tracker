@@ -477,6 +477,74 @@ export async function queryAssistant(
   );
 }
 
+export async function queryAssistantStream(
+  messages: Array<{ role: string; content: string | null; tool_calls?: any[] }>,
+  confirmedAction: { tool: string; args: any } | null,
+  user: User,
+  onChunk: (chunk: string) => void,
+  onPendingAction?: (action: { tool: string; args: any }) => void
+): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL("/api/assistant/stream", API_BASE_URL).toString() : "/api/assistant/stream";
+  const headers = await buildAuthorizedHeaders(user, {
+    "Content-Type": "application/json"
+  });
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ messages, confirmedAction })
+  });
+
+  if (!response.ok) {
+    let errorMsg = "Failed to query assistant.";
+    try {
+      const errJson = await response.json();
+      if (errJson.error) errorMsg = errJson.error;
+    } catch (e) {}
+    throw new Error(errorMsg);
+  }
+
+  if (!response.body) {
+    throw new Error("ReadableStream not supported by browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("data: ")) {
+        const payloadStr = trimmed.slice(6).trim();
+        try {
+          const payload = JSON.parse(payloadStr);
+          if (payload.type === "text" && payload.text) {
+            onChunk(payload.text);
+          } else if (payload.type === "action" && payload.pendingAction && onPendingAction) {
+            onPendingAction(payload.pendingAction);
+          } else if (payload.type === "error") {
+            throw new Error(payload.error || "Stream failed.");
+          } else if (payload.type === "done") {
+            return;
+          }
+        } catch (e: any) {
+          if (e.message && e.message !== "Unexpected end of JSON input") {
+            console.warn("Error parsing stream chunk:", e);
+          }
+        }
+      }
+    }
+  }
+}
+
 export interface Token {
   id: string;
   label: string;
