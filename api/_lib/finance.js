@@ -228,6 +228,86 @@ const createSettlementSchema = z
     }
   });
 
+const createWalletLoanSchema = z.object({
+  borrowerMemberId: z.string().trim().min(1, "Borrower member is required.").optional(),
+  borrowerName: z.string().trim().min(1, "Borrower name is required.").max(120).optional(),
+  borrowerEmail: z.string().trim().email("Invalid borrower email.").max(320).nullable().optional(),
+  walletId: z.string().trim().min(1).nullable().optional(),
+  amount: z.union([z.string(), z.number()]).transform((value, context) => {
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: error instanceof Error ? error.message : "Invalid loan amount." });
+      return z.NEVER;
+    }
+  }),
+  interestRate: z.union([z.string(), z.number()]).default(0).transform((value, context) => {
+    const raw = typeof value === "number" ? value.toString() : String(value ?? "0").trim();
+    if (raw === "" || raw === "0") return 0;
+    if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: "Interest rate must be a valid number with up to 2 decimal places." });
+      return z.NEVER;
+    }
+    const basisPoints = Math.round(Number(raw) * 100);
+    if (basisPoints < 0 || basisPoints > 100000) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: "Interest rate must be between 0% and 1000%." });
+      return z.NEVER;
+    }
+    return basisPoints;
+  }),
+  interestType: z.enum(["percentage", "fixed", "none"]).default("percentage"),
+  interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).default("monthly"),
+  lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value."),
+  dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
+  interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
+  notes: z.string().trim().max(280).nullable().optional()
+});
+
+const updateWalletLoanSchema = z.object({
+  borrowerMemberId: z.string().trim().min(1).optional(),
+  borrowerName: z.string().trim().min(1).max(120).optional(),
+  borrowerEmail: z.string().trim().email("Invalid borrower email.").max(320).nullable().optional(),
+  amount: z.union([z.string(), z.number()]).optional().transform((value, context) => {
+    if (value === undefined) return undefined;
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: error instanceof Error ? error.message : "Invalid loan amount." });
+      return z.NEVER;
+    }
+  }),
+  interestRate: z.union([z.string(), z.number()]).optional().transform((value, context) => {
+    if (value === undefined) return undefined;
+    const raw = typeof value === "number" ? value.toString() : String(value ?? "0").trim();
+    if (raw === "" || raw === "0") return 0;
+    if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: "Interest rate must be a valid number with up to 2 decimal places." });
+      return z.NEVER;
+    }
+    return Math.round(Number(raw) * 100);
+  }),
+  interestType: z.enum(["percentage", "fixed", "none"]).optional(),
+  interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).optional(),
+  lendingDate: z.string().trim().refine(isValidIsoDate).optional(),
+  dueDate: z.string().trim().refine(isValidIsoDate).nullable().optional(),
+  interestStartDate: z.string().trim().refine(isValidIsoDate).nullable().optional(),
+  notes: z.string().trim().max(280).nullable().optional(),
+  status: z.enum(["active", "settled", "cancelled"]).optional()
+});
+
+const createWalletLoanRepaymentSchema = z.object({
+  amount: z.union([z.string(), z.number()]).transform((value, context) => {
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({ code: z.ZodIssueCode.custom, input: value, message: error instanceof Error ? error.message : "Invalid repayment amount." });
+      return z.NEVER;
+    }
+  }),
+  repaymentDate: z.string().trim().refine(isValidIsoDate, "Repayment date must be a valid YYYY-MM-DD value."),
+  notes: z.string().trim().max(280).nullable().optional()
+});
+
 const reminderPreferencesSchema = z.object({
   dailyLoggingEnabled: z.boolean(),
   dailyLoggingHour: z.number().int().min(0).max(23),
@@ -289,6 +369,42 @@ function mapWalletMember(row) {
     role: row.member_role,
     invite_status: row.invite_status,
     joined_at: asIsoTimestamp(row.joined_at)
+  };
+}
+
+function mapWalletLoanRepayment(row) {
+  return {
+    id: row.id,
+    loan_id: row.loan_id,
+    amount: formatMinorUnits(Number(row.amount_minor)),
+    repayment_date: asIsoDate(row.repayment_date),
+    notes: row.notes,
+    created_at: asIsoTimestamp(row.created_at)
+  };
+}
+
+function mapWalletLoan(row, repayments = []) {
+  return {
+    id: row.id,
+    owner_user_id: row.owner_user_id ?? null,
+    wallet_id: row.wallet_id ?? null,
+    lender_member_id: row.lender_member_id ?? null,
+    lender_member_name: row.lender_member_name ?? "You",
+    borrower_member_id: row.borrower_member_id ?? null,
+    borrower_member_name: row.borrower_member_name ?? row.borrower_name ?? "Borrower",
+    borrower_name: row.borrower_name ?? row.borrower_member_name ?? null,
+    borrower_email: row.borrower_email ?? null,
+    amount: formatMinorUnits(Number(row.amount_minor)),
+    interest_rate: row.interest_rate_basis_points ? row.interest_rate_basis_points / 100 : 0,
+    interest_type: row.interest_type,
+    interest_rate_period: row.interest_rate_period,
+    lending_date: asIsoDate(row.lending_date),
+    due_date: row.due_date ? asIsoDate(row.due_date) : null,
+    interest_start_date: row.interest_start_date ? asIsoDate(row.interest_start_date) : null,
+    notes: row.notes,
+    status: row.status,
+    created_at: asIsoTimestamp(row.created_at),
+    repayments
   };
 }
 
@@ -426,6 +542,16 @@ async function ensureSchema(sql) {
       await safeSchemaStep("create wallet_expenses table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expenses (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, paid_by_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), category VARCHAR(64) NOT NULL, description VARCHAR(280) NOT NULL, expense_date DATE NOT NULL, split_rule VARCHAR(16) NOT NULL CHECK (split_rule IN ('equal', 'fixed', 'percentage')), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create wallet_expense_splits table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expense_splits (wallet_expense_id UUID NOT NULL REFERENCES wallet_expenses(id) ON DELETE CASCADE, member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0), percentage_basis_points INTEGER, PRIMARY KEY (wallet_expense_id, member_id))`);
       await safeSchemaStep("create wallet_settlements table", () => sql`CREATE TABLE IF NOT EXISTS wallet_settlements (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, from_member_id UUID NOT NULL REFERENCES wallet_members(id), to_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), settlement_date DATE NOT NULL, note VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
+      await safeSchemaStep("create wallet_loans table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loans (id UUID PRIMARY KEY, owner_user_id TEXT, wallet_id UUID REFERENCES wallets(id) ON DELETE CASCADE, lender_member_id UUID REFERENCES wallet_members(id), borrower_member_id UUID REFERENCES wallet_members(id), borrower_name VARCHAR(120), borrower_email VARCHAR(320), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), interest_rate_basis_points INTEGER NOT NULL DEFAULT 0, interest_type VARCHAR(16) NOT NULL DEFAULT 'percentage' CHECK (interest_type IN ('percentage', 'fixed', 'none')), interest_rate_period VARCHAR(16) NOT NULL DEFAULT 'monthly' CHECK (interest_rate_period IN ('monthly', 'yearly', 'one-time')), lending_date DATE NOT NULL, due_date DATE, interest_start_date DATE, notes VARCHAR(280), status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'settled', 'cancelled')), created_at TIMESTAMPTZ NOT NULL)`);
+      await safeSchemaStep("wallet_loans owner_user_id column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS owner_user_id TEXT`);
+      await safeSchemaStep("wallet_loans borrower_name column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_name VARCHAR(120)`);
+      await safeSchemaStep("wallet_loans borrower_email column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_email VARCHAR(320)`);
+      await safeSchemaStep("wallet_loans drop not null constraints", async () => {
+        await sql`ALTER TABLE wallet_loans ALTER COLUMN wallet_id DROP NOT NULL`;
+        await sql`ALTER TABLE wallet_loans ALTER COLUMN lender_member_id DROP NOT NULL`;
+        await sql`ALTER TABLE wallet_loans ALTER COLUMN borrower_member_id DROP NOT NULL`;
+      });
+      await safeSchemaStep("create wallet_loan_repayments table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loan_repayments (id UUID PRIMARY KEY, loan_id UUID NOT NULL REFERENCES wallet_loans(id) ON DELETE CASCADE, amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), repayment_date DATE NOT NULL, notes VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
       await safeSchemaStep("create reminder_preferences table", () => sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create bill_reminders table", () => sql`CREATE TABLE IF NOT EXISTS bill_reminders (id UUID PRIMARY KEY, user_id TEXT NOT NULL, title VARCHAR(120) NOT NULL, amount_minor BIGINT, category VARCHAR(64), due_date DATE NOT NULL, recurrence VARCHAR(16) NOT NULL CHECK (recurrence IN ('once', 'weekly', 'monthly', 'yearly')), interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 24), reminder_days_before INTEGER NOT NULL CHECK (reminder_days_before BETWEEN 0 AND 60), is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL)`);
@@ -780,6 +906,52 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     budget_totals: budgetTotals
   };
 
+  const loanRows = await sql`
+    SELECT wallet_loans.id,
+           wallet_loans.owner_user_id,
+           wallet_loans.wallet_id,
+           wallet_loans.lender_member_id,
+           COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+           wallet_loans.borrower_member_id,
+           COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+           wallet_loans.borrower_name,
+           wallet_loans.borrower_email,
+           wallet_loans.amount_minor,
+           wallet_loans.interest_rate_basis_points,
+           wallet_loans.interest_type,
+           wallet_loans.interest_rate_period,
+           wallet_loans.lending_date,
+           wallet_loans.due_date,
+           wallet_loans.interest_start_date,
+           wallet_loans.notes,
+           wallet_loans.status,
+           wallet_loans.created_at
+    FROM wallet_loans
+    LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+    LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    WHERE wallet_loans.wallet_id = ${walletId}
+    ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+  `;
+
+  const loanIds = loanRows.map((loan) => loan.id);
+  const repaymentRows = loanIds.length === 0 ? [] : await sql`
+    SELECT id, loan_id, amount_minor, repayment_date, notes, created_at
+    FROM wallet_loan_repayments
+    WHERE loan_id = ANY(${loanIds})
+    ORDER BY repayment_date ASC, created_at ASC
+  `;
+
+  const repaymentsByLoanId = new Map();
+  for (const repayment of repaymentRows) {
+    const records = repaymentsByLoanId.get(repayment.loan_id) ?? [];
+    records.push(mapWalletLoanRepayment(repayment));
+    repaymentsByLoanId.set(repayment.loan_id, records);
+  }
+
+  const loans = loanRows.map((loan) =>
+    mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? [])
+  );
+
   return {
     wallet: mapWallet(walletRows[0]),
     members: members.map(mapWalletMember),
@@ -787,6 +959,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), platform: expense.platform ?? null, splits: splitMap.get(expense.id) ?? [] })),
     balances: balanceRows.map((balance) => ({ member_id: balance.member_id, member_name: balance.member_name, net_amount: formatMinorUnits(Number(balance.net_amount_minor)) })),
     settlements: settlementRows.map((settlement) => ({ id: settlement.id, wallet_id: settlement.wallet_id, from_member_id: settlement.from_member_id, from_member_name: settlement.from_member_name, to_member_id: settlement.to_member_id, to_member_name: settlement.to_member_name, amount: formatMinorUnits(Number(settlement.amount_minor)), date: asIsoDate(settlement.settlement_date), note: settlement.note, created_at: asIsoTimestamp(settlement.created_at) })),
+    loans,
     walletAggregation,
     expensePagination: {
       limit: pagination.expenseLimit,
@@ -897,10 +1070,11 @@ async function updateWalletForUser(userId, walletId, rawBody) {
         SELECT
           EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
           EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
-          EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+          EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements,
+          EXISTS(SELECT 1 FROM wallet_loans WHERE lender_member_id = ${member.id} OR borrower_member_id = ${member.id}) AS has_loans
       `;
 
-      const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+      const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements || historyRows[0]?.has_loans);
 
       if (hasHistory) {
         await tx`UPDATE wallet_members SET user_id = ${null}, email = ${null}, invite_status = ${"declined"} WHERE id = ${member.id}`;
@@ -979,6 +1153,8 @@ async function deleteWalletForUser(userId, walletId) {
         AND metadata_json::jsonb ->> 'walletId' = ${walletId}
     `;
 
+    await tx`DELETE FROM wallet_loan_repayments WHERE loan_id IN (SELECT id FROM wallet_loans WHERE wallet_id = ${walletId})`;
+    await tx`DELETE FROM wallet_loans WHERE wallet_id = ${walletId}`;
     await tx`DELETE FROM wallet_expense_splits WHERE wallet_expense_id IN (SELECT id FROM wallet_expenses WHERE wallet_id = ${walletId})`;
     await tx`DELETE FROM wallet_expenses WHERE wallet_id = ${walletId}`;
     await tx`DELETE FROM wallet_settlements WHERE wallet_id = ${walletId}`;
@@ -1020,10 +1196,11 @@ async function leaveWalletForUser(userId, walletId) {
       SELECT
         EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${membership.id}) AS has_expenses,
         EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${membership.id}) AS has_splits,
-        EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${membership.id} OR to_member_id = ${membership.id}) AS has_settlements
+        EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${membership.id} OR to_member_id = ${membership.id}) AS has_settlements,
+        EXISTS(SELECT 1 FROM wallet_loans WHERE lender_member_id = ${membership.id} OR borrower_member_id = ${membership.id}) AS has_loans
     `;
 
-    const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+    const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements || historyRows[0]?.has_loans);
 
     if (hasHistory) {
       await tx`
@@ -1303,10 +1480,11 @@ async function removeWalletMemberForUser(userId, walletId, memberId) {
       SELECT
         EXISTS(SELECT 1 FROM wallet_expenses WHERE paid_by_member_id = ${member.id}) AS has_expenses,
         EXISTS(SELECT 1 FROM wallet_expense_splits WHERE member_id = ${member.id}) AS has_splits,
-        EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements
+        EXISTS(SELECT 1 FROM wallet_settlements WHERE from_member_id = ${member.id} OR to_member_id = ${member.id}) AS has_settlements,
+        EXISTS(SELECT 1 FROM wallet_loans WHERE lender_member_id = ${member.id} OR borrower_member_id = ${member.id}) AS has_loans
     `;
 
-    const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements);
+    const hasHistory = Boolean(historyRows[0]?.has_expenses || historyRows[0]?.has_splits || historyRows[0]?.has_settlements || historyRows[0]?.has_loans);
 
     if (hasHistory) {
       await tx`
@@ -1460,6 +1638,469 @@ async function deleteWalletSettlementForUser(userId, walletId, settlementId) {
     return loadWalletDetail(tx, walletId);
   });
   return { status: 200, body: { wallet } };
+}
+
+async function createWalletLoanForUser(userId, walletId, rawBody) {
+  const result = createWalletLoanSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const walletRecord = walletRows[0];
+    if (!walletRecord) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (walletRecord.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can lend money and manage loans.");
+    }
+
+    const ownerMemberRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId} AND user_id = ${userId}`;
+    const ownerMember = ownerMemberRows[0];
+    if (!ownerMember) {
+      throw new Error("Owner member profile was not found.");
+    }
+
+    const borrowerRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${result.data.borrowerMemberId}`;
+    const borrower = borrowerRows[0];
+    if (!borrower) {
+      throw new Error("Borrower must be a member of this wallet.");
+    }
+    if (borrower.id === ownerMember.id) {
+      throw new Error("Cannot create a loan to yourself.");
+    }
+
+    await tx`
+      INSERT INTO wallet_loans (
+        id, wallet_id, lender_member_id, borrower_member_id, amount_minor,
+        interest_rate_basis_points, interest_type, interest_rate_period,
+        lending_date, due_date, interest_start_date, notes, status, created_at
+      ) VALUES (
+        ${randomUUID()},
+        ${walletId},
+        ${ownerMember.id},
+        ${borrower.id},
+        ${result.data.amount},
+        ${result.data.interestRate},
+        ${result.data.interestType},
+        ${result.data.interestRatePeriod},
+        ${result.data.lendingDate},
+        ${result.data.dueDate ?? null},
+        ${result.data.interestStartDate ?? null},
+        ${result.data.notes?.trim() || null},
+        ${"active"},
+        ${new Date().toISOString()}
+      )
+    `;
+
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 201, body: { wallet } };
+}
+
+async function updateWalletLoanForUser(userId, walletId, loanId, rawBody) {
+  const result = updateWalletLoanSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const walletRecord = walletRows[0];
+    if (!walletRecord) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (walletRecord.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can update loan terms and interest.");
+    }
+
+    const loanRows = await tx`SELECT id, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
+    const currentLoan = loanRows[0];
+    if (!currentLoan) {
+      throw new Error("Loan not found.");
+    }
+
+    if (result.data.borrowerMemberId) {
+      const borrowerRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${result.data.borrowerMemberId}`;
+      if (!borrowerRows[0]) {
+        throw new Error("Borrower must be a member of this wallet.");
+      }
+    }
+
+    const updatedBorrowerId = result.data.borrowerMemberId ?? currentLoan.borrower_member_id;
+    const updatedAmountMinor = result.data.amount !== undefined ? result.data.amount : currentLoan.amount_minor;
+    const updatedInterestRateBasisPoints = result.data.interestRate !== undefined ? result.data.interestRate : currentLoan.interest_rate_basis_points;
+    const updatedInterestType = result.data.interestType ?? currentLoan.interest_type;
+    const updatedInterestRatePeriod = result.data.interestRatePeriod ?? currentLoan.interest_rate_period;
+    const updatedLendingDate = result.data.lendingDate ?? asIsoDate(currentLoan.lending_date);
+    const updatedDueDate = result.data.dueDate !== undefined ? result.data.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null);
+    const updatedInterestStartDate = result.data.interestStartDate !== undefined ? result.data.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null);
+    const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentLoan.notes;
+    const updatedStatus = result.data.status ?? currentLoan.status;
+
+    await tx`
+      UPDATE wallet_loans
+      SET borrower_member_id = ${updatedBorrowerId},
+          amount_minor = ${updatedAmountMinor},
+          interest_rate_basis_points = ${updatedInterestRateBasisPoints},
+          interest_type = ${updatedInterestType},
+          interest_rate_period = ${updatedInterestRatePeriod},
+          lending_date = ${updatedLendingDate},
+          due_date = ${updatedDueDate},
+          interest_start_date = ${updatedInterestStartDate},
+          notes = ${updatedNotes},
+          status = ${updatedStatus}
+      WHERE id = ${loanId} AND wallet_id = ${walletId}
+    `;
+
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 200, body: { wallet } };
+}
+
+async function deleteWalletLoanForUser(userId, walletId, loanId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const walletRecord = walletRows[0];
+    if (!walletRecord) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (walletRecord.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can delete loans.");
+    }
+
+    const rows = await tx`DELETE FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId} RETURNING id`;
+    if (!rows[0]) {
+      throw new Error("Loan not found.");
+    }
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 200, body: { wallet } };
+}
+
+async function createWalletLoanRepaymentForUser(userId, walletId, loanId, rawBody) {
+  const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan repayment payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const walletRecord = walletRows[0];
+    if (!walletRecord) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (walletRecord.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can record loan repayments.");
+    }
+
+    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
+    if (!loanRows[0]) {
+      throw new Error("Loan not found.");
+    }
+
+    await tx`
+      INSERT INTO wallet_loan_repayments (id, loan_id, amount_minor, repayment_date, notes, created_at)
+      VALUES (
+        ${randomUUID()},
+        ${loanId},
+        ${result.data.amount},
+        ${result.data.repaymentDate},
+        ${result.data.notes?.trim() || null},
+        ${new Date().toISOString()}
+      )
+    `;
+
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 201, body: { wallet } };
+}
+
+async function deleteWalletLoanRepaymentForUser(userId, walletId, loanId, repaymentId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const wallet = await sql.begin(async (tx) => {
+    const walletRows = await tx`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+    const walletRecord = walletRows[0];
+    if (!walletRecord) {
+      throw new Error("Wallet not found.");
+    }
+    await ensureWalletAccess(tx, userId, walletId);
+    if (walletRecord.owner_user_id !== userId) {
+      throw new Error("Only the wallet owner can delete loan repayments.");
+    }
+
+    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
+    if (!loanRows[0]) {
+      throw new Error("Loan not found.");
+    }
+
+    const rows = await tx`DELETE FROM wallet_loan_repayments WHERE id = ${repaymentId} AND loan_id = ${loanId} RETURNING id`;
+    if (!rows[0]) {
+      throw new Error("Repayment not found.");
+    }
+    return loadWalletDetail(tx, walletId);
+  });
+  return { status: 200, body: { wallet } };
+}
+
+async function loadLoanRecord(sql, loanId) {
+  const loanRows = await sql`
+    SELECT wallet_loans.id,
+           wallet_loans.owner_user_id,
+           wallet_loans.wallet_id,
+           wallet_loans.lender_member_id,
+           COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+           wallet_loans.borrower_member_id,
+           COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+           wallet_loans.borrower_name,
+           wallet_loans.borrower_email,
+           wallet_loans.amount_minor,
+           wallet_loans.interest_rate_basis_points,
+           wallet_loans.interest_type,
+           wallet_loans.interest_rate_period,
+           wallet_loans.lending_date,
+           wallet_loans.due_date,
+           wallet_loans.interest_start_date,
+           wallet_loans.notes,
+           wallet_loans.status,
+           wallet_loans.created_at
+    FROM wallet_loans
+    LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+    LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    WHERE wallet_loans.id = ${loanId}
+  `;
+  const loan = loanRows[0];
+  if (!loan) {
+    throw new Error("Loan not found.");
+  }
+
+  const repaymentRows = await sql`
+    SELECT id, loan_id, amount_minor, repayment_date, notes, created_at
+    FROM wallet_loan_repayments
+    WHERE loan_id = ${loanId}
+    ORDER BY repayment_date ASC, created_at ASC
+  `;
+
+  return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment));
+}
+
+async function listLoansForUser(userId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const loanRows = await sql`
+    SELECT wallet_loans.id,
+           wallet_loans.owner_user_id,
+           wallet_loans.wallet_id,
+           wallet_loans.lender_member_id,
+           COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+           wallet_loans.borrower_member_id,
+           COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+           wallet_loans.borrower_name,
+           wallet_loans.borrower_email,
+           wallet_loans.amount_minor,
+           wallet_loans.interest_rate_basis_points,
+           wallet_loans.interest_type,
+           wallet_loans.interest_rate_period,
+           wallet_loans.lending_date,
+           wallet_loans.due_date,
+           wallet_loans.interest_start_date,
+           wallet_loans.notes,
+           wallet_loans.status,
+           wallet_loans.created_at
+    FROM wallet_loans
+    LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+    LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    WHERE wallet_loans.owner_user_id = ${userId}
+    ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+  `;
+
+  const loanIds = loanRows.map((loan) => loan.id);
+  const repaymentRows = loanIds.length === 0 ? [] : await sql`
+    SELECT id, loan_id, amount_minor, repayment_date, notes, created_at
+    FROM wallet_loan_repayments
+    WHERE loan_id = ANY(${loanIds})
+    ORDER BY repayment_date ASC, created_at ASC
+  `;
+
+  const repaymentsByLoanId = new Map();
+  for (const repayment of repaymentRows) {
+    const records = repaymentsByLoanId.get(repayment.loan_id) ?? [];
+    records.push(mapWalletLoanRepayment(repayment));
+    repaymentsByLoanId.set(repayment.loan_id, records);
+  }
+
+  const loans = loanRows.map((loan) => mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? []));
+  return { status: 200, body: { loans } };
+}
+
+async function createStandaloneLoanForUser(userId, rawBody) {
+  const result = createWalletLoanSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const loan = await sql.begin(async (tx) => {
+    const loanId = randomUUID();
+    await tx`
+      INSERT INTO wallet_loans (
+        id, owner_user_id, wallet_id, lender_member_id, borrower_member_id,
+        borrower_name, borrower_email, amount_minor,
+        interest_rate_basis_points, interest_type, interest_rate_period,
+        lending_date, due_date, interest_start_date, notes, status, created_at
+      ) VALUES (
+        ${loanId},
+        ${userId},
+        ${result.data.walletId ?? null},
+        ${null},
+        ${result.data.borrowerMemberId ?? null},
+        ${result.data.borrowerName?.trim() || "Borrower"},
+        ${result.data.borrowerEmail?.trim() || null},
+        ${result.data.amount},
+        ${result.data.interestRate},
+        ${result.data.interestType},
+        ${result.data.interestRatePeriod},
+        ${result.data.lendingDate},
+        ${result.data.dueDate ?? null},
+        ${result.data.interestStartDate ?? null},
+        ${result.data.notes?.trim() || null},
+        ${"active"},
+        ${new Date().toISOString()}
+      )
+    `;
+
+    return loadLoanRecord(tx, loanId);
+  });
+
+  return { status: 201, body: { loan } };
+}
+
+async function updateStandaloneLoanForUser(userId, loanId, rawBody) {
+  const result = updateWalletLoanSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const loan = await sql.begin(async (tx) => {
+    const loanRows = await tx`SELECT id, owner_user_id, borrower_name, borrower_email, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+    const currentLoan = loanRows[0];
+    if (!currentLoan) {
+      throw new Error("Loan not found.");
+    }
+
+    const updatedBorrowerName = result.data.borrowerName !== undefined ? (result.data.borrowerName?.trim() || null) : currentLoan.borrower_name;
+    const updatedBorrowerEmail = result.data.borrowerEmail !== undefined ? (result.data.borrowerEmail?.trim() || null) : currentLoan.borrower_email;
+    const updatedBorrowerMemberId = result.data.borrowerMemberId !== undefined ? result.data.borrowerMemberId : currentLoan.borrower_member_id;
+    const updatedAmountMinor = result.data.amount !== undefined ? result.data.amount : currentLoan.amount_minor;
+    const updatedInterestRateBasisPoints = result.data.interestRate !== undefined ? result.data.interestRate : currentLoan.interest_rate_basis_points;
+    const updatedInterestType = result.data.interestType ?? currentLoan.interest_type;
+    const updatedInterestRatePeriod = result.data.interestRatePeriod ?? currentLoan.interest_rate_period;
+    const updatedLendingDate = result.data.lendingDate ?? asIsoDate(currentLoan.lending_date);
+    const updatedDueDate = result.data.dueDate !== undefined ? result.data.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null);
+    const updatedInterestStartDate = result.data.interestStartDate !== undefined ? result.data.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null);
+    const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentLoan.notes;
+    const updatedStatus = result.data.status ?? currentLoan.status;
+
+    await tx`
+      UPDATE wallet_loans
+      SET borrower_name = ${updatedBorrowerName},
+          borrower_email = ${updatedBorrowerEmail},
+          borrower_member_id = ${updatedBorrowerMemberId},
+          amount_minor = ${updatedAmountMinor},
+          interest_rate_basis_points = ${updatedInterestRateBasisPoints},
+          interest_type = ${updatedInterestType},
+          interest_rate_period = ${updatedInterestRatePeriod},
+          lending_date = ${updatedLendingDate},
+          due_date = ${updatedDueDate},
+          interest_start_date = ${updatedInterestStartDate},
+          notes = ${updatedNotes},
+          status = ${updatedStatus}
+      WHERE id = ${loanId} AND owner_user_id = ${userId}
+    `;
+
+    return loadLoanRecord(tx, loanId);
+  });
+
+  return { status: 200, body: { loan } };
+}
+
+async function deleteStandaloneLoanForUser(userId, loanId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const rows = await sql`DELETE FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId} RETURNING id`;
+  if (!rows[0]) {
+    throw new Error("Loan not found.");
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody) {
+  const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
+  if (!result.success) {
+    return { status: 400, body: { error: "Invalid loan repayment payload.", details: result.error.flatten() } };
+  }
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const loan = await sql.begin(async (tx) => {
+    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+    if (!loanRows[0]) {
+      throw new Error("Loan not found.");
+    }
+
+    await tx`
+      INSERT INTO wallet_loan_repayments (id, loan_id, amount_minor, repayment_date, notes, created_at)
+      VALUES (
+        ${randomUUID()},
+        ${loanId},
+        ${result.data.amount},
+        ${result.data.repaymentDate},
+        ${result.data.notes?.trim() || null},
+        ${new Date().toISOString()}
+      )
+    `;
+
+    return loadLoanRecord(tx, loanId);
+  });
+
+  return { status: 201, body: { loan } };
+}
+
+async function deleteStandaloneLoanRepaymentForUser(userId, loanId, repaymentId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const loan = await sql.begin(async (tx) => {
+    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+    if (!loanRows[0]) {
+      throw new Error("Loan not found.");
+    }
+
+    const rows = await tx`DELETE FROM wallet_loan_repayments WHERE id = ${repaymentId} AND loan_id = ${loanId} RETURNING id`;
+    if (!rows[0]) {
+      throw new Error("Repayment not found.");
+    }
+
+    return loadLoanRecord(tx, loanId);
+  });
+
+  return { status: 200, body: { loan } };
 }
 
 async function listBillRemindersForUser(userId) {
@@ -1781,6 +2422,12 @@ async function deleteUserData(userId) {
     }
 
     for (const walletId of ownedWalletIds) {
+      if (hasTable("wallet_loan_repayments") && hasTable("wallet_loans")) {
+        await tx`DELETE FROM wallet_loan_repayments WHERE loan_id IN (SELECT id FROM wallet_loans WHERE wallet_id = ${walletId})`;
+      }
+      if (hasTable("wallet_loans")) {
+        await tx`DELETE FROM wallet_loans WHERE wallet_id = ${walletId}`;
+      }
       if (hasTable("wallet_expense_splits") && hasTable("wallet_expenses")) {
         await tx`DELETE FROM wallet_expense_splits WHERE wallet_expense_id IN (SELECT id FROM wallet_expenses WHERE wallet_id = ${walletId})`;
       }
@@ -1817,6 +2464,12 @@ async function deleteUserData(userId) {
     if (hasTable("expenses")) {
       await tx`DELETE FROM expenses WHERE user_id = ${userId}`;
     }
+    if (hasTable("wallet_loan_repayments") && hasTable("wallet_loans")) {
+      await tx`DELETE FROM wallet_loan_repayments WHERE loan_id IN (SELECT id FROM wallet_loans WHERE owner_user_id = ${userId})`;
+    }
+    if (hasTable("wallet_loans")) {
+      await tx`DELETE FROM wallet_loans WHERE owner_user_id = ${userId}`;
+    }
   });
 }
 
@@ -1844,6 +2497,17 @@ module.exports = {
   createWalletSettlementForUser,
   updateWalletSettlementForUser,
   deleteWalletSettlementForUser,
+  createWalletLoanForUser,
+  updateWalletLoanForUser,
+  deleteWalletLoanForUser,
+  createWalletLoanRepaymentForUser,
+  deleteWalletLoanRepaymentForUser,
+  listLoansForUser,
+  createStandaloneLoanForUser,
+  updateStandaloneLoanForUser,
+  deleteStandaloneLoanForUser,
+  createStandaloneLoanRepaymentForUser,
+  deleteStandaloneLoanRepaymentForUser,
   listBillRemindersForUser,
   createBillReminderForUser,
   updateBillReminderForUser,

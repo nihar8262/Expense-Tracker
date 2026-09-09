@@ -10,6 +10,9 @@ import type {
   CreateWalletMemberInput,
   CreateWalletExpenseInput,
   CreateWalletInput,
+  CreateWalletLoanInput,
+  UpdateWalletLoanInput,
+  CreateWalletLoanRepaymentInput,
   ExpensesQueryInput
 } from "../lib/validation.js";
 import {
@@ -30,6 +33,7 @@ import {
   WalletExpenseNotFoundError,
   WalletInviteNotFoundError,
   WalletNotFoundError,
+  WalletLoanNotFoundError,
   type WalletBalanceRecord,
   type WalletBudgetRecord,
   type WalletDetailRecord,
@@ -37,6 +41,8 @@ import {
   type WalletExpenseSplitRecord,
   type WalletMemberRecord,
   type WalletRecord,
+  type WalletLoanRecord,
+  type WalletLoanRepaymentRecord,
   WalletSettlementNotFoundError,
   type WalletSettlementRecord,
   WalletValidationError,
@@ -130,6 +136,35 @@ type StoredWalletSettlement = {
   amountMinor: number;
   date: string;
   note: string | null;
+  createdAt: string;
+};
+
+type StoredWalletLoanRepayment = {
+  id: string;
+  loanId: string;
+  amountMinor: number;
+  repaymentDate: string;
+  notes: string | null;
+  createdAt: string;
+};
+
+type StoredWalletLoan = {
+  id: string;
+  ownerUserId: string;
+  walletId: string | null;
+  lenderMemberId: string | null;
+  borrowerMemberId: string | null;
+  borrowerName: string | null;
+  borrowerEmail: string | null;
+  amountMinor: number;
+  interestRateBasisPoints: number;
+  interestType: "percentage" | "fixed" | "none";
+  interestRatePeriod: "monthly" | "yearly" | "one-time";
+  lendingDate: string;
+  dueDate: string | null;
+  interestStartDate: string | null;
+  notes: string | null;
+  status: "active" | "settled" | "cancelled";
   createdAt: string;
 };
 
@@ -442,6 +477,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
   const walletExpenses = new Map<string, StoredWalletExpense>();
   const walletExpenseSplits = new Map<string, StoredWalletExpenseSplit[]>();
   const walletSettlements = new Map<string, StoredWalletSettlement>();
+  const walletLoans = new Map<string, StoredWalletLoan>();
+  const walletLoanRepayments = new Map<string, StoredWalletLoanRepayment>();
   const notifications = new Map<string, StoredNotification>();
   const reminderPreferences = new Map<string, StoredReminderPreferences>();
   const billReminders = new Map<string, StoredBillReminder>();
@@ -466,6 +503,45 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
 
     return wallet;
+  }
+
+  function mapLoanRecord(loan: StoredWalletLoan): WalletLoanRecord {
+    const lender = loan.lenderMemberId ? walletMembers.get(loan.lenderMemberId) : null;
+    const borrower = loan.borrowerMemberId ? walletMembers.get(loan.borrowerMemberId) : null;
+    const repayments = [...walletLoanRepayments.values()]
+      .filter((rep) => rep.loanId === loan.id)
+      .sort((a, b) => a.repaymentDate.localeCompare(b.repaymentDate) || a.createdAt.localeCompare(b.createdAt))
+      .map((rep) => ({
+        id: rep.id,
+        loan_id: rep.loanId,
+        amount: formatMinorUnits(rep.amountMinor),
+        repayment_date: rep.repaymentDate,
+        notes: rep.notes,
+        created_at: rep.createdAt
+      }));
+
+    return {
+      id: loan.id,
+      owner_user_id: loan.ownerUserId,
+      wallet_id: loan.walletId,
+      lender_member_id: loan.lenderMemberId,
+      lender_member_name: lender?.displayName ?? "You",
+      borrower_member_id: loan.borrowerMemberId,
+      borrower_member_name: borrower?.displayName ?? loan.borrowerName ?? "Borrower",
+      borrower_name: loan.borrowerName ?? borrower?.displayName ?? null,
+      borrower_email: loan.borrowerEmail ?? borrower?.email ?? null,
+      amount: formatMinorUnits(loan.amountMinor),
+      interest_rate: loan.interestRateBasisPoints ? loan.interestRateBasisPoints / 100 : 0,
+      interest_type: loan.interestType,
+      interest_rate_period: loan.interestRatePeriod,
+      lending_date: loan.lendingDate,
+      due_date: loan.dueDate,
+      interest_start_date: loan.interestStartDate,
+      notes: loan.notes,
+      status: loan.status,
+      created_at: loan.createdAt,
+      repayments
+    };
   }
 
   function buildWalletDetail(walletId: string, pagination?: WalletHistoryPagination): WalletDetailRecord {
@@ -644,6 +720,11 @@ export function createMemoryExpenseStore(): ExpenseStore {
       budget_totals: budgetTotals
     };
 
+    const loanRecords: WalletLoanRecord[] = [...walletLoans.values()]
+      .filter((loan) => loan.walletId === walletId)
+      .sort((a, b) => b.lendingDate.localeCompare(a.lendingDate) || b.createdAt.localeCompare(a.createdAt))
+      .map(mapLoanRecord);
+
     return {
       wallet: mapWallet(wallet),
       members: members.map(mapWalletMember),
@@ -651,6 +732,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       expenses: expenseRecords,
       balances,
       settlements,
+      loans: loanRecords,
       walletAggregation,
       expensePagination: {
         limit: pag.expenseLimit,
@@ -794,13 +876,21 @@ export function createMemoryExpenseStore(): ExpenseStore {
       }
     }
 
+    for (const [loanId, loan] of walletLoans.entries()) {
+      if (loan.walletId === walletId) {
+        walletLoans.delete(loanId);
+        walletLoanRepayments.delete(loanId);
+      }
+    }
+
     deleteWalletScopedNotifications(walletId);
   }
 
   function memberHasWalletHistory(memberId: string): boolean {
     return [...walletExpenses.values()].some((expense) => expense.paidByMemberId === memberId)
       || [...walletExpenseSplits.values()].some((splits) => splits.some((split) => split.memberId === memberId))
-      || [...walletSettlements.values()].some((settlement) => settlement.fromMemberId === memberId || settlement.toMemberId === memberId);
+      || [...walletSettlements.values()].some((settlement) => settlement.fromMemberId === memberId || settlement.toMemberId === memberId)
+      || [...walletLoans.values()].some((loan) => loan.lenderMemberId === memberId || loan.borrowerMemberId === memberId);
   }
 
   async function createExpense(userId: string, input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult> {
@@ -1553,6 +1643,270 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return buildWalletDetail(walletId);
   }
 
+  async function createWalletLoan(userId: string, walletId: string, input: CreateWalletLoanInput): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can lend money and manage loans.");
+    }
+
+    const members = listWalletMembers(walletId);
+    const ownerMember = members.find((member) => member.userId === userId);
+    if (!ownerMember) {
+      throw new WalletValidationError("Owner member profile was not found.");
+    }
+
+    const borrower = members.find((member) => member.id === input.borrowerMemberId);
+    if (!borrower) {
+      throw new WalletValidationError("Borrower must be a member of this wallet.");
+    }
+
+    if (borrower.id === ownerMember.id) {
+      throw new WalletValidationError("Cannot create a loan to yourself.");
+    }
+
+    const loan: StoredWalletLoan = {
+      id: randomUUID(),
+      ownerUserId: wallet.ownerUserId,
+      walletId,
+      lenderMemberId: ownerMember.id,
+      borrowerMemberId: borrower.id,
+      borrowerName: borrower.displayName,
+      borrowerEmail: borrower.email,
+      amountMinor: input.amount,
+      interestRateBasisPoints: input.interestRate,
+      interestType: input.interestType,
+      interestRatePeriod: input.interestRatePeriod,
+      lendingDate: input.lendingDate,
+      dueDate: input.dueDate ?? null,
+      interestStartDate: input.interestStartDate ?? null,
+      notes: input.notes?.trim() || null,
+      status: "active",
+      createdAt: new Date().toISOString()
+    };
+
+    walletLoans.set(loan.id, loan);
+    return buildWalletDetail(walletId);
+  }
+
+  async function updateWalletLoan(userId: string, walletId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can update loan terms and interest.");
+    }
+
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.walletId !== walletId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    let borrowerName = existingLoan.borrowerName;
+    let borrowerEmail = existingLoan.borrowerEmail;
+
+    if (input.borrowerMemberId) {
+      const members = listWalletMembers(walletId);
+      const borrower = members.find((member) => member.id === input.borrowerMemberId);
+      if (!borrower) {
+        throw new WalletValidationError("Borrower must be a member of this wallet.");
+      }
+      borrowerName = borrower.displayName;
+      borrowerEmail = borrower.email;
+    }
+
+    walletLoans.set(loanId, {
+      ...existingLoan,
+      borrowerMemberId: input.borrowerMemberId !== undefined ? input.borrowerMemberId : existingLoan.borrowerMemberId,
+      borrowerName: input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : borrowerName,
+      borrowerEmail: input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : borrowerEmail,
+      amountMinor: input.amount !== undefined ? input.amount : existingLoan.amountMinor,
+      interestRateBasisPoints: input.interestRate !== undefined ? input.interestRate : existingLoan.interestRateBasisPoints,
+      interestType: input.interestType ?? existingLoan.interestType,
+      interestRatePeriod: input.interestRatePeriod ?? existingLoan.interestRatePeriod,
+      lendingDate: input.lendingDate ?? existingLoan.lendingDate,
+      dueDate: input.dueDate !== undefined ? input.dueDate : existingLoan.dueDate,
+      interestStartDate: input.interestStartDate !== undefined ? input.interestStartDate : existingLoan.interestStartDate,
+      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingLoan.notes,
+      status: input.status ?? existingLoan.status
+    });
+
+    return buildWalletDetail(walletId);
+  }
+
+  async function deleteWalletLoan(userId: string, walletId: string, loanId: string): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can delete loans.");
+    }
+
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.walletId !== walletId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    walletLoans.delete(loanId);
+    for (const [repId, rep] of walletLoanRepayments.entries()) {
+      if (rep.loanId === loanId) {
+        walletLoanRepayments.delete(repId);
+      }
+    }
+
+    return buildWalletDetail(walletId);
+  }
+
+  async function createWalletLoanRepayment(userId: string, walletId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can record loan repayments.");
+    }
+
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.walletId !== walletId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const repayment: StoredWalletLoanRepayment = {
+      id: randomUUID(),
+      loanId,
+      amountMinor: input.amount,
+      repaymentDate: input.repaymentDate,
+      notes: input.notes?.trim() || null,
+      createdAt: new Date().toISOString()
+    };
+
+    walletLoanRepayments.set(repayment.id, repayment);
+    return buildWalletDetail(walletId);
+  }
+
+  async function deleteWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can delete loan repayments.");
+    }
+
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.walletId !== walletId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const existingRepayment = walletLoanRepayments.get(repaymentId);
+    if (!existingRepayment || existingRepayment.loanId !== loanId) {
+      throw new WalletLoanNotFoundError("Repayment not found.");
+    }
+
+    walletLoanRepayments.delete(repaymentId);
+    return buildWalletDetail(walletId);
+  }
+
+  async function listLoans(userId: string): Promise<WalletLoanRecord[]> {
+    return [...walletLoans.values()]
+      .filter((loan) => loan.ownerUserId === userId)
+      .sort((a, b) => b.lendingDate.localeCompare(a.lendingDate) || b.createdAt.localeCompare(a.createdAt))
+      .map(mapLoanRecord);
+  }
+
+  async function createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord> {
+    const loan: StoredWalletLoan = {
+      id: randomUUID(),
+      ownerUserId: userId,
+      walletId: input.walletId ?? null,
+      lenderMemberId: null,
+      borrowerMemberId: input.borrowerMemberId ?? null,
+      borrowerName: input.borrowerName?.trim() || "Borrower",
+      borrowerEmail: input.borrowerEmail?.trim() || null,
+      amountMinor: input.amount,
+      interestRateBasisPoints: input.interestRate,
+      interestType: input.interestType,
+      interestRatePeriod: input.interestRatePeriod,
+      lendingDate: input.lendingDate,
+      dueDate: input.dueDate ?? null,
+      interestStartDate: input.interestStartDate ?? null,
+      notes: input.notes?.trim() || null,
+      status: "active",
+      createdAt: new Date().toISOString()
+    };
+
+    walletLoans.set(loan.id, loan);
+    return mapLoanRecord(loan);
+  }
+
+  async function updateStandaloneLoan(userId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletLoanRecord> {
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const updated: StoredWalletLoan = {
+      ...existingLoan,
+      borrowerName: input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : existingLoan.borrowerName,
+      borrowerEmail: input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : existingLoan.borrowerEmail,
+      borrowerMemberId: input.borrowerMemberId !== undefined ? input.borrowerMemberId : existingLoan.borrowerMemberId,
+      amountMinor: input.amount !== undefined ? input.amount : existingLoan.amountMinor,
+      interestRateBasisPoints: input.interestRate !== undefined ? input.interestRate : existingLoan.interestRateBasisPoints,
+      interestType: input.interestType ?? existingLoan.interestType,
+      interestRatePeriod: input.interestRatePeriod ?? existingLoan.interestRatePeriod,
+      lendingDate: input.lendingDate ?? existingLoan.lendingDate,
+      dueDate: input.dueDate !== undefined ? input.dueDate : existingLoan.dueDate,
+      interestStartDate: input.interestStartDate !== undefined ? input.interestStartDate : existingLoan.interestStartDate,
+      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingLoan.notes,
+      status: input.status ?? existingLoan.status
+    };
+
+    walletLoans.set(loanId, updated);
+    return mapLoanRecord(updated);
+  }
+
+  async function deleteStandaloneLoan(userId: string, loanId: string): Promise<void> {
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    walletLoans.delete(loanId);
+    for (const [repId, rep] of walletLoanRepayments.entries()) {
+      if (rep.loanId === loanId) {
+        walletLoanRepayments.delete(repId);
+      }
+    }
+  }
+
+  async function createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord> {
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const repayment: StoredWalletLoanRepayment = {
+      id: randomUUID(),
+      loanId,
+      amountMinor: input.amount,
+      repaymentDate: input.repaymentDate,
+      notes: input.notes?.trim() || null,
+      createdAt: new Date().toISOString()
+    };
+
+    walletLoanRepayments.set(repayment.id, repayment);
+    return mapLoanRecord(existingLoan);
+  }
+
+  async function deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord> {
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const existingRepayment = walletLoanRepayments.get(repaymentId);
+    if (!existingRepayment || existingRepayment.loanId !== loanId) {
+      throw new WalletLoanNotFoundError("Repayment not found.");
+    }
+
+    walletLoanRepayments.delete(repaymentId);
+    return mapLoanRecord(existingLoan);
+  }
+
   async function listBillReminders(userId: string): Promise<BillReminderRecord[]> {
     return [...billReminders.values()]
       .filter((billReminder) => billReminder.userId === userId)
@@ -2068,6 +2422,17 @@ export function createMemoryExpenseStore(): ExpenseStore {
         billReminders.delete(billReminderId);
       }
     }
+
+    for (const [loanId, loan] of walletLoans.entries()) {
+      if (loan.ownerUserId === userId) {
+        walletLoans.delete(loanId);
+        for (const [repId, rep] of walletLoanRepayments.entries()) {
+          if (rep.loanId === loanId) {
+            walletLoanRepayments.delete(repId);
+          }
+        }
+      }
+    }
   }
 
   async function searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]> {
@@ -2102,6 +2467,17 @@ export function createMemoryExpenseStore(): ExpenseStore {
     createWalletSettlement,
     updateWalletSettlement,
     deleteWalletSettlement,
+    createWalletLoan,
+    updateWalletLoan,
+    deleteWalletLoan,
+    createWalletLoanRepayment,
+    deleteWalletLoanRepayment,
+    listLoans,
+    createStandaloneLoan,
+    updateStandaloneLoan,
+    deleteStandaloneLoan,
+    createStandaloneLoanRepayment,
+    deleteStandaloneLoanRepayment,
     listBillReminders,
     createBillReminder,
     updateBillReminder,

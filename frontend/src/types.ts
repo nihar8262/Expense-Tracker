@@ -132,6 +132,60 @@ export type WalletAggregation = {
 	budget_totals: WalletAggregationBudget[];
 };
 
+export type WalletLoanRepayment = {
+	id: string;
+	loan_id: string;
+	amount: string;
+	repayment_date: string;
+	notes: string | null;
+	created_at: string;
+};
+
+export type WalletLoan = {
+	id: string;
+	owner_user_id?: string | null;
+	wallet_id?: string | null;
+	lender_member_id?: string | null;
+	lender_member_name?: string | null;
+	borrower_member_id?: string | null;
+	borrower_member_name?: string | null;
+	borrower_name?: string | null;
+	borrower_email?: string | null;
+	amount: string;
+	interest_rate: number;
+	interest_type: "percentage" | "fixed" | "none";
+	interest_rate_period: "monthly" | "yearly" | "one-time";
+	lending_date: string;
+	interest_start_date: string | null;
+	due_date: string | null;
+	status: "active" | "settled" | "cancelled";
+	notes: string | null;
+	created_at: string;
+	repayments: WalletLoanRepayment[];
+};
+
+export type WalletLoanForm = {
+	borrowerMemberId?: string;
+	borrowerName?: string;
+	borrowerEmail?: string;
+	walletId?: string;
+	amount: string;
+	interestRate?: string | number;
+	interestType?: "percentage" | "fixed" | "none";
+	interestRatePeriod?: "monthly" | "yearly" | "one-time";
+	lendingDate: string;
+	interestStartDate?: string;
+	dueDate?: string;
+	notes?: string;
+	status?: "active" | "settled" | "cancelled";
+};
+
+export type WalletLoanRepaymentForm = {
+	amount: string;
+	repaymentDate: string;
+	notes?: string;
+};
+
 export type WalletDetail = {
 	wallet: Wallet;
 	members: WalletMember[];
@@ -139,6 +193,7 @@ export type WalletDetail = {
 	expenses: WalletExpense[];
 	balances: WalletBalance[];
 	settlements: WalletSettlement[];
+	loans?: WalletLoan[];
 	walletAggregation: WalletAggregation;
 	expensePagination?: WalletHistoryPagination;
 	settlementPagination?: WalletHistoryPagination;

@@ -301,6 +301,132 @@ export const createBillReminderSchema = z.object({
   isActive: z.boolean().default(true)
 });
 
+export const createWalletLoanSchema = z
+  .object({
+    walletId: z.string().trim().optional(),
+    borrowerMemberId: z.string().trim().optional(),
+    borrowerName: z.string().trim().optional(),
+    borrowerEmail: z
+      .string()
+      .trim()
+      .email("Invalid email address.")
+      .nullable()
+      .optional()
+      .or(z.literal("")),
+    amount: z.union([z.string(), z.number()]).transform((value, context) => {
+      try {
+        return parseAmountToMinorUnits(value);
+      } catch (error) {
+        context.issues.push({
+          code: z.ZodIssueCode.custom,
+          input: value,
+          message: error instanceof Error ? error.message : "Invalid loan amount."
+        });
+        return z.NEVER;
+      }
+    }),
+    interestRate: z.union([z.string(), z.number()]).default(0).transform((value, context) => {
+      const raw = typeof value === "number" ? value.toString() : String(value ?? "0").trim();
+      if (raw === "" || raw === "0") return 0;
+      if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+        context.issues.push({
+          code: z.ZodIssueCode.custom,
+          input: value,
+          message: "Interest rate must be a valid number with up to 2 decimal places."
+        });
+        return z.NEVER;
+      }
+      const basisPoints = Math.round(Number(raw) * 100);
+      if (basisPoints < 0 || basisPoints > 100000) {
+        context.issues.push({
+          code: z.ZodIssueCode.custom,
+          input: value,
+          message: "Interest rate must be between 0% and 1000%."
+        });
+        return z.NEVER;
+      }
+      return basisPoints;
+    }),
+    interestType: z.enum(["percentage", "fixed", "none"]).default("percentage"),
+    interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).default("monthly"),
+    lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value."),
+    dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
+    interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
+    notes: z.string().trim().max(280, "Notes is too long.").nullable().optional()
+  })
+  .superRefine((value, context) => {
+    if (!value.borrowerMemberId && !value.borrowerName) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["borrowerName"],
+        message: "Borrower name or borrower member is required."
+      });
+    }
+  });
+
+export const updateWalletLoanSchema = z.object({
+  borrowerMemberId: z.string().trim().optional(),
+  borrowerName: z.string().trim().optional(),
+  borrowerEmail: z
+    .string()
+    .trim()
+    .email("Invalid email address.")
+    .nullable()
+    .optional()
+    .or(z.literal("")),
+  amount: z.union([z.string(), z.number()]).optional().transform((value, context) => {
+    if (value === undefined) return undefined;
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({
+        code: z.ZodIssueCode.custom,
+        input: value,
+        message: error instanceof Error ? error.message : "Invalid loan amount."
+      });
+      return z.NEVER;
+    }
+  }),
+  interestRate: z.union([z.string(), z.number()]).optional().transform((value, context) => {
+    if (value === undefined) return undefined;
+    const raw = typeof value === "number" ? value.toString() : String(value ?? "0").trim();
+    if (raw === "" || raw === "0") return 0;
+    if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+      context.issues.push({
+        code: z.ZodIssueCode.custom,
+        input: value,
+        message: "Interest rate must be a valid number with up to 2 decimal places."
+      });
+      return z.NEVER;
+    }
+    return Math.round(Number(raw) * 100);
+  }),
+  interestType: z.enum(["percentage", "fixed", "none"]).optional(),
+  interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).optional(),
+  lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value.").optional(),
+  dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
+  interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
+  notes: z.string().trim().max(280, "Notes is too long.").nullable().optional(),
+  status: z.enum(["active", "settled", "cancelled"]).optional()
+});
+
+export const createWalletLoanRepaymentSchema = z.object({
+  amount: z.union([z.string(), z.number()]).transform((value, context) => {
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({
+        code: z.ZodIssueCode.custom,
+        input: value,
+        message: error instanceof Error ? error.message : "Invalid repayment amount."
+      });
+      return z.NEVER;
+    }
+  }),
+  repaymentDate: z.string().trim().refine(isValidIsoDate, "Repayment date must be a valid YYYY-MM-DD value."),
+  notes: z.string().trim().max(280, "Notes is too long.").nullable().optional()
+});
+
 export const walletInviteResponseSchema = z.object({
   action: z.enum(["accept", "decline"])
 });
@@ -316,3 +442,6 @@ export type CreateReminderPreferencesInput = z.infer<typeof createReminderPrefer
 export type CreateWalletReminderPreferencesInput = z.infer<typeof createWalletReminderPreferencesSchema>;
 export type CreateBillReminderInput = z.infer<typeof createBillReminderSchema>;
 export type WalletInviteResponseInput = z.infer<typeof walletInviteResponseSchema>;
+export type CreateWalletLoanInput = z.infer<typeof createWalletLoanSchema>;
+export type UpdateWalletLoanInput = z.infer<typeof updateWalletLoanSchema>;
+export type CreateWalletLoanRepaymentInput = z.infer<typeof createWalletLoanRepaymentSchema>;

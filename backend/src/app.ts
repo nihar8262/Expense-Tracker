@@ -9,6 +9,17 @@ import {
   handleCreateWalletExpense,
   handleCreateWalletMember,
   handleCreateWalletSettlement,
+  handleCreateWalletLoan,
+  handleUpdateWalletLoan,
+  handleDeleteWalletLoan,
+  handleCreateWalletLoanRepayment,
+  handleDeleteWalletLoanRepayment,
+  handleListLoans,
+  handleCreateStandaloneLoan,
+  handleUpdateStandaloneLoan,
+  handleDeleteStandaloneLoan,
+  handleCreateStandaloneLoanRepayment,
+  handleDeleteStandaloneLoanRepayment,
   handleDeleteAccount,
   handleDeleteBillReminder,
   handleDeleteBudget,
@@ -427,6 +438,138 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to delete settlement."
+    );
+  });
+
+  app.post("/api/wallets/:walletId/loans", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateWalletLoan(request.body, request.params.walletId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to create loan."
+    );
+  });
+
+  app.put("/api/wallets/:walletId/loans/:loanId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateWalletLoan(request.body, request.params.walletId, request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update loan."
+    );
+  });
+
+  app.delete("/api/wallets/:walletId/loans/:loanId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteWalletLoan(request.params.walletId, request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete loan."
+    );
+  });
+
+  app.post("/api/wallets/:walletId/loans/:loanId/repayments", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateWalletLoanRepayment(request.body, request.params.walletId, request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to record loan repayment."
+    );
+  });
+
+  app.delete("/api/wallets/:walletId/loans/:loanId/repayments/:repaymentId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteWalletLoanRepayment(request.params.walletId, request.params.loanId, request.params.repaymentId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete loan repayment."
+    );
+  });
+
+  app.get("/api/loans", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleListLoans(user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to list loans."
+    );
+  });
+
+  app.post("/api/loans", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateStandaloneLoan(request.body, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to create loan."
+    );
+  });
+
+  app.put("/api/loans/:loanId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateStandaloneLoan(request.body, request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update loan."
+    );
+  });
+
+  app.delete("/api/loans/:loanId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteStandaloneLoan(request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete loan."
+    );
+  });
+
+  app.post("/api/loans/:loanId/repayments", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateStandaloneLoanRepayment(request.body, request.params.loanId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to record loan repayment."
+    );
+  });
+
+  app.delete("/api/loans/:loanId/repayments/:repaymentId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteStandaloneLoanRepayment(request.params.loanId, request.params.repaymentId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete loan repayment."
     );
   });
 

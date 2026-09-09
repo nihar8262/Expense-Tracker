@@ -7,6 +7,9 @@ import type {
   CreateWalletMemberInput,
   CreateWalletExpenseInput,
   CreateWalletInput,
+  CreateWalletLoanInput,
+  UpdateWalletLoanInput,
+  CreateWalletLoanRepaymentInput,
   ExpensesQueryInput
 } from "../lib/validation.js";
 
@@ -137,6 +140,41 @@ export type WalletHistoryPagination = {
   settlementOffset: number;
 };
 
+export type WalletLoanInterestType = "percentage" | "fixed" | "none";
+export type WalletLoanInterestPeriod = "monthly" | "yearly" | "one-time";
+export type WalletLoanStatus = "active" | "settled" | "cancelled";
+
+export type WalletLoanRepaymentRecord = {
+  id: string;
+  loan_id: string;
+  amount: string;
+  repayment_date: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type WalletLoanRecord = {
+  id: string;
+  owner_user_id: string;
+  wallet_id: string | null;
+  lender_member_id: string | null;
+  lender_member_name: string | null;
+  borrower_member_id: string | null;
+  borrower_member_name: string;
+  borrower_email: string | null;
+  amount: string;
+  interest_rate: number;
+  interest_type: WalletLoanInterestType;
+  interest_rate_period: WalletLoanInterestPeriod;
+  lending_date: string;
+  due_date: string | null;
+  interest_start_date: string | null;
+  notes: string | null;
+  status: WalletLoanStatus;
+  created_at: string;
+  repayments: WalletLoanRepaymentRecord[];
+};
+
 export type WalletDetailRecord = {
   wallet: WalletRecord;
   members: WalletMemberRecord[];
@@ -144,6 +182,7 @@ export type WalletDetailRecord = {
   expenses: WalletExpenseRecord[];
   balances: WalletBalanceRecord[];
   settlements: WalletSettlementRecord[];
+  loans?: WalletLoanRecord[];
   walletAggregation: WalletAggregationRecord;
   expensePagination?: WalletHistoryPaginationRecord;
   settlementPagination?: WalletHistoryPaginationRecord;
@@ -238,6 +277,17 @@ export interface ExpenseStore {
   createWalletSettlement(userId: string, walletId: string, input: CreateSettlementInput): Promise<WalletDetailRecord>;
   updateWalletSettlement(userId: string, walletId: string, settlementId: string, input: CreateSettlementInput): Promise<WalletDetailRecord>;
   deleteWalletSettlement(userId: string, walletId: string, settlementId: string): Promise<WalletDetailRecord>;
+  createWalletLoan(userId: string, walletId: string, input: CreateWalletLoanInput): Promise<WalletDetailRecord>;
+  updateWalletLoan(userId: string, walletId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletDetailRecord>;
+  deleteWalletLoan(userId: string, walletId: string, loanId: string): Promise<WalletDetailRecord>;
+  createWalletLoanRepayment(userId: string, walletId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletDetailRecord>;
+  deleteWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string): Promise<WalletDetailRecord>;
+  listLoans(userId: string): Promise<WalletLoanRecord[]>;
+  createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord>;
+  updateStandaloneLoan(userId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletLoanRecord>;
+  deleteStandaloneLoan(userId: string, loanId: string): Promise<void>;
+  createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord>;
+  deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord>;
   listBillReminders(userId: string): Promise<BillReminderRecord[]>;
   createBillReminder(userId: string, input: CreateBillReminderInput): Promise<BillReminderRecord>;
   updateBillReminder(userId: string, billReminderId: string, input: CreateBillReminderInput): Promise<BillReminderRecord>;
@@ -331,3 +381,11 @@ export class WalletInviteNotFoundError extends Error {
     this.name = "WalletInviteNotFoundError";
   }
 }
+
+export class WalletLoanNotFoundError extends Error {
+  constructor(message = "Loan not found.") {
+    super(message);
+    this.name = "WalletLoanNotFoundError";
+  }
+}
+

@@ -23,6 +23,9 @@ import type {
   Wallet,
   WalletDetail,
   WalletBudget,
+  WalletLoan,
+  WalletLoanForm,
+  WalletLoanRepaymentForm,
 } from "../types";
 
 type WalletsPageProps = {
@@ -134,6 +137,35 @@ type WalletsPageProps = {
     walletId: string,
     settlementId: string,
   ) => Promise<boolean>;
+  onCreateWalletLoan?: (
+    walletId: string,
+    input: WalletLoanForm,
+  ) => Promise<boolean>;
+  onUpdateWalletLoan?: (
+    walletId: string,
+    loanId: string,
+    input: Partial<WalletLoanForm>,
+  ) => Promise<boolean>;
+  onDeleteWalletLoan?: (
+    walletId: string,
+    loanId: string,
+  ) => Promise<boolean>;
+  onCreateWalletLoanRepayment?: (
+    walletId: string,
+    loanId: string,
+    input: WalletLoanRepaymentForm,
+  ) => Promise<boolean>;
+  onDeleteWalletLoanRepayment?: (
+    walletId: string,
+    loanId: string,
+    repaymentId: string,
+  ) => Promise<boolean>;
+  loans?: WalletLoan[];
+  onCreateStandaloneLoan?: (input: WalletLoanForm) => Promise<boolean>;
+  onUpdateStandaloneLoan?: (loanId: string, input: Partial<WalletLoanForm>) => Promise<boolean>;
+  onDeleteStandaloneLoan?: (loanId: string) => Promise<boolean>;
+  onCreateStandaloneLoanRepayment?: (loanId: string, input: WalletLoanRepaymentForm) => Promise<boolean>;
+  onDeleteStandaloneLoanRepayment?: (loanId: string, repaymentId: string) => Promise<boolean>;
   currencySymbol?: string;
   onLoadMoreExpenses?: () => Promise<void>;
 };
@@ -276,6 +308,17 @@ export function WalletsPage({
   onCreateWalletSettlement,
   onUpdateWalletSettlement,
   onDeleteWalletSettlement,
+  onCreateWalletLoan,
+  onUpdateWalletLoan,
+  onDeleteWalletLoan,
+  onCreateWalletLoanRepayment,
+  onDeleteWalletLoanRepayment,
+  loans = [],
+  onCreateStandaloneLoan,
+  onUpdateStandaloneLoan,
+  onDeleteStandaloneLoan,
+  onCreateStandaloneLoanRepayment,
+  onDeleteStandaloneLoanRepayment,
   currencySymbol = "₹",
   onLoadMoreExpenses
 }: WalletsPageProps) {
@@ -373,6 +416,42 @@ export function WalletsPage({
   const [settlementFilterMonth, setSettlementFilterMonth] = useState("all");
   const [settlementFilterAmount, setSettlementFilterAmount] = useState("all");
 
+  // View Mode: Shared Wallets vs Peer Loans
+  const [viewMode, setViewMode] = useState<"wallets" | "loans">("wallets");
+
+  // Loan & Lending Hub State
+  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
+  const [editingLoan, setEditingLoan] = useState<WalletLoan | null>(null);
+  const [isRepaymentModalOpen, setIsRepaymentModalOpen] = useState(false);
+  const [activeLoanForRepayment, setActiveLoanForRepayment] = useState<WalletLoan | null>(null);
+  const [selectedLoanForDetails, setSelectedLoanForDetails] = useState<WalletLoan | null>(null);
+  const [loanFilterBorrower, setLoanFilterBorrower] = useState("all");
+  const [loanFilterStatus, setLoanFilterStatus] = useState("all");
+  const [standaloneSearch, setStandaloneSearch] = useState("");
+  const [standaloneFilterStatus, setStandaloneFilterStatus] = useState("all");
+  const [deletingLoanIds, setDeletingLoanIds] = useState<string[]>([]);
+  const [deletingLoanRepaymentIds, setDeletingLoanRepaymentIds] = useState<string[]>([]);
+
+  // Loan Form State
+  const [loanBorrowerId, setLoanBorrowerId] = useState("");
+  const [loanBorrowerName, setLoanBorrowerName] = useState("");
+  const [loanBorrowerEmail, setLoanBorrowerEmail] = useState("");
+  const [loanAmount, setLoanAmount] = useState("");
+  const [loanInterestRate, setLoanInterestRate] = useState("0");
+  const [loanInterestType, setLoanInterestType] = useState<"percentage" | "fixed" | "none">("percentage");
+  const [loanInterestPeriod, setLoanInterestPeriod] = useState<"monthly" | "yearly" | "one-time">("monthly");
+  const [loanLendingDate, setLoanLendingDate] = useState(getTodayIsoDate());
+  const [loanInterestStartDate, setLoanInterestStartDate] = useState("");
+  const [loanDueDate, setLoanDueDate] = useState("");
+  const [loanNotes, setLoanNotes] = useState("");
+  const [showLoanValidation, setShowLoanValidation] = useState(false);
+
+  // Repayment Form State
+  const [repaymentAmount, setRepaymentAmount] = useState("");
+  const [repaymentDate, setRepaymentDate] = useState(getTodayIsoDate());
+  const [repaymentNotes, setRepaymentNotes] = useState("");
+  const [showRepaymentValidation, setShowRepaymentValidation] = useState(false);
+
   const createWalletErrors = useMemo(
     () => ({
       name: walletName.trim() ? "" : "Wallet name is required.",
@@ -441,11 +520,231 @@ export function WalletsPage({
                 m.email &&
                 m.email.toLowerCase() === inviteEmail.trim().toLowerCase(),
             )
-          ? "A member with this email is already in this group."
+          ? "This email is already in the wallet."
           : "",
     }),
     [inviteDisplayName, inviteEmail, selectedWallet],
   );
+
+  function calculateLoanFinancials(loan: WalletLoan) {
+    const principal = parseFloat(loan.amount) || 0;
+    const totalRepaid = loan.repayments?.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0) || 0;
+    const rate = Number(loan.interest_rate) || 0;
+
+    let accruedInterest = 0;
+    if (rate > 0) {
+      if (loan.interest_type === "fixed") {
+        accruedInterest = rate;
+      } else {
+        const startStr = loan.interest_start_date || loan.lending_date;
+        const startDate = new Date(startStr);
+        const now = new Date();
+
+        if (now >= startDate) {
+          if (loan.interest_rate_period === "one-time") {
+            accruedInterest = (principal * rate) / 100;
+          } else if (loan.interest_rate_period === "yearly") {
+            const diffMonths = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            const diffYears = diffMonths / 12;
+            accruedInterest = (principal * (rate / 100)) * diffYears;
+          } else {
+            // monthly
+            const months = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            accruedInterest = (principal * (rate / 100)) * months;
+          }
+        }
+      }
+    }
+
+    const totalDue = principal + accruedInterest;
+    const remainingBalance = Math.max(0, totalDue - totalRepaid);
+    const isFullyPaid = totalRepaid >= totalDue && totalDue > 0;
+    const progressPercent = totalDue > 0 ? Math.min(100, Math.round((totalRepaid / totalDue) * 100)) : 100;
+
+    const isOverdue = Boolean(loan.due_date && new Date(loan.due_date) < new Date() && remainingBalance > 0);
+
+    return {
+      principal,
+      accruedInterest,
+      totalDue,
+      totalRepaid,
+      remainingBalance,
+      isFullyPaid,
+      progressPercent,
+      isOverdue
+    };
+  }
+
+  function getLoanBorrowerName(loan: WalletLoan): string {
+    if (loan.borrower_name) return loan.borrower_name;
+    if (loan.borrower_member_id && selectedWallet?.members) {
+      const m = selectedWallet.members.find((member) => member.id === loan.borrower_member_id);
+      if (m) return m.display_name;
+    }
+    return "Borrower";
+  }
+
+  function getLoanBorrowerEmail(loan: WalletLoan): string | null {
+    if (loan.borrower_email) return loan.borrower_email;
+    if (loan.borrower_member_id && selectedWallet?.members) {
+      const m = selectedWallet.members.find((member) => member.id === loan.borrower_member_id);
+      if (m?.email) return m.email;
+    }
+    return null;
+  }
+
+  const standaloneLoansList = useMemo(() => loans || [], [loans]);
+
+  const standaloneLoansAggregate = useMemo(() => {
+    let totalLent = 0;
+    let totalInterest = 0;
+    let totalRepaid = 0;
+    let totalRemaining = 0;
+    let activeCount = 0;
+
+    for (const loan of standaloneLoansList) {
+      const { principal, accruedInterest, totalRepaid: repaid, remainingBalance, isFullyPaid } = calculateLoanFinancials(loan);
+      totalLent += principal;
+      totalInterest += accruedInterest;
+      totalRepaid += repaid;
+      totalRemaining += remainingBalance;
+      if (!isFullyPaid) {
+        activeCount++;
+      }
+    }
+
+    return {
+      totalLent,
+      totalInterest,
+      totalRepaid,
+      totalRemaining,
+      activeCount,
+      totalLoans: standaloneLoansList.length
+    };
+  }, [standaloneLoansList]);
+
+  const filteredStandaloneLoans = useMemo(() => {
+    return standaloneLoansList.filter((loan) => {
+      const bName = getLoanBorrowerName(loan).toLowerCase();
+      const bEmail = (getLoanBorrowerEmail(loan) || "").toLowerCase();
+      const search = standaloneSearch.trim().toLowerCase();
+      if (search && !bName.includes(search) && !bEmail.includes(search)) {
+        return false;
+      }
+      const { isFullyPaid, isOverdue } = calculateLoanFinancials(loan);
+      if (standaloneFilterStatus === "active" && isFullyPaid) {
+        return false;
+      }
+      if (standaloneFilterStatus === "repaid" && !isFullyPaid) {
+        return false;
+      }
+      if (standaloneFilterStatus === "overdue" && !isOverdue) {
+        return false;
+      }
+      return true;
+    });
+  }, [standaloneLoansList, standaloneSearch, standaloneFilterStatus, selectedWallet]);
+
+  const walletLoans = useMemo(() => selectedWallet?.loans || [], [selectedWallet?.loans]);
+
+  const walletLoansAggregate = useMemo(() => {
+    let totalLent = 0;
+    let totalInterest = 0;
+    let totalRepaid = 0;
+    let totalRemaining = 0;
+    let activeCount = 0;
+
+    for (const loan of walletLoans) {
+      const { principal, accruedInterest, totalRepaid: repaid, remainingBalance, isFullyPaid } = calculateLoanFinancials(loan);
+      totalLent += principal;
+      totalInterest += accruedInterest;
+      totalRepaid += repaid;
+      totalRemaining += remainingBalance;
+      if (!isFullyPaid) {
+        activeCount++;
+      }
+    }
+
+    return {
+      totalLent,
+      totalInterest,
+      totalRepaid,
+      totalRemaining,
+      activeCount,
+      totalLoans: walletLoans.length
+    };
+  }, [walletLoans]);
+
+  const filteredWalletLoans = useMemo(() => {
+    return walletLoans.filter((loan) => {
+      if (loanFilterBorrower !== "all" && loan.borrower_member_id !== loanFilterBorrower) {
+        return false;
+      }
+      const { isFullyPaid } = calculateLoanFinancials(loan);
+      if (loanFilterStatus === "active" && isFullyPaid) {
+        return false;
+      }
+      if (loanFilterStatus === "repaid" && !isFullyPaid) {
+        return false;
+      }
+      return true;
+    });
+  }, [walletLoans, loanFilterBorrower, loanFilterStatus]);
+
+  const loanErrors = useMemo(() => {
+    const errors = {
+      borrower: "",
+      amount: "",
+      interestRate: "",
+      lendingDate: "",
+    };
+
+    const isStandaloneForm = viewMode === "loans" || !selectedWallet;
+    if (isStandaloneForm) {
+      if (!loanBorrowerName.trim()) {
+        errors.borrower = "Borrower name is required.";
+      }
+    } else {
+      if (!loanBorrowerId.trim()) {
+        errors.borrower = "Please select a member.";
+      }
+    }
+
+    const amt = parseFloat(loanAmount.trim());
+    if (!loanAmount.trim()) {
+      errors.amount = "Loan amount is required.";
+    } else if (isNaN(amt) || amt <= 0) {
+      errors.amount = "Amount must be a positive number.";
+    }
+
+    const rate = parseFloat(loanInterestRate.trim());
+    if (loanInterestRate.trim() && (isNaN(rate) || rate < 0)) {
+      errors.interestRate = "Interest rate cannot be negative.";
+    }
+
+    if (!loanLendingDate.trim()) {
+      errors.lendingDate = "Lending date is required.";
+    }
+
+    return errors;
+  }, [viewMode, selectedWallet, loanBorrowerId, loanBorrowerName, loanAmount, loanInterestRate, loanLendingDate]);
+
+  const repaymentErrors = useMemo(() => {
+    const errors = {
+      amount: "",
+      date: ""
+    };
+    const amt = parseFloat(repaymentAmount.trim());
+    if (!repaymentAmount.trim()) {
+      errors.amount = "Repayment amount is required.";
+    } else if (isNaN(amt) || amt <= 0) {
+      errors.amount = "Amount must be greater than 0.";
+    }
+    if (!repaymentDate.trim()) {
+      errors.date = "Repayment date is required.";
+    }
+    return errors;
+  }, [repaymentAmount, repaymentDate]);
 
   const walletBudgetCategoryChoices = useMemo(() => {
     const optionsByLabel = new Map<string, CategoryOption>();
@@ -1336,6 +1635,169 @@ export function WalletsPage({
     }
   }
 
+  function handleOpenCreateLoan() {
+    setEditingLoan(null);
+    const nonOwnerMembers = selectedWallet?.members.filter((m) => m.role !== "owner") || [];
+    setLoanBorrowerId(nonOwnerMembers[0]?.id || selectedWallet?.members[0]?.id || "");
+    setLoanBorrowerName("");
+    setLoanBorrowerEmail("");
+    setLoanAmount("");
+    setLoanInterestRate("0");
+    setLoanInterestType("percentage");
+    setLoanInterestPeriod("monthly");
+    setLoanLendingDate(getTodayIsoDate());
+    setLoanInterestStartDate(getTodayIsoDate());
+    setLoanDueDate("");
+    setLoanNotes("");
+    setShowLoanValidation(false);
+    setIsLoanModalOpen(true);
+  }
+
+  function handleOpenEditLoan(loan: WalletLoan) {
+    setEditingLoan(loan);
+    setLoanBorrowerId(loan.borrower_member_id || "");
+    setLoanBorrowerName(loan.borrower_name || "");
+    setLoanBorrowerEmail(loan.borrower_email || "");
+    setLoanAmount(loan.amount);
+    setLoanInterestRate(String(loan.interest_rate ?? 0));
+    setLoanInterestType(loan.interest_type ?? "percentage");
+    setLoanInterestPeriod(loan.interest_rate_period ?? "monthly");
+    setLoanLendingDate(loan.lending_date);
+    setLoanInterestStartDate(loan.interest_start_date || "");
+    setLoanDueDate(loan.due_date || "");
+    setLoanNotes(loan.notes || "");
+    setShowLoanValidation(false);
+    setIsLoanModalOpen(true);
+  }
+
+  async function handleLoanFormSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setShowLoanValidation(true);
+
+    if (loanErrors.borrower || loanErrors.amount || loanErrors.interestRate || loanErrors.lendingDate) {
+      return;
+    }
+
+    const isStandaloneForm = viewMode === "loans" || !selectedWallet || !loanBorrowerId;
+
+    const payload: WalletLoanForm = {
+      borrowerMemberId: isStandaloneForm ? undefined : loanBorrowerId,
+      borrowerName: isStandaloneForm ? loanBorrowerName.trim() : undefined,
+      borrowerEmail: isStandaloneForm ? (loanBorrowerEmail.trim() || undefined) : undefined,
+      amount: loanAmount.trim(),
+      interestRate: parseFloat(loanInterestRate.trim()) || 0,
+      interestType: loanInterestType,
+      interestRatePeriod: loanInterestPeriod,
+      lendingDate: loanLendingDate,
+      interestStartDate: loanInterestStartDate.trim() || undefined,
+      dueDate: loanDueDate.trim() || undefined,
+      notes: loanNotes.trim() || undefined
+    };
+
+    if (editingLoan) {
+      if (editingLoan.wallet_id && onUpdateWalletLoan) {
+        const success = await onUpdateWalletLoan(editingLoan.wallet_id, editingLoan.id, payload);
+        if (success) {
+          setIsLoanModalOpen(false);
+          setEditingLoan(null);
+        }
+      } else if (onUpdateStandaloneLoan) {
+        const success = await onUpdateStandaloneLoan(editingLoan.id, payload);
+        if (success) {
+          setIsLoanModalOpen(false);
+          setEditingLoan(null);
+        }
+      }
+    } else {
+      if (!isStandaloneForm && selectedWallet && onCreateWalletLoan) {
+        const success = await onCreateWalletLoan(selectedWallet.wallet.id, payload);
+        if (success) {
+          setIsLoanModalOpen(false);
+        }
+      } else if (onCreateStandaloneLoan) {
+        const success = await onCreateStandaloneLoan(payload);
+        if (success) {
+          setIsLoanModalOpen(false);
+        }
+      }
+    }
+  }
+
+  async function handleDeleteLoanClick(loan: WalletLoan) {
+    if (!window.confirm("Are you sure you want to delete this loan record? All associated repayment history will also be removed.")) {
+      return;
+    }
+    setDeletingLoanIds((prev) => [...prev, loan.id]);
+    try {
+      if (loan.wallet_id && onDeleteWalletLoan) {
+        await onDeleteWalletLoan(loan.wallet_id, loan.id);
+      } else if (onDeleteStandaloneLoan) {
+        await onDeleteStandaloneLoan(loan.id);
+      }
+      if (selectedLoanForDetails?.id === loan.id) {
+        setSelectedLoanForDetails(null);
+      }
+    } finally {
+      setDeletingLoanIds((prev) => prev.filter((id) => id !== loan.id));
+    }
+  }
+
+  function handleOpenRepaymentModal(loan: WalletLoan) {
+    setActiveLoanForRepayment(loan);
+    const { remainingBalance } = calculateLoanFinancials(loan);
+    setRepaymentAmount(remainingBalance > 0 ? remainingBalance.toFixed(2) : "");
+    setRepaymentDate(getTodayIsoDate());
+    setRepaymentNotes("");
+    setShowRepaymentValidation(false);
+    setIsRepaymentModalOpen(true);
+  }
+
+  async function handleRepaymentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setShowRepaymentValidation(true);
+
+    if (repaymentErrors.amount || repaymentErrors.date) {
+      return;
+    }
+
+    if (!activeLoanForRepayment) return;
+
+    const payload: WalletLoanRepaymentForm = {
+      amount: repaymentAmount.trim(),
+      repaymentDate: repaymentDate,
+      notes: repaymentNotes.trim() || undefined
+    };
+
+    if (activeLoanForRepayment.wallet_id && onCreateWalletLoanRepayment) {
+      const success = await onCreateWalletLoanRepayment(activeLoanForRepayment.wallet_id, activeLoanForRepayment.id, payload);
+      if (success) {
+        setIsRepaymentModalOpen(false);
+        setActiveLoanForRepayment(null);
+      }
+    } else if (onCreateStandaloneLoanRepayment) {
+      const success = await onCreateStandaloneLoanRepayment(activeLoanForRepayment.id, payload);
+      if (success) {
+        setIsRepaymentModalOpen(false);
+        setActiveLoanForRepayment(null);
+      }
+    }
+  }
+
+  async function handleDeleteRepaymentClick(loan: WalletLoan, repaymentId: string) {
+    if (!window.confirm("Delete this repayment entry?")) return;
+
+    setDeletingLoanRepaymentIds((prev) => [...prev, repaymentId]);
+    try {
+      if (loan.wallet_id && onDeleteWalletLoanRepayment) {
+        await onDeleteWalletLoanRepayment(loan.wallet_id, loan.id, repaymentId);
+      } else if (onDeleteStandaloneLoanRepayment) {
+        await onDeleteStandaloneLoanRepayment(loan.id, repaymentId);
+      }
+    } finally {
+      setDeletingLoanRepaymentIds((prev) => prev.filter((id) => id !== repaymentId));
+    }
+  }
+
   function handleScanComplete(data: { amount: string; description: string; date: string; category?: string; platform?: string }) {
     setExpenseAmount(data.amount);
     setExpenseDescription(data.description);
@@ -1731,10 +2193,70 @@ export function WalletsPage({
   return (
     <>
       <PageHero
-        eyebrow="Shared wallets"
-        title="Track group spending, balances, and settlements."
-        description="Create a wallet for a trip, home, or shared budget, then manage balances, group budgets, transactions, invites, and payback history in one connected surface."
+        eyebrow={viewMode === "wallets" ? "Shared wallets" : "Peer Lending & Loans"}
+        title={viewMode === "wallets" ? "Track group spending, balances, and settlements." : "Track loans, custom interest, and repayments directly."}
+        description={viewMode === "wallets"
+          ? "Create a wallet for a trip, home, or shared budget, then manage balances, group budgets, transactions, invites, and payback history in one connected surface."
+          : "Lend money with customizable monthly, yearly, or one-time interest schedules and start dates. Track principal, accrued interest, and repayments without needing a group wallet."}
       />
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-2 border-b border-[color:var(--border)] mb-6">
+        <div className="inline-flex p-1 rounded-2xl bg-zinc-100/90 dark:bg-zinc-800/80 border border-[color:var(--border)] shadow-inner">
+          <button
+            type="button"
+            onClick={() => setViewMode("wallets")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
+              viewMode === "wallets"
+                ? "bg-white dark:bg-zinc-900 text-ink shadow-sm scale-[1.01]"
+                : "text-secondary hover:text-ink"
+            )}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-primary">
+              <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM14 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM3.5 15.5a3.5 3.5 0 0 1 7 0h-7ZM13.5 15.5a3.5 3.5 0 0 1 7 0h-7Z" />
+            </svg>
+            <span>Shared Wallets</span>
+            {wallets.length > 0 && (
+              <span className="ml-1 px-2 py-0.5 text-xs font-bold rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
+                {wallets.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("loans")}
+            className={cn(
+              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
+              viewMode === "loans"
+                ? "bg-white dark:bg-zinc-900 text-ink shadow-sm scale-[1.01]"
+                : "text-secondary hover:text-ink"
+            )}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-emerald-500">
+              <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
+            </svg>
+            <span>Peer Loans &amp; Lending</span>
+            {standaloneLoansList.length > 0 && (
+              <span className="ml-1 px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                {standaloneLoansList.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {viewMode === "loans" && (
+          <button
+            type="button"
+            className="ui-button-primary flex items-center gap-2 shrink-0 self-start sm:self-auto shadow-md hover:shadow-lg transition-shadow"
+            onClick={handleOpenCreateLoan}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+            </svg>
+            <span>+ Lend Money</span>
+          </button>
+        )}
+      </div>
 
       {statusMessage ? (
         <StatusNotice tone="success">{statusMessage}</StatusNotice>
@@ -1743,13 +2265,14 @@ export function WalletsPage({
         <StatusNotice tone="error">{errorMessage}</StatusNotice>
       ) : null}
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.36fr)_minmax(0,0.64fr)]">
-        <SurfaceCard className="space-y-6 p-5 sm:p-6 xl:sticky xl:top-32 xl:self-start">
-          <SectionHeader
-            eyebrow="Your wallets"
-            title="Groups and shared ledgers"
-            description="Switch between wallets and create a new shared group from the same persistent rail."
-          />
+      {viewMode === "wallets" && (
+        <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.36fr)_minmax(0,0.64fr)]">
+          <SurfaceCard className="space-y-6 p-5 sm:p-6 xl:sticky xl:top-32 xl:self-start">
+            <SectionHeader
+              eyebrow="Your wallets"
+              title="Groups and shared ledgers"
+              description="Switch between wallets and create a new shared group from the same persistent rail."
+            />
 
           {wallets.length === 0 ? (
             <EmptyState
@@ -2127,6 +2650,318 @@ export function WalletsPage({
                     );
                   })}
                 </div>
+              </SurfaceCard>
+
+              {/* Peer Loans & Interest Hub Section */}
+              <SurfaceCard className="space-y-6 p-5 sm:p-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <SectionHeader
+                    eyebrow="Lending & Credit"
+                    title="Peer Loans & Interest Hub"
+                    description="Owner-managed personal loans with custom interest schedules, starting months, and repayment tracking."
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isWalletOwner ? (
+                      <button
+                        type="button"
+                        className="ui-button-primary flex items-center gap-2"
+                        onClick={handleOpenCreateLoan}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                          <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                        </svg>
+                        Lend money
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 text-zinc-500">
+                          <path fillRule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clipRule="evenodd" />
+                        </svg>
+                        Managed by Wallet Owner
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Metrics Banner */}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-[20px] border border-blue-500/15 bg-blue-50/50 p-4 dark:border-blue-500/20 dark:bg-blue-950/20">
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Total Principal Lent</p>
+                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
+                      {formatCurrency(walletLoansAggregate.totalLent.toFixed(2), selectedWallet.wallet.currency)}
+                    </p>
+                    <span className="text-[11px] text-secondary">{walletLoansAggregate.totalLoans} loan{walletLoansAggregate.totalLoans === 1 ? "" : "s"} total</span>
+                  </div>
+
+                  <div className="rounded-[20px] border border-amber-500/15 bg-amber-50/50 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Accrued Interest</p>
+                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
+                      {formatCurrency(walletLoansAggregate.totalInterest.toFixed(2), selectedWallet.wallet.currency)}
+                    </p>
+                    <span className="text-[11px] text-secondary">Earned across active loans</span>
+                  </div>
+
+                  <div className="rounded-[20px] border border-emerald-500/15 bg-emerald-50/50 p-4 dark:border-emerald-500/20 dark:bg-emerald-950/20">
+                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Total Repaid</p>
+                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
+                      {formatCurrency(walletLoansAggregate.totalRepaid.toFixed(2), selectedWallet.wallet.currency)}
+                    </p>
+                    <span className="text-[11px] text-secondary">Recovered installments</span>
+                  </div>
+
+                  <div className="rounded-[20px] border border-purple-500/15 bg-purple-50/50 p-4 dark:border-purple-500/20 dark:bg-purple-950/20">
+                    <p className="text-xs font-medium text-purple-700 dark:text-purple-300">Outstanding Balance</p>
+                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
+                      {formatCurrency(walletLoansAggregate.totalRemaining.toFixed(2), selectedWallet.wallet.currency)}
+                    </p>
+                    <span className="text-[11px] text-secondary">{walletLoansAggregate.activeCount} active loan{walletLoansAggregate.activeCount === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+
+                {/* Filters */}
+                {walletLoans.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border)] pb-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={loanFilterBorrower}
+                        onChange={(e) => setLoanFilterBorrower(e.target.value)}
+                        className="text-xs py-1.5 px-3 rounded-xl"
+                      >
+                        <option value="all">All Borrowers</option>
+                        {selectedWallet.members.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.display_name}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={loanFilterStatus}
+                        onChange={(e) => setLoanFilterStatus(e.target.value)}
+                        className="text-xs py-1.5 px-3 rounded-xl"
+                      >
+                        <option value="all">All Statuses</option>
+                        <option value="active">Active Only</option>
+                        <option value="repaid">Fully Repaid</option>
+                      </select>
+                    </div>
+
+                    <span className="text-xs text-secondary font-medium">
+                      Showing {filteredWalletLoans.length} of {walletLoans.length} loans
+                    </span>
+                  </div>
+                )}
+
+                {/* Loans List */}
+                {walletLoans.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-10">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                      </svg>
+                    </div>
+                    <h3 className="mt-3 text-base font-semibold text-ink">No loans recorded yet</h3>
+                    <p className="mt-1 max-w-sm text-sm text-secondary">
+                      {isWalletOwner
+                        ? "Lend funds to members of this wallet, configure interest rate schedules, and record repayments seamlessly."
+                        : "No peer loans have been issued by the wallet owner yet."}
+                    </p>
+                    {isWalletOwner && (
+                      <button
+                        type="button"
+                        className="ui-button-primary mt-4 flex items-center gap-2"
+                        onClick={handleOpenCreateLoan}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                          <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                        </svg>
+                        Lend money
+                      </button>
+                    )}
+                  </div>
+                ) : filteredWalletLoans.length === 0 ? (
+                  <EmptyState
+                    title="No loans match the filter"
+                    description="Change your borrower or status filter to view other loans."
+                  />
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {filteredWalletLoans.map((loan) => {
+                      const {
+                        totalDue,
+                        totalRepaid,
+                        remainingBalance,
+                        isFullyPaid,
+                        progressPercent,
+                        isOverdue
+                      } = calculateLoanFinancials(loan);
+
+                      const borrower = selectedWallet.members.find(
+                        (m) => m.id === loan.borrower_member_id
+                      );
+
+                      return (
+                        <article
+                          key={loan.id}
+                          className={cn(
+                            "group relative flex flex-col justify-between rounded-[24px] border p-5 shadow-sm transition-all duration-200",
+                            isFullyPaid
+                              ? "border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
+                              : isOverdue
+                                ? "border-rose-500/25 bg-rose-50/30 dark:bg-rose-950/10"
+                                : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/60"
+                          )}
+                        >
+                          <div className="space-y-4">
+                            {/* Header: Borrower info + Status */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <img
+                                  src={getMemberAvatarUrl(
+                                    loan.borrower_member_name || borrower?.display_name || "Borrower",
+                                    borrower?.email
+                                  )}
+                                  alt={loan.borrower_member_name || "Borrower"}
+                                  className="h-10 w-10 shrink-0 rounded-full border border-[color:var(--border)] object-cover"
+                                />
+                                <div className="min-w-0">
+                                  <strong className="block text-base font-semibold text-ink truncate">
+                                    {loan.borrower_member_name || borrower?.display_name || "Unknown Member"}
+                                  </strong>
+                                  <p className="text-xs text-secondary">
+                                    Lent on {loan.lending_date}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div>
+                                {isFullyPaid ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                                    ✓ Fully Repaid
+                                  </span>
+                                ) : isOverdue ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                                    ⚠️ Overdue
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
+                                    Active Loan
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Loan Amount & Terms */}
+                            <div className="grid grid-cols-2 gap-3 rounded-[18px] bg-zinc-50/80 p-3.5 dark:bg-zinc-800/40">
+                              <div>
+                                <span className="text-[11px] font-medium text-secondary">Principal Lent</span>
+                                <p className="text-lg font-bold text-ink">
+                                  {formatCurrency(loan.amount, selectedWallet.wallet.currency)}
+                                </p>
+                              </div>
+
+                              <div>
+                                <span className="text-[11px] font-medium text-secondary">Interest Schedule</span>
+                                <p className="text-sm font-semibold text-ink truncate">
+                                  {loan.interest_rate > 0
+                                    ? loan.interest_type === "percentage"
+                                      ? `${loan.interest_rate}% / ${loan.interest_rate_period}`
+                                      : `${formatCurrency(String(loan.interest_rate), selectedWallet.wallet.currency)} fixed`
+                                    : "Zero Interest"}
+                                </p>
+                                {loan.interest_start_date && (
+                                  <p className="text-[11px] text-secondary truncate">
+                                    Starts {loan.interest_start_date}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Progress & Remaining */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-xs font-medium">
+                                <span className="text-secondary">
+                                  Repaid {formatCurrency(totalRepaid.toFixed(2), selectedWallet.wallet.currency)} of {formatCurrency(totalDue.toFixed(2), selectedWallet.wallet.currency)}
+                                </span>
+                                <span className={cn("font-semibold", isFullyPaid ? "text-emerald-600" : "text-ink")}>
+                                  {progressPercent}%
+                                </span>
+                              </div>
+
+                              <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                                <div
+                                  className={cn(
+                                    "h-full transition-all duration-300 rounded-full",
+                                    isFullyPaid ? "bg-emerald-500" : "bg-primary"
+                                  )}
+                                  style={{ width: `${progressPercent}%` }}
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between pt-1 text-xs">
+                                <span className="text-secondary">
+                                  {loan.due_date ? `Due ${loan.due_date}` : "No due date"}
+                                </span>
+                                <span className="font-semibold text-ink">
+                                  Remaining: {formatCurrency(remainingBalance.toFixed(2), selectedWallet.wallet.currency)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {loan.notes && (
+                              <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2 rounded-xl">
+                                "{loan.notes}"
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3">
+                            <button
+                              type="button"
+                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                              onClick={() => setSelectedLoanForDetails(loan)}
+                            >
+                              Timeline ({loan.repayments?.length || 0})
+                            </button>
+
+                            <div className="flex items-center gap-1.5">
+                              {isWalletOwner && !isFullyPaid && (
+                                <button
+                                  type="button"
+                                  className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold"
+                                  onClick={() => handleOpenRepaymentModal(loan)}
+                                >
+                                  + Repay
+                                </button>
+                              )}
+
+                              {isWalletOwner && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
+                                    onClick={() => handleOpenEditLoan(loan)}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
+                                    disabled={deletingLoanIds.includes(loan.id)}
+                                    onClick={() => void handleDeleteLoanClick(loan)}
+                                  >
+                                    {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </SurfaceCard>
 
               <BudgetTrackerSection
@@ -3061,6 +3896,384 @@ export function WalletsPage({
           ) : null}
         </section>
       </section>
+      )}
+
+      {viewMode === "loans" && (
+        <section className="space-y-6">
+          {/* Top Aggregate Summary Metrics Cards */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <SurfaceCard className="relative overflow-hidden p-5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                  Total Principal Lent
+                </p>
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                  </svg>
+                </span>
+              </div>
+              <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
+                {formatCurrency(standaloneLoansAggregate.totalLent.toFixed(2))}
+              </strong>
+              <span className="mt-1 block text-xs text-secondary">
+                Across {standaloneLoansAggregate.totalLoans} peer loan{standaloneLoansAggregate.totalLoans !== 1 ? "s" : ""}
+              </span>
+            </SurfaceCard>
+
+            <SurfaceCard className="relative overflow-hidden p-5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                  Accrued Interest
+                </p>
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 6a.75.75 0 0 0-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75V6Z" clipRule="evenodd" />
+                  </svg>
+                </span>
+              </div>
+              <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
+                +{formatCurrency(standaloneLoansAggregate.totalInterest.toFixed(2))}
+              </strong>
+              <span className="mt-1 block text-xs text-secondary">
+                Calculated per schedule
+              </span>
+            </SurfaceCard>
+
+            <SurfaceCard className="relative overflow-hidden p-5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                  Total Repaid
+                </p>
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+                  </svg>
+                </span>
+              </div>
+              <strong className="mt-3 block text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(standaloneLoansAggregate.totalRepaid.toFixed(2))}
+              </strong>
+              <span className="mt-1 block text-xs text-secondary">
+                Principal &amp; interest received
+              </span>
+            </SurfaceCard>
+
+            <SurfaceCard className="relative overflow-hidden p-5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                  Outstanding Balance
+                </p>
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
+                  </svg>
+                </span>
+              </div>
+              <strong className="mt-3 block text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+                {formatCurrency(standaloneLoansAggregate.totalRemaining.toFixed(2))}
+              </strong>
+              <span className="mt-1 block text-xs text-secondary">
+                {standaloneLoansAggregate.activeCount} active loan{standaloneLoansAggregate.activeCount !== 1 ? "s" : ""}
+              </span>
+            </SurfaceCard>
+          </div>
+
+          {/* Controls Bar: Search & Status Filters */}
+          <SurfaceCard className="p-4 sm:p-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={standaloneSearch}
+                    onChange={(e) => setStandaloneSearch(e.target.value)}
+                    placeholder="Search by borrower name or email..."
+                    className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
+                  />
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
+                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                  </svg>
+                  {standaloneSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setStandaloneSearch("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setStandaloneFilterStatus("all")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      standaloneFilterStatus === "all"
+                        ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
+                        : "text-secondary hover:text-ink"
+                    )}
+                  >
+                    All ({standaloneLoansList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStandaloneFilterStatus("active")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      standaloneFilterStatus === "active"
+                        ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "text-secondary hover:text-ink"
+                    )}
+                  >
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStandaloneFilterStatus("repaid")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      standaloneFilterStatus === "repaid"
+                        ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                        : "text-secondary hover:text-ink"
+                    )}
+                  >
+                    Repaid
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStandaloneFilterStatus("overdue")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      standaloneFilterStatus === "overdue"
+                        ? "bg-white dark:bg-zinc-900 text-red-600 dark:text-red-400 shadow-sm"
+                        : "text-secondary hover:text-ink"
+                    )}
+                  >
+                    Overdue
+                  </button>
+                </div>
+              </div>
+            </div>
+          </SurfaceCard>
+
+          {/* Standalone Loans Grid */}
+          {filteredStandaloneLoans.length === 0 ? (
+            standaloneLoansList.length === 0 ? (
+              <SurfaceCard className="p-8 sm:p-12 text-center space-y-4">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 text-2xl shadow-inner">
+                  💸
+                </div>
+                <div className="space-y-2 max-w-md mx-auto">
+                  <h3 className="font-display text-xl font-bold text-ink">
+                    No peer loans tracked yet
+                  </h3>
+                  <p className="text-sm leading-6 text-secondary">
+                    Lend money to friends, family, or partners with customizable interest schedules, start months, and repayment tracking — without creating or joining a shared wallet.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ui-button-primary mt-2 inline-flex items-center gap-2"
+                  onClick={handleOpenCreateLoan}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                  </svg>
+                  <span>+ Lend Money to Someone</span>
+                </button>
+              </SurfaceCard>
+            ) : (
+              <SurfaceCard className="p-8 text-center space-y-2">
+                <p className="text-base font-semibold text-ink">No matching loans found</p>
+                <p className="text-xs text-secondary">Try adjusting your search query or status filter.</p>
+              </SurfaceCard>
+            )
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filteredStandaloneLoans.map((loan) => {
+                const {
+                  principal,
+                  accruedInterest,
+                  totalDue,
+                  totalRepaid,
+                  remainingBalance,
+                  isFullyPaid,
+                  progressPercent,
+                  isOverdue
+                } = calculateLoanFinancials(loan);
+
+                const bName = getLoanBorrowerName(loan);
+                const bEmail = getLoanBorrowerEmail(loan);
+
+                return (
+                  <article
+                    key={loan.id}
+                    className={cn(
+                      "rounded-[26px] border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
+                      isFullyPaid
+                        ? "border-emerald-200/70 bg-emerald-50/25 dark:border-emerald-900/40 dark:bg-emerald-950/10"
+                        : isOverdue
+                          ? "border-red-200/80 bg-red-50/20 dark:border-red-900/40 dark:bg-red-950/10"
+                          : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/90"
+                    )}
+                  >
+                    <div className="space-y-4">
+                      {/* Card Header: Borrower info & status badge */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={getMemberAvatarUrl(bName, bEmail)}
+                            alt={bName}
+                            className="h-11 w-11 shrink-0 rounded-2xl border border-[color:var(--border)] object-cover shadow-sm"
+                          />
+                          <div className="min-w-0">
+                            <strong className="block truncate text-base font-bold text-ink">
+                              {bName}
+                            </strong>
+                            {bEmail ? (
+                              <p className="truncate text-xs text-secondary">
+                                {bEmail}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-secondary">
+                                Standalone Loan
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="shrink-0">
+                          {isFullyPaid ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                              ✓ Paid
+                            </span>
+                          ) : isOverdue ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-800 dark:bg-red-950/80 dark:text-red-300 animate-pulse">
+                              Overdue
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Financials Overview */}
+                      <div className="rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40 p-3.5 space-y-2.5">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-xs text-secondary">Principal Lent:</span>
+                          <span className="text-base font-bold text-ink">
+                            {formatCurrency(principal.toFixed(2))}
+                          </span>
+                        </div>
+
+                        {Number(loan.interest_rate) > 0 && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-secondary">
+                              Interest ({loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}):
+                            </span>
+                            <span className="font-semibold text-purple-600 dark:text-purple-400">
+                              +{formatCurrency(accruedInterest.toFixed(2))}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex items-baseline justify-between border-t border-[color:var(--border)] pt-2">
+                          <span className="text-xs font-semibold text-secondary">Total Due:</span>
+                          <span className="text-base font-extrabold text-ink">
+                            {formatCurrency(totalDue.toFixed(2))}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Repayment Progress Bar */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-secondary">
+                            Repaid: <strong className="text-ink">{formatCurrency(totalRepaid.toFixed(2))}</strong>
+                          </span>
+                          <span className={cn("font-semibold", isFullyPaid ? "text-emerald-600" : "text-ink")}>
+                            {progressPercent}%
+                          </span>
+                        </div>
+
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                          <div
+                            className={cn(
+                              "h-full transition-all duration-300 rounded-full",
+                              isFullyPaid ? "bg-emerald-500" : "bg-primary"
+                            )}
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 text-xs">
+                          <span className="text-secondary">
+                            {loan.due_date ? `Due: ${loan.due_date}` : `Lent: ${loan.lending_date}`}
+                          </span>
+                          <span className="font-semibold text-ink">
+                            Remaining: {formatCurrency(remainingBalance.toFixed(2))}
+                          </span>
+                        </div>
+                      </div>
+
+                      {loan.notes && (
+                        <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2.5 rounded-xl border border-[color:var(--border)]">
+                          "{loan.notes}"
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Actions Toolbar */}
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3.5">
+                      <button
+                        type="button"
+                        className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                        onClick={() => setSelectedLoanForDetails(loan)}
+                      >
+                        Timeline ({loan.repayments?.length || 0})
+                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        {!isFullyPaid && (
+                          <button
+                            type="button"
+                            className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold"
+                            onClick={() => handleOpenRepaymentModal(loan)}
+                          >
+                            + Repay
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
+                          onClick={() => handleOpenEditLoan(loan)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
+                          disabled={deletingLoanIds.includes(loan.id)}
+                          onClick={() => void handleDeleteLoanClick(loan)}
+                        >
+                          {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {isMobileExpenseModalOpen ? (
         <ModalFrame
@@ -3279,6 +4492,474 @@ export function WalletsPage({
           </div>
         </ModalFrame>
       ) : null}
+
+      {/* Create / Edit Loan Modal */}
+      {isLoanModalOpen ? (
+        <ModalFrame
+          onClose={() => {
+            setIsLoanModalOpen(false);
+            setEditingLoan(null);
+          }}
+          className="max-w-[540px] overflow-y-auto p-5 sm:p-6"
+        >
+          <SectionHeader
+            eyebrow="Peer Lending"
+            title={editingLoan ? "Edit loan terms" : viewMode === "loans" || !selectedWallet ? "Lend money to someone" : "Lend money to member"}
+            description="Set the principal, custom interest schedule, start month, and optional due date."
+          />
+          <form
+            className="mt-5 grid gap-4"
+            onSubmit={handleLoanFormSubmit}
+            noValidate
+          >
+            {/* Borrower */}
+            {viewMode === "loans" || !selectedWallet || (editingLoan && editingLoan.borrower_name) ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2 text-sm font-medium text-secondary">
+                  <span className="required-mark">Borrower Full Name</span>
+                  <input
+                    value={loanBorrowerName}
+                    onChange={(e) => setLoanBorrowerName(e.target.value)}
+                    placeholder="e.g. Alex Johnson"
+                    disabled={Boolean(editingLoan)}
+                    required
+                  />
+                  {showLoanValidation && loanErrors.borrower && (
+                    <span className="text-sm text-[color:var(--danger-text)]">
+                      {loanErrors.borrower}
+                    </span>
+                  )}
+                </label>
+                <label className="grid gap-2 text-sm font-medium text-secondary">
+                  Borrower Email (Optional)
+                  <input
+                    type="email"
+                    value={loanBorrowerEmail}
+                    onChange={(e) => setLoanBorrowerEmail(e.target.value)}
+                    placeholder="alex@example.com"
+                    disabled={Boolean(editingLoan)}
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="grid gap-2 text-sm font-medium text-secondary">
+                <span className="required-mark">Borrower (Wallet Member)</span>
+                <select
+                  value={loanBorrowerId}
+                  onChange={(e) => setLoanBorrowerId(e.target.value)}
+                  disabled={Boolean(editingLoan)}
+                  required
+                >
+                  <option value="">Select a member</option>
+                  {selectedWallet?.members
+                    .filter((m) => m.role !== "owner" || editingLoan)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.display_name} {m.role === "owner" ? "(Owner)" : ""}
+                      </option>
+                    ))}
+                </select>
+                {showLoanValidation && loanErrors.borrower && (
+                  <span className="text-sm text-[color:var(--danger-text)]">
+                    {loanErrors.borrower}
+                  </span>
+                )}
+              </label>
+            )}
+
+            {/* Amount & Lending Date */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-2 text-sm font-medium text-secondary">
+                <span className="required-mark">Principal Amount</span>
+                <div className="relative">
+                  <input
+                    className="pl-8"
+                    value={loanAmount}
+                    onChange={(e) => setLoanAmount(e.target.value)}
+                    placeholder="0.00"
+                    disabled={Boolean(editingLoan)}
+                    required
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 dark:text-zinc-100 z-10">
+                    {currencySymbol}
+                  </span>
+                </div>
+                {showLoanValidation && loanErrors.amount && (
+                  <span className="text-sm text-[color:var(--danger-text)]">
+                    {loanErrors.amount}
+                  </span>
+                )}
+              </label>
+
+              <label className="grid gap-2 text-sm font-medium text-secondary">
+                <span className="required-mark">Lending Date</span>
+                <input
+                  type="date"
+                  value={loanLendingDate}
+                  onChange={(e) => {
+                    setLoanLendingDate(e.target.value);
+                    if (!loanInterestStartDate) {
+                      setLoanInterestStartDate(e.target.value);
+                    }
+                  }}
+                  required
+                />
+                {showLoanValidation && loanErrors.lendingDate && (
+                  <span className="text-sm text-[color:var(--danger-text)]">
+                    {loanErrors.lendingDate}
+                  </span>
+                )}
+              </label>
+            </div>
+
+            {/* Interest Rate & Period */}
+            <div className="rounded-[20px] border border-[color:var(--border)] bg-zinc-50/70 p-4 dark:bg-zinc-800/30 space-y-3">
+              <p className="section-eyebrow">Interest Rate & Policy</p>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                  <span>Interest Rate</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={loanInterestRate}
+                    onChange={(e) => setLoanInterestRate(e.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                  <span>Interest Type</span>
+                  <select
+                    value={loanInterestType}
+                    onChange={(e) => setLoanInterestType(e.target.value as "percentage" | "fixed" | "none")}
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed Amount ({currencySymbol})</option>
+                    <option value="none">No Interest (0%)</option>
+                  </select>
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                  <span>Period / Frequency</span>
+                  <select
+                    value={loanInterestPeriod}
+                    onChange={(e) => setLoanInterestPeriod(e.target.value as "monthly" | "yearly" | "one-time")}
+                    disabled={loanInterestType === "fixed" || loanInterestType === "none"}
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                    <option value="one-time">One-time Flat</option>
+                  </select>
+                </label>
+              </div>
+
+              {/* Interest Start Date */}
+              <label className="grid gap-1.5 text-xs font-medium text-secondary">
+                <span>Interest Starts From (Month / Date)</span>
+                <input
+                  type="date"
+                  value={loanInterestStartDate}
+                  onChange={(e) => setLoanInterestStartDate(e.target.value)}
+                />
+                <span className="text-[11px] text-muted">
+                  Choose when interest begins accruing (e.g. grace period before interest applies).
+                </span>
+              </label>
+            </div>
+
+            {/* Due Date & Notes */}
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span>Expected Payback Due Date (Optional)</span>
+              <input
+                type="date"
+                value={loanDueDate}
+                onChange={(e) => setLoanDueDate(e.target.value)}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span>Loan Notes / Reason</span>
+              <textarea
+                value={loanNotes}
+                onChange={(e) => setLoanNotes(e.target.value)}
+                rows={2}
+                placeholder="Reason or notes regarding this loan"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => {
+                  setIsLoanModalOpen(false);
+                  setEditingLoan(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button-primary"
+                disabled={isSubmitting}
+              >
+                {submittingAction === "loan"
+                  ? "Saving..."
+                  : editingLoan
+                    ? "Update terms"
+                    : "Create loan"}
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
+      {/* Record Repayment Modal */}
+      {isRepaymentModalOpen && activeLoanForRepayment ? (
+        <ModalFrame
+          onClose={() => {
+            setIsRepaymentModalOpen(false);
+            setActiveLoanForRepayment(null);
+          }}
+          className="max-w-[480px] p-5 sm:p-6"
+        >
+          <SectionHeader
+            eyebrow="Record Payback"
+            title={`Repayment from ${activeLoanForRepayment.borrower_member_name}`}
+            description="Log an installment or full repayment against this loan."
+          />
+          <form
+            className="mt-5 grid gap-4"
+            onSubmit={handleRepaymentSubmit}
+            noValidate
+          >
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">Repayment Amount</span>
+              <div className="relative">
+                <input
+                  className="pl-8"
+                  value={repaymentAmount}
+                  onChange={(e) => setRepaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 dark:text-zinc-100 z-10">
+                  {currencySymbol}
+                </span>
+              </div>
+              {showRepaymentValidation && repaymentErrors.amount && (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  {repaymentErrors.amount}
+                </span>
+              )}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">Payment Date</span>
+              <input
+                type="date"
+                value={repaymentDate}
+                onChange={(e) => setRepaymentDate(e.target.value)}
+                required
+              />
+              {showRepaymentValidation && repaymentErrors.date && (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  {repaymentErrors.date}
+                </span>
+              )}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span>Payment Reference / Notes</span>
+              <input
+                value={repaymentNotes}
+                onChange={(e) => setRepaymentNotes(e.target.value)}
+                placeholder="e.g. UPI Ref #48291, Cash payment"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => {
+                  setIsRepaymentModalOpen(false);
+                  setActiveLoanForRepayment(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button-primary"
+                disabled={isSubmitting}
+              >
+                {submittingAction === "loan-repayment" ? "Recording..." : "Record payback"}
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
+      {/* Loan Details & Timeline Modal */}
+      {selectedLoanForDetails ? (() => {
+        const liveLoan = (selectedLoanForDetails.wallet_id ? selectedWallet?.loans?.find((l) => l.id === selectedLoanForDetails.id) : loans.find((l) => l.id === selectedLoanForDetails.id)) || selectedLoanForDetails;
+        const borrowerName = getLoanBorrowerName(liveLoan);
+        const borrowerEmail = getLoanBorrowerEmail(liveLoan);
+        const canManageLoan = !liveLoan.wallet_id || isWalletOwner;
+        const loanCurrency = liveLoan.wallet_id ? selectedWallet?.wallet.currency : undefined;
+
+        const {
+          principal,
+          accruedInterest,
+          totalRepaid,
+          remainingBalance,
+          isFullyPaid,
+          isOverdue
+        } = calculateLoanFinancials(liveLoan);
+
+        return (
+          <ModalFrame
+            onClose={() => setSelectedLoanForDetails(null)}
+            className="flex max-h-[92vh] max-w-[620px] flex-col p-0 overflow-hidden"
+          >
+            <div className="border-b border-[color:var(--border)] px-6 py-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <span className="section-eyebrow">Loan Details & Timeline</span>
+                  <h2 className="mt-1 font-display text-2xl font-bold text-ink">
+                    {borrowerName}'s Loan
+                  </h2>
+                  {borrowerEmail && (
+                    <p className="text-xs text-secondary">{borrowerEmail}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="ui-button-secondary !py-1 !px-3 text-xs"
+                  onClick={() => setSelectedLoanForDetails(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto p-6 space-y-6">
+              {/* Financial Cards Grid */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-[18px] bg-zinc-50 p-3 dark:bg-zinc-800/40">
+                  <span className="text-[11px] text-secondary">Principal</span>
+                  <p className="text-base font-bold text-ink">{formatCurrency(principal.toFixed(2), loanCurrency)}</p>
+                </div>
+                <div className="rounded-[18px] bg-amber-50/50 p-3 dark:bg-amber-950/20">
+                  <span className="text-[11px] text-amber-700 dark:text-amber-300">Interest</span>
+                  <p className="text-base font-bold text-ink">{formatCurrency(accruedInterest.toFixed(2), loanCurrency)}</p>
+                </div>
+                <div className="rounded-[18px] bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-300">Repaid</span>
+                  <p className="text-base font-bold text-ink">{formatCurrency(totalRepaid.toFixed(2), loanCurrency)}</p>
+                </div>
+                <div className="rounded-[18px] bg-purple-50/50 p-3 dark:bg-purple-950/20">
+                  <span className="text-[11px] text-purple-700 dark:text-purple-300">Balance</span>
+                  <p className="text-base font-bold text-ink">{formatCurrency(remainingBalance.toFixed(2), loanCurrency)}</p>
+                </div>
+              </div>
+
+              {/* Terms Overview */}
+              <div className="rounded-[20px] border border-[color:var(--border)] p-4 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-secondary">Lending Date:</span>
+                  <span className="font-semibold text-ink">{liveLoan.lending_date}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-secondary">Interest Policy:</span>
+                  <span className="font-semibold text-ink">
+                    {Number(liveLoan.interest_rate) > 0
+                      ? liveLoan.interest_type === "percentage"
+                        ? `${liveLoan.interest_rate}% / ${liveLoan.interest_rate_period}`
+                        : `${formatCurrency(String(liveLoan.interest_rate), loanCurrency)} fixed`
+                      : "No Interest"}
+                  </span>
+                </div>
+                {liveLoan.interest_start_date && (
+                  <div className="flex justify-between">
+                    <span className="text-secondary">Interest Start Date:</span>
+                    <span className="font-semibold text-ink">{liveLoan.interest_start_date}</span>
+                  </div>
+                )}
+                {liveLoan.due_date && (
+                  <div className="flex justify-between">
+                    <span className="text-secondary">Due Date:</span>
+                    <span className="font-semibold text-ink">{liveLoan.due_date} {isOverdue && "(Overdue)"}</span>
+                  </div>
+                )}
+                {liveLoan.notes && (
+                  <div className="border-t border-[color:var(--border)] pt-2 mt-2">
+                    <span className="text-secondary">Notes:</span>
+                    <p className="mt-1 italic text-ink">{liveLoan.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Repayments History */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-sm text-ink">
+                    Repayment History ({liveLoan.repayments?.length || 0})
+                  </h4>
+                  {canManageLoan && !isFullyPaid && (
+                    <button
+                      type="button"
+                      className="ui-button-primary !py-1 !px-2.5 text-xs"
+                      onClick={() => {
+                        handleOpenRepaymentModal(liveLoan);
+                      }}
+                    >
+                      + Add Payment
+                    </button>
+                  )}
+                </div>
+
+                {(!liveLoan.repayments || liveLoan.repayments.length === 0) ? (
+                  <p className="text-xs text-secondary text-center py-4 bg-zinc-50 dark:bg-zinc-800/30 rounded-2xl">
+                    No repayments have been recorded for this loan yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {liveLoan.repayments.map((repayment) => (
+                      <div
+                        key={repayment.id}
+                        className="flex items-center justify-between rounded-[16px] border border-[color:var(--border)] p-3 bg-white/70 dark:bg-zinc-800/40"
+                      >
+                        <div>
+                          <p className="font-bold text-sm text-ink">
+                            {formatCurrency(repayment.amount, loanCurrency)}
+                          </p>
+                          <p className="text-[11px] text-secondary">
+                            {repayment.repayment_date} {repayment.notes && `• ${repayment.notes}`}
+                          </p>
+                        </div>
+                        {canManageLoan && (
+                          <button
+                            type="button"
+                            className="ui-button-danger !py-1 !px-2 text-xs"
+                            disabled={deletingLoanRepaymentIds.includes(repayment.id)}
+                            onClick={() => void handleDeleteRepaymentClick(liveLoan, repayment.id)}
+                          >
+                            {deletingLoanRepaymentIds.includes(repayment.id) ? "..." : "Delete"}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </ModalFrame>
+        );
+      })() : null}
     </>
   );
 }

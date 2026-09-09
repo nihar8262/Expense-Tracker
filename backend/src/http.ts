@@ -6,6 +6,9 @@ import {
   createWalletReminderPreferencesSchema,
   createSettlementSchema,
   createWalletExpenseSchema,
+  createWalletLoanSchema,
+  updateWalletLoanSchema,
+  createWalletLoanRepaymentSchema,
   walletInviteResponseSchema,
   createWalletMemberSchema,
   createWalletSchema,
@@ -22,6 +25,7 @@ import {
   WalletExpenseNotFoundError,
   WalletInviteNotFoundError,
   WalletNotFoundError,
+  WalletLoanNotFoundError,
   WalletSettlementNotFoundError,
   WalletValidationError
 } from "./store/types.js";
@@ -851,6 +855,362 @@ export async function handleDeleteWalletSettlement(walletId: string, settlementI
     return {
       status: 500,
       body: { error: "Failed to delete settlement." }
+    };
+  }
+}
+
+export async function handleCreateWalletLoan(rawBody: unknown, walletId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createWalletLoanSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const wallet = await store.createWalletLoan(userId, walletId, result.data);
+    return {
+      status: 201,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to create loan." }
+    };
+  }
+}
+
+export async function handleUpdateWalletLoan(rawBody: unknown, walletId: string, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = updateWalletLoanSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const wallet = await store.updateWalletLoan(userId, walletId, loanId, result.data);
+    return {
+      status: 200,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError || error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to update loan." }
+    };
+  }
+}
+
+export async function handleDeleteWalletLoan(walletId: string, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const wallet = await store.deleteWalletLoan(userId, walletId, loanId);
+    return {
+      status: 200,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError || error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to delete loan." }
+    };
+  }
+}
+
+export async function handleCreateWalletLoanRepayment(rawBody: unknown, walletId: string, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan repayment payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const wallet = await store.createWalletLoanRepayment(userId, walletId, loanId, result.data);
+    return {
+      status: 201,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError || error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to record loan repayment." }
+    };
+  }
+}
+
+export async function handleDeleteWalletLoanRepayment(walletId: string, loanId: string, repaymentId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const wallet = await store.deleteWalletLoanRepayment(userId, walletId, loanId, repaymentId);
+    return {
+      status: 200,
+      body: { wallet }
+    };
+  } catch (error) {
+    if (error instanceof WalletNotFoundError || error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to delete loan repayment." }
+    };
+  }
+}
+
+export async function handleListLoans(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const loans = await store.listLoans(userId);
+    return {
+      status: 200,
+      body: { loans }
+    };
+  } catch (error) {
+    return {
+      status: 500,
+      body: { error: "Failed to list loans." }
+    };
+  }
+}
+
+export async function handleCreateStandaloneLoan(rawBody: unknown, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createWalletLoanSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const loan = await store.createStandaloneLoan(userId, result.data);
+    return {
+      status: 201,
+      body: { loan }
+    };
+  } catch (error) {
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to create loan." }
+    };
+  }
+}
+
+export async function handleUpdateStandaloneLoan(rawBody: unknown, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = updateWalletLoanSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const loan = await store.updateStandaloneLoan(userId, loanId, result.data);
+    return {
+      status: 200,
+      body: { loan }
+    };
+  } catch (error) {
+    if (error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to update loan." }
+    };
+  }
+}
+
+export async function handleDeleteStandaloneLoan(loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    await store.deleteStandaloneLoan(userId, loanId);
+    return {
+      status: 200,
+      body: { ok: true }
+    };
+  } catch (error) {
+    if (error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to delete loan." }
+    };
+  }
+}
+
+export async function handleCreateStandaloneLoanRepayment(rawBody: unknown, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
+
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid loan repayment payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const loan = await store.createStandaloneLoanRepayment(userId, loanId, result.data);
+    return {
+      status: 201,
+      body: { loan }
+    };
+  } catch (error) {
+    if (error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof WalletValidationError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to record loan repayment." }
+    };
+  }
+}
+
+export async function handleDeleteStandaloneLoanRepayment(loanId: string, repaymentId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const loan = await store.deleteStandaloneLoanRepayment(userId, loanId, repaymentId);
+    return {
+      status: 200,
+      body: { loan }
+    };
+  } catch (error) {
+    if (error instanceof WalletLoanNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    return {
+      status: 500,
+      body: { error: "Failed to delete loan repayment." }
     };
   }
 }

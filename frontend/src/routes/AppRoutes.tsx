@@ -38,7 +38,8 @@ import type {
   TrendDetailItem,
   TrendPoint,
   Wallet,
-  WalletDetail
+  WalletDetail,
+  WalletLoan
 } from "../types";
 import { ApiError } from "../types";
 import { deleteAccountData } from "../services/api";
@@ -347,7 +348,18 @@ export function AppRoutes() {
     deleteSharedWalletExpense,
     createWalletSettlement,
     updateWalletSettlementEntry,
-    deleteWalletSettlementEntry
+    deleteWalletSettlementEntry,
+    createWalletLoan,
+    updateWalletLoan,
+    deleteWalletLoan,
+    createWalletLoanRepayment,
+    deleteWalletLoanRepayment,
+    listLoans,
+    createStandaloneLoan,
+    updateStandaloneLoan,
+    deleteStandaloneLoan,
+    createStandaloneLoanRepayment,
+    deleteStandaloneLoanRepayment
   } = useWallets();
   const {
     listNotifications,
@@ -369,6 +381,7 @@ export function AppRoutes() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [loans, setLoans] = useState<WalletLoan[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
@@ -1160,6 +1173,14 @@ export function AppRoutes() {
     }
   }
 
+  async function loadLoans(user: User) {
+    try {
+      setLoans(await listLoans(user));
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load loans.");
+    }
+  }
+
   async function loadNotifications(user: User) {
     try {
       setNotifications(await listNotifications(user));
@@ -1212,6 +1233,7 @@ export function AppRoutes() {
       setExpenses([]);
       setBudgets([]);
       setWallets([]);
+      setLoans([]);
       setSelectedWalletId(null);
       setSelectedWallet(null);
       setNotifications([]);
@@ -1278,6 +1300,7 @@ export function AppRoutes() {
     if (!currentUser) {
       setIsWalletLoading(false);
       setWallets([]);
+      setLoans([]);
       setSelectedWalletId(null);
       setSelectedWallet(null);
       setNotifications([]);
@@ -1287,6 +1310,7 @@ export function AppRoutes() {
     }
 
     void loadWallets(currentUser);
+    void loadLoans(currentUser);
     void runChecksAndReloadNotifications(currentUser);
     void loadBillReminders(currentUser);
     void loadReminderPreferences(currentUser);
@@ -1934,6 +1958,216 @@ export function AppRoutes() {
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete settlement.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleCreateWalletLoan(inputWalletId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to lend money.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      const wallet = await createWalletLoan(inputWalletId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Loan record created successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleUpdateWalletLoan(inputWalletId: string, loanId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update loan.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      const wallet = await updateWalletLoan(inputWalletId, loanId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Loan terms updated successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleDeleteWalletLoan(inputWalletId: string, loanId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete loan.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      const wallet = await deleteWalletLoan(inputWalletId, loanId, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Loan deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleCreateWalletLoanRepayment(inputWalletId: string, loanId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to record repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const wallet = await createWalletLoanRepayment(inputWalletId, loanId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Repayment recorded successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record repayment.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleDeleteWalletLoanRepayment(inputWalletId: string, loanId: string, repaymentId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const wallet = await deleteWalletLoanRepayment(inputWalletId, loanId, repaymentId, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage("Repayment deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete repayment.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleCreateStandaloneLoan(input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to lend money.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      const newLoan = await createStandaloneLoan(input, currentUser);
+      setLoans((prev) => [newLoan, ...prev]);
+      setWalletStatusMessage("Loan record created successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleUpdateStandaloneLoan(loanId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update loan.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      const updatedLoan = await updateStandaloneLoan(loanId, input, currentUser);
+      setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
+      setWalletStatusMessage("Loan terms updated successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleDeleteStandaloneLoan(loanId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete loan.");
+      return false;
+    }
+
+    startWalletSubmit("loan");
+
+    try {
+      await deleteStandaloneLoan(loanId, currentUser);
+      setLoans((prev) => prev.filter((l) => l.id !== loanId));
+      setWalletStatusMessage("Loan deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete loan.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleCreateStandaloneLoanRepayment(loanId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to record repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const updatedLoan = await createStandaloneLoanRepayment(loanId, input, currentUser);
+      setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
+      setWalletStatusMessage("Repayment recorded successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record repayment.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleDeleteStandaloneLoanRepayment(loanId: string, repaymentId: string) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to delete repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const updatedLoan = await deleteStandaloneLoanRepayment(loanId, repaymentId, currentUser);
+      setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
+      setWalletStatusMessage("Repayment deleted.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete repayment.");
       return false;
     } finally {
       endWalletSubmit();
@@ -2721,6 +2955,17 @@ export function AppRoutes() {
               onCreateWalletSettlement={handleCreateWalletSettlement}
               onUpdateWalletSettlement={handleUpdateWalletSettlement}
               onDeleteWalletSettlement={handleDeleteWalletSettlement}
+              onCreateWalletLoan={handleCreateWalletLoan}
+              onUpdateWalletLoan={handleUpdateWalletLoan}
+              onDeleteWalletLoan={handleDeleteWalletLoan}
+              onCreateWalletLoanRepayment={handleCreateWalletLoanRepayment}
+              onDeleteWalletLoanRepayment={handleDeleteWalletLoanRepayment}
+              loans={loans}
+              onCreateStandaloneLoan={handleCreateStandaloneLoan}
+              onUpdateStandaloneLoan={handleUpdateStandaloneLoan}
+              onDeleteStandaloneLoan={handleDeleteStandaloneLoan}
+              onCreateStandaloneLoanRepayment={handleCreateStandaloneLoanRepayment}
+              onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
               onLoadMoreExpenses={handleLoadMoreWalletExpenses}
             />
           ) : page === "alerts" ? (

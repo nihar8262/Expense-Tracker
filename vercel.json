@@ -59,6 +59,14 @@
       "destination": "/api/notifications?route=:route*"
     },
     {
+      "source": "/api/loans",
+      "destination": "/api/wallets?loans=true"
+    },
+    {
+      "source": "/api/loans/:route*",
+      "destination": "/api/wallets?loansRoute=:route*"
+    },
+    {
       "source": "/api/wallets/:route*",
       "destination": "/api/wallets?route=:route*"
     },

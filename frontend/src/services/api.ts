@@ -10,7 +10,10 @@ import type {
   ReminderPreferences,
   SplitRule,
   Wallet,
-  WalletDetail
+  WalletDetail,
+  WalletLoan,
+  WalletLoanForm,
+  WalletLoanRepaymentForm
 } from "../types";
 import { ApiError } from "../types";
 
@@ -347,6 +350,148 @@ export async function deleteWalletSettlementEntry(walletId: string, settlementId
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/settlements/${settlementId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/settlements/${settlementId}`;
   const body = await apiRequest<{ wallet: WalletDetail }>(user, { url: endpoint, method: "DELETE" }, "Failed to delete settlement.");
   return body.wallet;
+}
+
+export async function createWalletLoan(
+  walletId: string,
+  payload: WalletLoanForm,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "POST",
+    data: payload
+  }, "Failed to create loan.");
+  return body.wallet;
+}
+
+export async function updateWalletLoan(
+  walletId: string,
+  loanId: string,
+  payload: Partial<WalletLoanForm>,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans/${loanId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans/${loanId}`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: payload
+  }, "Failed to update loan.");
+  return body.wallet;
+}
+
+export async function deleteWalletLoan(
+  walletId: string,
+  loanId: string,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans/${loanId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans/${loanId}`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "DELETE"
+  }, "Failed to delete loan.");
+  return body.wallet;
+}
+
+export async function createWalletLoanRepayment(
+  walletId: string,
+  loanId: string,
+  payload: WalletLoanRepaymentForm,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans/${loanId}/repayments`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans/${loanId}/repayments`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "POST",
+    data: payload
+  }, "Failed to record loan repayment.");
+  return body.wallet;
+}
+
+export async function deleteWalletLoanRepayment(
+  walletId: string,
+  loanId: string,
+  repaymentId: string,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans/${loanId}/repayments/${repaymentId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans/${loanId}/repayments/${repaymentId}`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "DELETE"
+  }, "Failed to delete loan repayment.");
+  return body.wallet;
+}
+
+export async function listLoans(user: User): Promise<WalletLoan[]> {
+  const endpoint = API_BASE_URL ? new URL("/api/loans", API_BASE_URL).toString() : "/api/loans";
+  const body = await apiRequest<{ loans: WalletLoan[] }>(user, { url: endpoint, method: "GET" }, "Failed to load loans.");
+  return body.loans;
+}
+
+export async function createStandaloneLoan(
+  payload: WalletLoanForm,
+  user: User
+): Promise<WalletLoan> {
+  const endpoint = API_BASE_URL ? new URL("/api/loans", API_BASE_URL).toString() : "/api/loans";
+  const body = await apiRequest<{ loan: WalletLoan }>(user, {
+    url: endpoint,
+    method: "POST",
+    data: payload
+  }, "Failed to create loan.");
+  return body.loan;
+}
+
+export async function updateStandaloneLoan(
+  loanId: string,
+  payload: Partial<WalletLoanForm>,
+  user: User
+): Promise<WalletLoan> {
+  const endpoint = API_BASE_URL ? new URL(`/api/loans/${loanId}`, API_BASE_URL).toString() : `/api/loans/${loanId}`;
+  const body = await apiRequest<{ loan: WalletLoan }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: payload
+  }, "Failed to update loan.");
+  return body.loan;
+}
+
+export async function deleteStandaloneLoan(
+  loanId: string,
+  user: User
+): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL(`/api/loans/${loanId}`, API_BASE_URL).toString() : `/api/loans/${loanId}`;
+  await apiRequest<{ ok: boolean }>(user, {
+    url: endpoint,
+    method: "DELETE"
+  }, "Failed to delete loan.");
+}
+
+export async function createStandaloneLoanRepayment(
+  loanId: string,
+  payload: WalletLoanRepaymentForm,
+  user: User
+): Promise<WalletLoan> {
+  const endpoint = API_BASE_URL ? new URL(`/api/loans/${loanId}/repayments`, API_BASE_URL).toString() : `/api/loans/${loanId}/repayments`;
+  const body = await apiRequest<{ loan: WalletLoan }>(user, {
+    url: endpoint,
+    method: "POST",
+    data: payload
+  }, "Failed to record loan repayment.");
+  return body.loan;
+}
+
+export async function deleteStandaloneLoanRepayment(
+  loanId: string,
+  repaymentId: string,
+  user: User
+): Promise<WalletLoan> {
+  const endpoint = API_BASE_URL ? new URL(`/api/loans/${loanId}/repayments/${repaymentId}`, API_BASE_URL).toString() : `/api/loans/${loanId}/repayments/${repaymentId}`;
+  const body = await apiRequest<{ loan: WalletLoan }>(user, {
+    url: endpoint,
+    method: "DELETE"
+  }, "Failed to delete loan repayment.");
+  return body.loan;
 }
 
 export async function listBillReminders(user: User): Promise<BillReminder[]> {

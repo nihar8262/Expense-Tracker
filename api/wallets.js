@@ -16,9 +16,20 @@ const {
   listWalletsForUser,
   updateWalletBudgetForUser,
   updateWalletExpenseForUser,
-  updateWalletSettlementForUser
+  updateWalletSettlementForUser,
+  createWalletLoanForUser,
+  updateWalletLoanForUser,
+  deleteWalletLoanForUser,
+  createWalletLoanRepaymentForUser,
+  deleteWalletLoanRepaymentForUser,
+  listLoansForUser,
+  createStandaloneLoanForUser,
+  updateStandaloneLoanForUser,
+  deleteStandaloneLoanForUser,
+  createStandaloneLoanRepaymentForUser,
+  deleteStandaloneLoanRepaymentForUser
 } = require("./_lib/finance");
-const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
+const { authenticateUser, getPathSegments, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
   try {
@@ -26,6 +37,86 @@ module.exports = async function handler(request, response) {
 
   if (!user) {
     return undefined;
+  }
+
+  const isLoansApi = Boolean(
+    request.query?.loans === "true" ||
+    request.query?.loansRoute !== undefined ||
+    (getPathSegments(request)[1] === "loans" && getPathSegments(request)[0] === "api")
+  );
+
+  if (isLoansApi) {
+    let loanSegments = [];
+    if (request.query?.loansRoute) {
+      const lr = request.query.loansRoute;
+      loanSegments = Array.isArray(lr) ? lr.flatMap((s) => String(s).split("/").filter(Boolean)) : String(lr).split("/").filter(Boolean);
+    } else {
+      const allSegs = getPathSegments(request);
+      const loansIdx = allSegs.indexOf("loans");
+      if (loansIdx !== -1) {
+        loanSegments = allSegs.slice(loansIdx + 1);
+      }
+    }
+
+    if (loanSegments.length === 0) {
+      if (request.method === "GET") {
+        const result = await listLoansForUser(user.id);
+        return sendResult(response, result);
+      }
+      if (request.method === "POST") {
+        const result = await createStandaloneLoanForUser(user.id, request.body);
+        return sendResult(response, result);
+      }
+      return methodNotAllowed(response, "GET, POST");
+    }
+
+    const loanId = loanSegments[0];
+    if (loanSegments.length === 1) {
+      if (request.method === "PUT") {
+        try {
+          const result = await updateStandaloneLoanForUser(user.id, loanId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to update loan." });
+        }
+      }
+      if (request.method === "DELETE") {
+        try {
+          const result = await deleteStandaloneLoanForUser(user.id, loanId);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete loan." });
+        }
+      }
+      return methodNotAllowed(response, "PUT, DELETE");
+    }
+
+    if (loanSegments.length === 2 && loanSegments[1] === "repayments") {
+      if (request.method === "POST") {
+        try {
+          const result = await createStandaloneLoanRepaymentForUser(user.id, loanId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to record loan repayment." });
+        }
+      }
+      return methodNotAllowed(response, "POST");
+    }
+
+    if (loanSegments.length === 3 && loanSegments[1] === "repayments") {
+      const repaymentId = loanSegments[2];
+      if (request.method === "DELETE") {
+        try {
+          const result = await deleteStandaloneLoanRepaymentForUser(user.id, loanId, repaymentId);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete loan repayment." });
+        }
+      }
+      return methodNotAllowed(response, "DELETE");
+    }
+
+    return notFound(response);
   }
 
   const segments = getRoutedSegments(request);
@@ -247,6 +338,69 @@ module.exports = async function handler(request, response) {
       }
 
       return methodNotAllowed(response, "PUT, DELETE");
+    }
+  }
+
+  if (resource === "loans") {
+    if (segments.length === 2) {
+      if (request.method === "POST") {
+        try {
+          const result = await createWalletLoanForUser(user.id, walletId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to create loan." });
+        }
+      }
+
+      return methodNotAllowed(response, "POST");
+    }
+
+    if (segments.length === 3 && resourceId) {
+      if (request.method === "PUT") {
+        try {
+          const result = await updateWalletLoanForUser(user.id, walletId, resourceId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to update loan." });
+        }
+      }
+
+      if (request.method === "DELETE") {
+        try {
+          const result = await deleteWalletLoanForUser(user.id, walletId, resourceId);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete loan." });
+        }
+      }
+
+      return methodNotAllowed(response, "PUT, DELETE");
+    }
+
+    if (segments.length === 4 && resourceId && segments[2] === "repayments") {
+      if (request.method === "POST") {
+        try {
+          const result = await createWalletLoanRepaymentForUser(user.id, walletId, resourceId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to record loan repayment." });
+        }
+      }
+
+      return methodNotAllowed(response, "POST");
+    }
+
+    if (segments.length === 5 && resourceId && segments[2] === "repayments" && segments[3]) {
+      if (request.method === "DELETE") {
+        try {
+          const result = await deleteWalletLoanRepaymentForUser(user.id, walletId, resourceId, segments[3]);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete loan repayment." });
+        }
+      }
+
+      return methodNotAllowed(response, "DELETE");
     }
   }
 
