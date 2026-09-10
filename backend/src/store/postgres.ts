@@ -180,7 +180,7 @@ type WalletLoanRow = {
 type NotificationRow = {
   id: string;
   user_id: string;
-  notification_type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
+  notification_type: NotificationType;
   title: string;
   message: string;
   notification_status: "unread" | "read";
@@ -750,7 +750,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
         CREATE TABLE IF NOT EXISTS notifications (
           id UUID PRIMARY KEY,
           user_id TEXT NOT NULL,
-          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response')),
+          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue')),
           title VARCHAR(120) NOT NULL,
           message VARCHAR(280) NOT NULL,
           notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')),
@@ -802,7 +802,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`ALTER TABLE wallet_members DROP CONSTRAINT IF EXISTS wallet_members_invite_status_check`;
       await sql`ALTER TABLE wallet_members ADD CONSTRAINT wallet_members_invite_status_check CHECK (invite_status IN ('linked', 'pending', 'declined'))`;
       await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
-      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
+      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue'))`;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
       await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
       await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
@@ -1925,6 +1925,46 @@ export function createPostgresExpenseStore(): ExpenseStore {
         }
       }
 
+      // Check for active loans matching this user's email or member ID
+      const matchingLoans = await sql<{ id: string; amount_minor: number; due_date: string | null }[]>`
+        SELECT id, amount_minor, due_date
+        FROM wallet_loans
+        WHERE status = 'active'
+          AND (lower(borrower_email) = ${normalizedEmail} OR borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId} OR lower(email) = ${normalizedEmail}))
+      `;
+
+      for (const loan of matchingLoans) {
+        await upsertNotification(sql, {
+          userId,
+          type: "loan-issued",
+          title: `Loan issued: ${formatMinorUnits(loan.amount_minor)}`,
+          message: `You have an active loan of ${formatMinorUnits(loan.amount_minor)} recorded.${loan.due_date ? ` Due date: ${loan.due_date}.` : ""}`,
+          scheduledFor: null,
+          metadata: {
+            loanId: loan.id,
+            amount: formatMinorUnits(loan.amount_minor),
+            dueDate: loan.due_date || ""
+          },
+          dedupeKey: `loan-issued:${loan.id}`
+        });
+
+        if (loan.due_date && new Date(loan.due_date) < new Date()) {
+          await upsertNotification(sql, {
+            userId,
+            type: "loan-overdue",
+            title: "Overdue Loan Payment Alert",
+            message: `Your loan payment was due on ${loan.due_date}. Please settle the outstanding balance.`,
+            scheduledFor: null,
+            metadata: {
+              loanId: loan.id,
+              dueDate: loan.due_date,
+              overdueAmount: formatMinorUnits(loan.amount_minor)
+            },
+            dedupeKey: `loan-overdue:${loan.id}:${loan.due_date}`
+          });
+        }
+      }
+
       return linkedCount;
     },
 
@@ -2401,7 +2441,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletValidationError("Owner member profile was not found.");
         }
 
-        const borrowerRows = await tx<WalletMemberRow[]>`SELECT id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${input.borrowerMemberId}`;
+        const borrowerRows = await tx<WalletMemberRow[]>`SELECT id, user_id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${input.borrowerMemberId}`;
         const borrower = borrowerRows[0];
         if (!borrower) {
           throw new WalletValidationError("Borrower must be a member of this wallet.");
@@ -2411,13 +2451,14 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletValidationError("Cannot create a loan to yourself.");
         }
 
+        const newLoanId = randomUUID();
         await tx`
           INSERT INTO wallet_loans (
             id, owner_user_id, wallet_id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor,
             interest_rate_basis_points, interest_type, interest_rate_period,
             lending_date, due_date, interest_start_date, notes, status, created_at
           ) VALUES (
-            ${randomUUID()},
+            ${newLoanId},
             ${wallet.owner_user_id},
             ${walletId},
             ${ownerMember.id},
@@ -2436,6 +2477,32 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${new Date().toISOString()}
           )
         `;
+
+        let borrowerUserId = borrower.user_id;
+        if (!borrowerUserId && borrower.email) {
+          const matchingUsers = await tx<{ user_id: string }[]>`
+            SELECT user_id FROM wallet_members WHERE user_id IS NOT NULL AND lower(email) = ${borrower.email.trim().toLowerCase()} LIMIT 1
+          `;
+          if (matchingUsers[0]?.user_id) borrowerUserId = matchingUsers[0].user_id;
+        }
+
+        if (borrowerUserId) {
+          await upsertNotification(tx, {
+            userId: borrowerUserId,
+            type: "loan-issued",
+            title: `New loan issued: ${formatMinorUnits(input.amount)}`,
+            message: `${ownerMember.display_name ?? "A member"} issued a loan of ${formatMinorUnits(input.amount)} to you in this wallet.${input.dueDate ? ` Due date: ${input.dueDate}.` : ""}`,
+            scheduledFor: null,
+            metadata: {
+              loanId: newLoanId,
+              walletId,
+              amount: formatMinorUnits(input.amount),
+              dueDate: input.dueDate || "",
+              lenderName: ownerMember.display_name ?? "Lender"
+            },
+            dedupeKey: `loan-issued:${newLoanId}`
+          });
+        }
 
         return loadWalletDetail(tx, walletId);
       });
@@ -3368,6 +3435,51 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
           if (notification) {
             createdNotifications.push(notification);
+          }
+        }
+
+        // Check overdue loans for this user as borrower
+        const overdueLoans = await sql<{
+          id: string;
+          amount_minor: number;
+          due_date: string;
+          total_repaid_minor: string;
+        }[]>`
+          SELECT l.id, l.amount_minor, l.due_date,
+                 COALESCE(SUM(r.amount_minor), 0)::text AS total_repaid_minor
+          FROM wallet_loans l
+          LEFT JOIN wallet_loan_repayments r ON r.loan_id = l.id
+          LEFT JOIN wallet_members m ON m.id = l.borrower_member_id
+          WHERE l.status = 'active'
+            AND l.due_date IS NOT NULL
+            AND l.due_date < ${userDate}
+            AND (m.user_id = ${targetUserId} OR lower(l.borrower_email) IN (SELECT lower(email) FROM wallet_members WHERE user_id = ${targetUserId} AND email IS NOT NULL))
+          GROUP BY l.id
+        `;
+
+        for (const loan of overdueLoans) {
+          const principal = Number(loan.amount_minor);
+          const repaid = Number(loan.total_repaid_minor || "0");
+          const remainingMinor = Math.max(0, principal - repaid);
+
+          if (remainingMinor > 0) {
+            const notif = await upsertNotification(sql, {
+              userId: targetUserId,
+              type: "loan-overdue",
+              title: "Overdue Loan Payment Alert",
+              message: `Your loan payment of ${formatMinorUnits(remainingMinor)} was due on ${loan.due_date}. Please settle the outstanding balance.`,
+              scheduledFor: null,
+              metadata: {
+                loanId: loan.id,
+                dueDate: loan.due_date,
+                overdueAmount: formatMinorUnits(remainingMinor)
+              },
+              dedupeKey: `loan-overdue:${loan.id}:${loan.due_date}`
+            });
+
+            if (notif) {
+              createdNotifications.push(notif);
+            }
           }
         }
       }

@@ -21,6 +21,7 @@ A full-stack personal finance application for tracking daily spending, managing 
   - [Expenses](#expenses)
   - [Budgets](#budgets)
   - [Shared Wallets](#shared-wallets)
+  - [Peer Loans & Lending Management](#peer-loans--lending-management)
   - [Notifications & Alerts](#notifications--alerts)
   - [Bill Reminders](#bill-reminders)
   - [Dashboard](#dashboard)
@@ -37,8 +38,11 @@ A full-stack personal finance application for tracking daily spending, managing 
 - **Personal expenses** — Create, edit, delete, filter by category, and sort by date. Idempotent submission prevents duplicates on retry.
 - **Budgets** — Set monthly or category-specific spending caps. Track remaining budget with overspend warnings.
 - **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements. Each wallet supports its own independent default currency preference with transaction-safe backend conversions.
+- **Peer Loans & Wallet Lending** — Lend money directly to peers or shared wallet members with flexible interest schedules (monthly, yearly, one-time, fixed amount), customizable start dates, and maturity due dates. Track principal, accrued interest, partial repayments, and outstanding balances.
+- **Borrower Mini Statement & Monthly Breakdown** — Consolidated, printable mini statement for any borrower. Features month-by-month financial summaries (borrowed amount, repaid amount, net delta, transaction frequency, overdue flags), lifetime lending aggregates, and a complete chronological ledger with high-contrast print/PDF styling.
+- **Member Notifications & Overdue Loan Alerts** — Real-time in-app notifications sent to a member's email when a loan is issued. Automated background checks detect overdue loans and notify borrowers with exact overdue balance figures, paired with a persistent in-app Payment Overdue Alert Banner.
 - **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources. Automatically maps and visualizes converted currency amounts seamlessly.
-- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, and wallet invite notifications. Timezone-aware scheduler ensures notifications deliver relative to the user's chosen local time.
+- **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, wallet invite notifications, loan issuance notices, and overdue loan alerts. Timezone-aware scheduler ensures notifications deliver relative to the user's chosen local time.
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
 - **Account management & profile editing** — Profile customization menu supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
@@ -246,6 +250,12 @@ All endpoints require authentication except `GET /api/health`.
 | POST     | `/api/wallets/:id/settlements`                    | Record settlement                |
 | PUT      | `/api/wallets/:id/settlements/:settlementId`      | Update settlement                |
 | DELETE   | `/api/wallets/:id/settlements/:settlementId`      | Delete settlement                |
+| GET/POST | `/api/wallets/:id/loans`                          | List / create wallet loans       |
+| PUT/DELETE | `/api/wallets/:id/loans/:loanId`                | Update / delete wallet loan      |
+| POST/DELETE | `/api/wallets/:id/loans/:loanId/repayments`    | Record / delete loan repayment   |
+| GET/POST | `/api/loans`                                      | List / create peer loans         |
+| PUT/DELETE | `/api/loans/:loanId`                            | Update / delete peer loan        |
+| POST/DELETE | `/api/loans/:loanId/repayments`                | Record / delete peer repayment   |
 | POST     | `/api/wallets/link-invites`                       | Link pending invites to user     |
 | POST     | `/api/wallet-invites/:memberId/respond`           | Accept / decline invite          |
 | GET      | `/api/notifications`                              | List notifications               |
@@ -337,6 +347,24 @@ Vercel
 - **Show more modals**: Filterable full-list views for expenses and settlements (month, category, amount range).
 - **Access control**: All linked members see the same data. Only the owner can delete the wallet. Members can leave.
 
+### Peer Loans & Lending Management
+
+- **Wallet Loans & Standalone Lending**: Lend money directly to members within shared group wallets, or manage standalone peer loans without creating a shared wallet.
+- **Customizable Interest Engines**:
+  - Percentage-based interest with **Monthly**, **Yearly**, or **One-time** calculation cadences.
+  - Fixed flat interest amount support.
+  - Flexible **Interest Start Dates** (allowing interest-free grace periods before compounding starts) and clear maturity **Due Dates**.
+- **Repayment Tracking**: Log partial or full repayments with payment dates, notes, and dynamic remaining balance calculations. Automatically manages transition states between active, settled, and overdue.
+- **Borrower Mini Statements**:
+  - **Dynamic Borrower Selector**: Search and filter by individual borrower, displaying contact avatars, email addresses, aggregate lent totals, outstanding balances, and active overdue indicators.
+  - **Month-by-Month Statement Breakdown**: Aggregates all transactions into monthly accounting rows displaying total borrowed, total repaid, net balance shift, transaction counts, and overdue status indicators.
+  - **Chronological Ledger**: Rich visual timeline of all financial events (disbursements and repayments) with notes, principal tags, and interest details.
+  - **Print & PDF Export**: One-click printable layout specifically tailored for statements and PDF generation, featuring high-contrast typography, clean data tables, summary cards, and removed interactive chrome.
+- **Member Notifications & Overdue Loan Alerts**:
+  - Dispatches immediate in-app `loan-issued` notifications to a member's email when they are added to a loan.
+  - Automated cron/background inspection (`/api/notifications/run-checks`) identifies loans where the maturity due date has passed with an unpaid balance, sending `loan-overdue` notifications with exact overdue balances.
+  - Persistent **Payment Overdue Alert Banner** rendered prominently on the borrower's Wallets and Loans surface, featuring overdue loan breakdowns and one-click access to their Mini Statement.
+
 ### Notifications & Alerts
 
 - Budget threshold and overspend alerts.
@@ -344,6 +372,9 @@ Vercel
 - Bill due reminders with advance notice.
 - Wallet invite notifications with accept/decline actions.
 - Invite response notifications (accepted/declined).
+- Loan issuance notifications (`loan-issued`) sent when member email is added to a loan.
+- Overdue loan alerts (`loan-overdue`) with live unpaid balance calculations and direct links to loan details.
+- In-app **Payment Overdue Alert Banner** on the Wallets & Lending page when due dates have passed.
 - Mark individual or all as read; delete notifications.
 - Notification bell with unread badge in the header.
 

@@ -212,7 +212,7 @@ export type BillReminderRecord = {
   created_at: string;
 };
 
-export type NotificationType = "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
+export type NotificationType = "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue";
 
 export type NotificationStatus = "unread" | "read";
 

@@ -346,4 +346,76 @@ describe("Wallet Loans & Lending API", () => {
 
     expect(getWalletRes.status).toBe(404);
   });
+
+  it("notifies member when a loan is issued and sends overdue alert notification when due date has passed", async () => {
+    const { app } = buildApp();
+
+    // 1. Create wallet with member Charlie
+    const createWalletRes = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        name: "Lending Circle",
+        defaultSplitRule: "equal",
+        currency: "INR",
+        members: [{ displayName: "Charlie", email: "charlie-user@example.com" }]
+      });
+
+    expect(createWalletRes.status).toBe(201);
+    const walletId = createWalletRes.body.wallet.wallet.id;
+    const charlieMember = createWalletRes.body.wallet.members.find((m: any) => m.display_name === "Charlie");
+
+    // Link Charlie user
+    await request(app)
+      .get("/api/wallets")
+      .set("Authorization", "Bearer charlie-user");
+
+    await request(app)
+      .post(`/api/wallet-invites/${charlieMember.id}/respond`)
+      .set("Authorization", "Bearer charlie-user")
+      .send({ action: "accept" });
+
+    // 2. Owner creates a loan to Charlie with past due date (overdue)
+    const createLoanRes = await request(app)
+      .post(`/api/wallets/${walletId}/loans`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        borrowerMemberId: charlieMember.id,
+        amount: "2500.00",
+        interestRate: "0",
+        lendingDate: "2026-08-01",
+        dueDate: "2026-08-15",
+        notes: "Monthly borrowing"
+      });
+
+    expect(createLoanRes.status).toBe(201);
+
+    // 3. Charlie checks notifications: should have loan-issued notification
+    const charlieNotifications = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer charlie-user");
+
+    expect(charlieNotifications.status).toBe(200);
+    const loanIssued = charlieNotifications.body.notifications.find((n: any) => n.type === "loan-issued");
+    expect(loanIssued).toBeDefined();
+    expect(loanIssued.title).toContain("2500.00");
+
+    // 4. Run reminder checks (simulating cron / alerts check)
+    const runChecksRes = await request(app)
+      .post("/api/notifications/run-checks")
+      .set("Authorization", "Bearer charlie-user");
+
+    expect(runChecksRes.status).toBe(200);
+
+    // 5. Charlie checks notifications again: should have loan-overdue alert
+    const charlieNotificationsAfter = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer charlie-user");
+
+    const loanOverdue = charlieNotificationsAfter.body.notifications.find((n: any) => n.type === "loan-overdue");
+    expect(loanOverdue).toBeDefined();
+    expect(loanOverdue.title).toContain("Overdue Loan Payment Alert");
+    expect(loanOverdue.message).toContain("2500.00");
+    expect(loanOverdue.message).toContain("2026-08-15");
+  });
 });

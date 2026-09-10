@@ -2931,6 +2931,7 @@ export function AppRoutes() {
               selectedWallet={selectedWallet}
               selectedWalletId={selectedWalletId}
               currentUserId={currentUser.uid}
+              currentUserEmail={currentUser.email}
               budgetCategoryOptions={budgetCategoryOptions}
               isLoading={isWalletLoading}
               isSubmitting={isWalletSubmitting}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { NotificationCenterProps } from "../types";
 import { EmptyState, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
 
@@ -196,7 +197,15 @@ export function AlertsSurface({
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={cn("data-pill", notification.status === "unread" ? "tone-positive" : "")}>{notification.type.replace(/-/g, " ")}</span>
+                      {notification.type === "loan-overdue" ? (
+                        <span className="data-pill tone-danger font-semibold">⚠️ Loan Overdue</span>
+                      ) : notification.type === "loan-issued" ? (
+                        <span className="data-pill tone-positive font-semibold">📄 Loan Issued</span>
+                      ) : (
+                        <span className={cn("data-pill", notification.status === "unread" ? "tone-positive" : "")}>
+                          {notification.type.replace(/-/g, " ")}
+                        </span>
+                      )}
                       <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted">{formatNotificationTime(notification.created_at)}</span>
                     </div>
                     <div className="space-y-1">
@@ -205,7 +214,7 @@ export function AlertsSurface({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 sm:max-w-[240px] sm:justify-end">
+                  <div className="flex flex-wrap items-center gap-2 sm:max-w-[280px] sm:justify-end">
                     {notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
                       <>
                         <button type="button" className="ui-button-danger" disabled={deletingNotificationIds.includes(notification.id) || respondingInviteIds.includes(notification.metadata!.walletMemberId)} onClick={() => void handleDeleteNotification(notification.id)}>
@@ -220,6 +229,11 @@ export function AlertsSurface({
                       </>
                     ) : (
                       <>
+                        {(notification.type === "loan-issued" || notification.type === "loan-overdue") && (
+                          <Link to="/wallets" className="ui-button-secondary !py-1.5 !px-3 text-xs">
+                            View Loan
+                          </Link>
+                        )}
                         {notification.status === "unread" ? (
                           <button type="button" className="ui-button-ghost" onClick={() => onMarkRead(notification.id)}>
                             Mark read

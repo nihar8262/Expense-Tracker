@@ -552,7 +552,7 @@ async function ensureSchema(sql) {
         await sql`ALTER TABLE wallet_loans ALTER COLUMN borrower_member_id DROP NOT NULL`;
       });
       await safeSchemaStep("create wallet_loan_repayments table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loan_repayments (id UUID PRIMARY KEY, loan_id UUID NOT NULL REFERENCES wallet_loans(id) ON DELETE CASCADE, amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), repayment_date DATE NOT NULL, notes VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
-      await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
+      await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
       await safeSchemaStep("create reminder_preferences table", () => sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create bill_reminders table", () => sql`CREATE TABLE IF NOT EXISTS bill_reminders (id UUID PRIMARY KEY, user_id TEXT NOT NULL, title VARCHAR(120) NOT NULL, amount_minor BIGINT, category VARCHAR(64), due_date DATE NOT NULL, recurrence VARCHAR(16) NOT NULL CHECK (recurrence IN ('once', 'weekly', 'monthly', 'yearly')), interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 24), reminder_days_before INTEGER NOT NULL CHECK (reminder_days_before BETWEEN 0 AND 60), is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("wallets description column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS description VARCHAR(280)`);
@@ -582,6 +582,8 @@ async function ensureSchema(sql) {
       await safeSchemaStep("notifications status backfill", () => sql`UPDATE notifications SET notification_status = 'unread' WHERE notification_status IS NULL`);
       await safeSchemaStep("notifications created at backfill", () => sql`UPDATE notifications SET created_at = NOW() WHERE created_at IS NULL`);
       await safeSchemaStep("notifications dedupe key backfill", () => sql`UPDATE notifications SET dedupe_key = CONCAT('legacy:', id::text) WHERE dedupe_key IS NULL OR dedupe_key = ''`);
+      await safeSchemaStep("notifications type check drop", () => sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`);
+      await safeSchemaStep("notifications type check update", () => sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue'))`);
       await safeSchemaStep(
         "notifications dedupe cleanup",
         () => sql`
@@ -1664,7 +1666,7 @@ async function createWalletLoanForUser(userId, walletId, rawBody) {
       throw new Error("Owner member profile was not found.");
     }
 
-    const borrowerRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${result.data.borrowerMemberId}`;
+    const borrowerRows = await tx`SELECT id, user_id, display_name, email FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${result.data.borrowerMemberId}`;
     const borrower = borrowerRows[0];
     if (!borrower) {
       throw new Error("Borrower must be a member of this wallet.");
@@ -1673,16 +1675,19 @@ async function createWalletLoanForUser(userId, walletId, rawBody) {
       throw new Error("Cannot create a loan to yourself.");
     }
 
+    const newLoanId = randomUUID();
     await tx`
       INSERT INTO wallet_loans (
-        id, wallet_id, lender_member_id, borrower_member_id, amount_minor,
+        id, wallet_id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor,
         interest_rate_basis_points, interest_type, interest_rate_period,
         lending_date, due_date, interest_start_date, notes, status, created_at
       ) VALUES (
-        ${randomUUID()},
+        ${newLoanId},
         ${walletId},
         ${ownerMember.id},
         ${borrower.id},
+        ${borrower.display_name},
+        ${borrower.email},
         ${result.data.amount},
         ${result.data.interestRate},
         ${result.data.interestType},
@@ -1695,6 +1700,29 @@ async function createWalletLoanForUser(userId, walletId, rawBody) {
         ${new Date().toISOString()}
       )
     `;
+
+    let borrowerUserId = borrower.user_id;
+    if (!borrowerUserId && borrower.email) {
+      const matchRows = await tx`SELECT user_id FROM wallet_members WHERE user_id IS NOT NULL AND lower(email) = ${borrower.email.trim().toLowerCase()} LIMIT 1`;
+      if (matchRows[0]?.user_id) borrowerUserId = matchRows[0].user_id;
+    }
+
+    if (borrowerUserId) {
+      await upsertNotification(tx, {
+        userId: borrowerUserId,
+        type: "loan-issued",
+        title: `New loan issued: ${formatMinorUnits(result.data.amount)}`,
+        message: `A loan of ${formatMinorUnits(result.data.amount)} was issued to you.${result.data.dueDate ? ` Due date: ${result.data.dueDate}.` : ""}`,
+        scheduledFor: null,
+        metadata: {
+          loanId: newLoanId,
+          walletId,
+          amount: formatMinorUnits(result.data.amount),
+          dueDate: result.data.dueDate || ""
+        },
+        dedupeKey: `loan-issued:${newLoanId}`
+      });
+    }
 
     return loadWalletDetail(tx, walletId);
   });
@@ -2383,6 +2411,46 @@ async function runReminderChecks(targetUserId) {
         createdNotifications.push(notification);
       }
     }
+
+      // Check overdue loans for this user as borrower
+      const overdueLoans = await sql`
+        SELECT l.id, l.amount_minor, l.due_date,
+               COALESCE(SUM(r.amount_minor), 0)::text AS total_repaid_minor
+        FROM wallet_loans l
+        LEFT JOIN wallet_loan_repayments r ON r.loan_id = l.id
+        LEFT JOIN wallet_members m ON m.id = l.borrower_member_id
+        WHERE l.status = 'active'
+          AND l.due_date IS NOT NULL
+          AND l.due_date < ${currentDate}
+          AND (m.user_id = ${userId} OR lower(l.borrower_email) IN (SELECT lower(email) FROM wallet_members WHERE user_id = ${userId} AND email IS NOT NULL))
+        GROUP BY l.id
+      `;
+
+      for (const loan of overdueLoans) {
+        const principal = Number(loan.amount_minor);
+        const repaid = Number(loan.total_repaid_minor || "0");
+        const remainingMinor = Math.max(0, principal - repaid);
+
+        if (remainingMinor > 0) {
+          const notif = await upsertNotification(sql, {
+            userId,
+            type: "loan-overdue",
+            title: "Overdue Loan Payment Alert",
+            message: `Your loan payment of ${formatMinorUnits(remainingMinor)} was due on ${loan.due_date}. Please settle the outstanding balance.`,
+            scheduledFor: null,
+            metadata: {
+              loanId: loan.id,
+              dueDate: loan.due_date,
+              overdueAmount: formatMinorUnits(remainingMinor)
+            },
+            dedupeKey: `loan-overdue:${loan.id}:${loan.due_date}`
+          });
+
+          if (notif) {
+            createdNotifications.push(notif);
+          }
+        }
+      }
   }
 
   return { status: 200, body: { processed_user_count: users.length, created_notifications: createdNotifications } };

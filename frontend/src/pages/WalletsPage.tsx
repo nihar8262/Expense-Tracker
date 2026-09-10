@@ -14,6 +14,7 @@ import {
   cn,
 } from "../components/ui";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
+import { BorrowerMiniStatementModal } from "../components/BorrowerMiniStatementModal";
 import type {
   BudgetForm,
   BudgetHistoryRange,
@@ -33,6 +34,7 @@ type WalletsPageProps = {
   selectedWallet: WalletDetail | null;
   selectedWalletId: string | null;
   currentUserId: string | null;
+  currentUserEmail?: string | null;
   budgetCategoryOptions: CategoryOption[];
   isLoading: boolean;
   isSubmitting: boolean;
@@ -285,6 +287,7 @@ export function WalletsPage({
   selectedWallet,
   selectedWalletId,
   currentUserId,
+  currentUserEmail,
   budgetCategoryOptions,
   isLoading,
   isSubmitting,
@@ -431,6 +434,14 @@ export function WalletsPage({
   const [standaloneFilterStatus, setStandaloneFilterStatus] = useState("all");
   const [deletingLoanIds, setDeletingLoanIds] = useState<string[]>([]);
   const [deletingLoanRepaymentIds, setDeletingLoanRepaymentIds] = useState<string[]>([]);
+  const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
+  const [statementBorrowerKey, setStatementBorrowerKey] = useState<string | null>(null);
+  const [isDismissedOverdueAlert, setIsDismissedOverdueAlert] = useState(false);
+
+  function handleOpenBorrowerStatement(borrowerKey?: string | null) {
+    setStatementBorrowerKey(borrowerKey || null);
+    setIsStatementModalOpen(true);
+  }
 
   // Loan Form State
   const [loanBorrowerId, setLoanBorrowerId] = useState("");
@@ -574,6 +585,35 @@ export function WalletsPage({
       isOverdue
     };
   }
+
+  const myOverdueLoans = useMemo(() => {
+    const candidateLoans = [...(loans || [])];
+    if (selectedWallet?.loans) {
+      for (const wLoan of selectedWallet.loans) {
+        if (!candidateLoans.some((l) => l.id === wLoan.id)) {
+          candidateLoans.push(wLoan);
+        }
+      }
+    }
+
+    const currentEmail = currentUserEmail?.trim().toLowerCase();
+
+    return candidateLoans.filter((loan) => {
+      const matchesEmail = Boolean(currentEmail && loan.borrower_email && loan.borrower_email.trim().toLowerCase() === currentEmail);
+      const isMemberBorrower = Boolean(
+        currentUserId &&
+        loan.borrower_member_id &&
+        selectedWallet?.members?.some((m) => m.id === loan.borrower_member_id && (m.user_id === currentUserId || (currentEmail && m.email?.toLowerCase() === currentEmail)))
+      );
+
+      if (!matchesEmail && !isMemberBorrower) {
+        return false;
+      }
+
+      const financials = calculateLoanFinancials(loan);
+      return financials.isOverdue && financials.remainingBalance > 0;
+    });
+  }, [loans, selectedWallet, currentUserId, currentUserEmail]);
 
   function getLoanBorrowerName(loan: WalletLoan): string {
     if (loan.borrower_name) return loan.borrower_name;
@@ -2245,16 +2285,28 @@ export function WalletsPage({
         </div>
 
         {viewMode === "loans" && (
-          <button
-            type="button"
-            className="ui-button-primary flex items-center gap-2 shrink-0 self-start sm:self-auto shadow-md hover:shadow-lg transition-shadow"
-            onClick={handleOpenCreateLoan}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-            </svg>
-            <span>+ Lend Money</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            {standaloneLoansList.length > 0 && (
+              <button
+                type="button"
+                className="ui-button-secondary flex items-center gap-2 shadow-xs cursor-pointer"
+                onClick={() => handleOpenBorrowerStatement(null)}
+                title="View consolidated monthly statement for borrowers"
+              >
+                <span>📄 Mini Statement</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="ui-button-primary flex items-center gap-2 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={handleOpenCreateLoan}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+              </svg>
+              <span>+ Lend Money</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -2264,6 +2316,76 @@ export function WalletsPage({
       {errorMessage ? (
         <StatusNotice tone="error">{errorMessage}</StatusNotice>
       ) : null}
+
+      {myOverdueLoans.length > 0 && !isDismissedOverdueAlert && (
+        <div className="mb-6 rounded-2xl border-2 border-rose-300 dark:border-rose-800 bg-rose-50/90 dark:bg-rose-950/40 p-4 sm:p-5 shadow-sm transition-all">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200 text-sm font-bold">
+                  ⚠️
+                </span>
+                <h3 className="text-base font-bold text-rose-900 dark:text-rose-100">
+                  Payment Overdue Alert ({myOverdueLoans.length} {myOverdueLoans.length === 1 ? "Loan" : "Loans"})
+                </h3>
+                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-rose-200/80 text-rose-800 dark:bg-rose-900 dark:text-rose-300">
+                  Action Required
+                </span>
+              </div>
+              <p className="text-sm text-rose-800 dark:text-rose-200">
+                You have passed the due date on {myOverdueLoans.length} borrowed loan{myOverdueLoans.length === 1 ? "" : "s"}. Total overdue balance:{" "}
+                <span className="font-bold text-rose-950 dark:text-white">
+                  {formatCurrency(myOverdueLoans.reduce((sum, l) => sum + calculateLoanFinancials(l).remainingBalance, 0).toFixed(2))}
+                </span>
+                . Please review your mini statement or settle payments with the lender.
+              </p>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                {myOverdueLoans.map((ovLoan) => {
+                  const fin = calculateLoanFinancials(ovLoan);
+                  return (
+                    <div
+                      key={ovLoan.id}
+                      className="flex items-center gap-2 rounded-xl bg-white/95 dark:bg-zinc-900/90 border border-rose-200 dark:border-rose-900/60 px-3 py-1.5 text-xs text-secondary shadow-xs"
+                    >
+                      <span className="font-semibold text-ink">
+                        {ovLoan.borrower_name || "Loan"}
+                      </span>
+                      <span className="text-rose-600 dark:text-rose-400 font-medium">
+                        Due: {ovLoan.due_date}
+                      </span>
+                      <span className="font-bold text-rose-700 dark:text-rose-300">
+                        {formatCurrency(fin.remainingBalance.toFixed(2), selectedWallet?.wallet?.currency)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
+              <button
+                type="button"
+                className="ui-button-secondary !bg-white dark:!bg-zinc-900 text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                onClick={() => {
+                  const firstBorrowerKey = myOverdueLoans[0]?.borrower_member_id || myOverdueLoans[0]?.borrower_email || myOverdueLoans[0]?.borrower_name || null;
+                  handleOpenBorrowerStatement(firstBorrowerKey);
+                }}
+              >
+                <span>📄 View Mini Statement</span>
+              </button>
+              <button
+                type="button"
+                className="text-xs text-rose-700 dark:text-rose-300 hover:text-rose-900 dark:hover:text-white px-2 py-1 font-medium transition-colors cursor-pointer"
+                onClick={() => setIsDismissedOverdueAlert(true)}
+                title="Dismiss alert banner for this session"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {viewMode === "wallets" && (
         <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.36fr)_minmax(0,0.64fr)]">
@@ -2744,6 +2866,18 @@ export function WalletsPage({
                         <option value="active">Active Only</option>
                         <option value="repaid">Fully Repaid</option>
                       </select>
+
+                      <button
+                        type="button"
+                        className="ui-button-secondary !py-1.5 !px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                        onClick={() => {
+                          const initialKey = loanFilterBorrower !== "all" ? `member:${loanFilterBorrower}` : null;
+                          handleOpenBorrowerStatement(initialKey);
+                        }}
+                        title="View monthly mini statement for members"
+                      >
+                        <span>📄 Mini Statement</span>
+                      </button>
                     </div>
 
                     <span className="text-xs text-secondary font-medium">
@@ -2917,13 +3051,28 @@ export function WalletsPage({
 
                           {/* Actions */}
                           <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3">
-                            <button
-                              type="button"
-                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                              onClick={() => setSelectedLoanForDetails(loan)}
-                            >
-                              Timeline ({loan.repayments?.length || 0})
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                                onClick={() => setSelectedLoanForDetails(loan)}
+                              >
+                                Timeline ({loan.repayments?.length || 0})
+                              </button>
+                              <button
+                                type="button"
+                                className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                onClick={() => {
+                                  const bKey = loan.borrower_member_id
+                                    ? `member:${loan.borrower_member_id}`
+                                    : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
+                                  handleOpenBorrowerStatement(bKey);
+                                }}
+                                title="View member monthly mini statement"
+                              >
+                                <span>📄 Statement</span>
+                              </button>
+                            </div>
 
                             <div className="flex items-center gap-1.5">
                               {isWalletOwner && !isFullyPaid && (
@@ -4231,13 +4380,28 @@ export function WalletsPage({
 
                     {/* Actions Toolbar */}
                     <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3.5">
-                      <button
-                        type="button"
-                        className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                        onClick={() => setSelectedLoanForDetails(loan)}
-                      >
-                        Timeline ({loan.repayments?.length || 0})
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                          onClick={() => setSelectedLoanForDetails(loan)}
+                        >
+                          Timeline ({loan.repayments?.length || 0})
+                        </button>
+                        <button
+                          type="button"
+                          className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                          onClick={() => {
+                            const bKey = loan.borrower_member_id
+                              ? `member:${loan.borrower_member_id}`
+                              : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
+                            handleOpenBorrowerStatement(bKey);
+                          }}
+                          title="View borrower monthly mini statement"
+                        >
+                          <span>📄 Statement</span>
+                        </button>
+                      </div>
 
                       <div className="flex items-center gap-1.5">
                         {!isFullyPaid && (
@@ -4960,6 +5124,20 @@ export function WalletsPage({
           </ModalFrame>
         );
       })() : null}
+
+      <BorrowerMiniStatementModal
+        isOpen={isStatementModalOpen}
+        onClose={() => {
+          setIsStatementModalOpen(false);
+          setStatementBorrowerKey(null);
+        }}
+        loans={viewMode === "loans" ? (loans || []) : (selectedWallet?.loans || [])}
+        initialBorrowerKey={statementBorrowerKey}
+        formatCurrency={(amt, curr) => formatCurrency(amt, curr || (selectedWallet ? selectedWallet.wallet.currency : undefined))}
+        currencySymbol={currencySymbol}
+        walletMembers={selectedWallet?.members}
+        onOpenRepayment={(loan) => handleOpenRepaymentModal(loan)}
+      />
     </>
   );
 }

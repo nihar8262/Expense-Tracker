@@ -208,7 +208,7 @@ export type WalletHistoryPagination = {
 
 export type Notification = {
 	id: string;
-	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response";
+	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue";
 	title: string;
 	message: string;
 	status: "unread" | "read";

@@ -25,6 +25,7 @@ import {
   NotificationNotFoundError,
   type NotificationCheckResult,
   type NotificationRecord,
+  type NotificationType,
   type ReminderPreferencesRecord,
   type CreateExpenseResult,
   type ExpenseRecord,
@@ -171,7 +172,7 @@ type StoredWalletLoan = {
 type StoredNotification = {
   id: string;
   userId: string;
-  type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite";
+  type: NotificationType;
   title: string;
   message: string;
   status: "unread" | "read";
@@ -1360,6 +1361,52 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return buildWalletDetail(walletId);
   }
 
+  function calculateLoanOverdueBalance(loan: StoredWalletLoan, now: Date): { isOverdue: boolean; remainingBalanceMinor: number } {
+    if (loan.status !== "active" || !loan.dueDate) {
+      return { isOverdue: false, remainingBalanceMinor: 0 };
+    }
+
+    const dueDateObj = new Date(`${loan.dueDate}T23:59:59.999Z`);
+    if (now <= dueDateObj) {
+      return { isOverdue: false, remainingBalanceMinor: 0 };
+    }
+
+    const principal = loan.amountMinor;
+    const repayments = [...walletLoanRepayments.values()]
+      .filter((r) => r.loanId === loan.id)
+      .reduce((sum, r) => sum + r.amountMinor, 0);
+
+    const ratePercent = loan.interestRateBasisPoints ? loan.interestRateBasisPoints / 10000 : 0;
+    let accruedInterestMinor = 0;
+
+    if (ratePercent > 0) {
+      if (loan.interestType === "fixed") {
+        accruedInterestMinor = Math.round(ratePercent * 100);
+      } else {
+        const startStr = loan.interestStartDate || loan.lendingDate;
+        const startDate = new Date(startStr);
+        if (now >= startDate) {
+          if (loan.interestRatePeriod === "one-time") {
+            accruedInterestMinor = Math.round(principal * ratePercent);
+          } else if (loan.interestRatePeriod === "yearly") {
+            const diffMonths = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            accruedInterestMinor = Math.round(principal * ratePercent * (diffMonths / 12));
+          } else {
+            const months = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            accruedInterestMinor = Math.round(principal * ratePercent * months);
+          }
+        }
+      }
+    }
+
+    const totalDueMinor = principal + accruedInterestMinor;
+    const remainingBalanceMinor = Math.max(0, totalDueMinor - repayments);
+    return {
+      isOverdue: remainingBalanceMinor > 0,
+      remainingBalanceMinor
+    };
+  }
+
   async function linkWalletInvites(userId: string, profile: { email: string | null; name: string | null }): Promise<number> {
     const normalizedEmail = profile.email?.trim().toLowerCase();
 
@@ -1395,6 +1442,49 @@ export function createMemoryExpenseStore(): ExpenseStore {
       });
 
       linkedCount += 1;
+    }
+
+    // Check for loans linked to this user's email or member ID
+    for (const loan of walletLoans.values()) {
+      if (loan.status !== "active") continue;
+      const matchesEmail = loan.borrowerEmail && loan.borrowerEmail.toLowerCase() === normalizedEmail;
+      const mem = loan.borrowerMemberId ? walletMembers.get(loan.borrowerMemberId) : null;
+      const matchesMember = mem && (mem.userId === userId || (mem.email && mem.email.toLowerCase() === normalizedEmail));
+
+      if (matchesEmail || matchesMember) {
+        createNotificationIfMissing({
+          userId,
+          type: "loan-issued",
+          title: `Loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+          message: `You have an active loan of ${formatMinorUnits(loan.amountMinor)} recorded.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+          scheduledFor: null,
+          metadata: {
+            loanId: loan.id,
+            amount: formatMinorUnits(loan.amountMinor),
+            dueDate: loan.dueDate || ""
+          },
+          dedupeKey: `loan-issued:${loan.id}`
+        });
+
+        if (loan.dueDate) {
+          const { isOverdue, remainingBalanceMinor } = calculateLoanOverdueBalance(loan, new Date());
+          if (isOverdue) {
+            createNotificationIfMissing({
+              userId,
+              type: "loan-overdue",
+              title: "Overdue Loan Payment Alert",
+              message: `Your loan payment of ${formatMinorUnits(remainingBalanceMinor)} was due on ${loan.dueDate}. Please settle the outstanding balance.`,
+              scheduledFor: null,
+              metadata: {
+                loanId: loan.id,
+                dueDate: loan.dueDate,
+                overdueAmount: formatMinorUnits(remainingBalanceMinor)
+              },
+              dedupeKey: `loan-overdue:${loan.id}:${loan.dueDate}`
+            });
+          }
+        }
+      }
     }
 
     return linkedCount;
@@ -1686,6 +1776,37 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
 
     walletLoans.set(loan.id, loan);
+
+    // Notify borrower if user account is linked or borrower email matches a user
+    let borrowerUserId = borrower.userId;
+    if (!borrowerUserId && borrower.email) {
+      const normalizedBorrowerEmail = borrower.email.trim().toLowerCase();
+      for (const m of walletMembers.values()) {
+        if (m.userId && m.email && m.email.toLowerCase() === normalizedBorrowerEmail) {
+          borrowerUserId = m.userId;
+          break;
+        }
+      }
+    }
+
+    if (borrowerUserId) {
+      createNotificationIfMissing({
+        userId: borrowerUserId,
+        type: "loan-issued",
+        title: `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+        message: `${ownerMember.displayName} issued a loan of ${formatMinorUnits(loan.amountMinor)} to you in ${wallet.name}.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+        scheduledFor: null,
+        metadata: {
+          loanId: loan.id,
+          walletId,
+          amount: formatMinorUnits(loan.amountMinor),
+          dueDate: loan.dueDate || "",
+          lenderName: ownerMember.displayName
+        },
+        dedupeKey: `loan-issued:${loan.id}`
+      });
+    }
+
     return buildWalletDetail(walletId);
   }
 
@@ -1830,6 +1951,34 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
 
     walletLoans.set(loan.id, loan);
+
+    // Notify borrower if email matches a registered user in walletMembers
+    if (loan.borrowerEmail) {
+      const normalizedBorrowerEmail = loan.borrowerEmail.trim().toLowerCase();
+      let borrowerUserId: string | null = null;
+      for (const m of walletMembers.values()) {
+        if (m.userId && m.email && m.email.toLowerCase() === normalizedBorrowerEmail) {
+          borrowerUserId = m.userId;
+          break;
+        }
+      }
+      if (borrowerUserId) {
+        createNotificationIfMissing({
+          userId: borrowerUserId,
+          type: "loan-issued",
+          title: `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+          message: `A loan of ${formatMinorUnits(loan.amountMinor)} has been recorded for you.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+          scheduledFor: null,
+          metadata: {
+            loanId: loan.id,
+            amount: formatMinorUnits(loan.amountMinor),
+            dueDate: loan.dueDate || ""
+          },
+          dedupeKey: `loan-issued:${loan.id}`
+        });
+      }
+    }
+
     return mapLoanRecord(loan);
   }
 
@@ -2374,6 +2523,49 @@ export function createMemoryExpenseStore(): ExpenseStore {
 
         if (created) {
           createdNotifications.push(mapNotification(created));
+        }
+      }
+
+      // Check overdue loans for this user as borrower
+      for (const loan of walletLoans.values()) {
+        if (loan.status !== "active" || !loan.dueDate) continue;
+
+        let borrowerUserId: string | null = null;
+        if (loan.borrowerMemberId) {
+          const mem = walletMembers.get(loan.borrowerMemberId);
+          if (mem?.userId) borrowerUserId = mem.userId;
+        }
+        if (!borrowerUserId && loan.borrowerEmail) {
+          const normEmail = loan.borrowerEmail.trim().toLowerCase();
+          for (const m of walletMembers.values()) {
+            if (m.userId && m.email && m.email.toLowerCase() === normEmail) {
+              borrowerUserId = m.userId;
+              break;
+            }
+          }
+        }
+
+        if (borrowerUserId === targetUserId) {
+          const { isOverdue, remainingBalanceMinor } = calculateLoanOverdueBalance(loan, now);
+          if (isOverdue) {
+            const created = createNotificationIfMissing({
+              userId: targetUserId,
+              type: "loan-overdue",
+              title: "Overdue Loan Payment Alert",
+              message: `Your loan payment of ${formatMinorUnits(remainingBalanceMinor)} was due on ${loan.dueDate}. Please settle the outstanding balance.`,
+              scheduledFor: null,
+              metadata: {
+                loanId: loan.id,
+                dueDate: loan.dueDate,
+                overdueAmount: formatMinorUnits(remainingBalanceMinor)
+              },
+              dedupeKey: `loan-overdue:${loan.id}:${loan.dueDate}`
+            });
+
+            if (created) {
+              createdNotifications.push(mapNotification(created));
+            }
+          }
         }
       }
     }
