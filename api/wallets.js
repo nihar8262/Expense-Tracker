@@ -21,12 +21,14 @@ const {
   updateWalletLoanForUser,
   deleteWalletLoanForUser,
   createWalletLoanRepaymentForUser,
+  updateWalletLoanRepaymentForUser,
   deleteWalletLoanRepaymentForUser,
   listLoansForUser,
   createStandaloneLoanForUser,
   updateStandaloneLoanForUser,
   deleteStandaloneLoanForUser,
   createStandaloneLoanRepaymentForUser,
+  updateStandaloneLoanRepaymentForUser,
   deleteStandaloneLoanRepaymentForUser
 } = require("./_lib/finance");
 const { authenticateUser, getPathSegments, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
@@ -105,6 +107,14 @@ module.exports = async function handler(request, response) {
 
     if (loanSegments.length === 3 && loanSegments[1] === "repayments") {
       const repaymentId = loanSegments[2];
+      if (request.method === "PUT") {
+        try {
+          const result = await updateStandaloneLoanRepaymentForUser(user.id, loanId, repaymentId, request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to update loan repayment." });
+        }
+      }
       if (request.method === "DELETE") {
         try {
           const result = await deleteStandaloneLoanRepaymentForUser(user.id, loanId, repaymentId);
@@ -113,7 +123,7 @@ module.exports = async function handler(request, response) {
           return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete loan repayment." });
         }
       }
-      return methodNotAllowed(response, "DELETE");
+      return methodNotAllowed(response, "PUT, DELETE");
     }
 
     return notFound(response);
@@ -391,6 +401,14 @@ module.exports = async function handler(request, response) {
     }
 
     if (segments.length === 5 && resourceId && segments[2] === "repayments" && segments[3]) {
+      if (request.method === "PUT") {
+        try {
+          const result = await updateWalletLoanRepaymentForUser(user.id, walletId, resourceId, segments[3], request.body);
+          return sendResult(response, result);
+        } catch (error) {
+          return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to update loan repayment." });
+        }
+      }
       if (request.method === "DELETE") {
         try {
           const result = await deleteWalletLoanRepaymentForUser(user.id, walletId, resourceId, segments[3]);
@@ -400,7 +418,7 @@ module.exports = async function handler(request, response) {
         }
       }
 
-      return methodNotAllowed(response, "DELETE");
+      return methodNotAllowed(response, "PUT, DELETE");
     }
   }
 

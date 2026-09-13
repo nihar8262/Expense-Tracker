@@ -418,4 +418,115 @@ describe("Wallet Loans & Lending API", () => {
     expect(loanOverdue.message).toContain("2500.00");
     expect(loanOverdue.message).toContain("2026-08-15");
   });
+
+  it("supports borrowed loanType, repayment updating, and email-based loan notifications", async () => {
+    const { app } = buildApp();
+
+    // 1. Create a wallet and a member
+    const createWalletRes = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        name: "Lending & Borrowing Test",
+        members: [{ displayName: "Dave Lender", email: "dave-user@example.com" }]
+      });
+    expect(createWalletRes.status).toBe(201);
+    const walletId = createWalletRes.body.wallet.wallet.id;
+    const daveMember = createWalletRes.body.wallet.members.find((m: any) => m.display_name === "Dave Lender");
+
+    // 2. Create a borrowed loan (money owner borrowed from Dave)
+    const createBorrowedRes = await request(app)
+      .post(`/api/wallets/${walletId}/loans`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        borrowerMemberId: daveMember.id,
+        amount: "3000.00",
+        loanType: "borrowed",
+        lendingDate: "2026-09-01",
+        notes: "Borrowed for equipment purchase"
+      });
+
+    expect(createBorrowedRes.status).toBe(201);
+    const borrowedLoan = createBorrowedRes.body.wallet.loans[0];
+    expect(borrowedLoan.loan_type).toBe("borrowed");
+    expect(borrowedLoan.amount).toBe("3000.00");
+
+    // 3. Record a repayment
+    const addRepaymentRes = await request(app)
+      .post(`/api/wallets/${walletId}/loans/${borrowedLoan.id}/repayments`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        amount: "1500.00",
+        repaymentDate: "2026-09-10",
+        notes: "First installment"
+      });
+
+    expect(addRepaymentRes.status).toBe(201);
+    const repayments = addRepaymentRes.body.wallet.loans[0].repayments;
+    expect(repayments).toHaveLength(1);
+    expect(repayments[0].amount).toBe("1500.00");
+    const repaymentId = repayments[0].id;
+
+    // 4. Update the repayment (e.g. owner mistakenly typed 1500 instead of 1200)
+    const updateRepaymentRes = await request(app)
+      .put(`/api/wallets/${walletId}/loans/${borrowedLoan.id}/repayments/${repaymentId}`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        amount: "1200.00",
+        repaymentDate: "2026-09-10",
+        notes: "Corrected amount"
+      });
+
+    expect(updateRepaymentRes.status).toBe(200);
+    const updatedRepayments = updateRepaymentRes.body.wallet.loans[0].repayments;
+    expect(updatedRepayments[0].amount).toBe("1200.00");
+    expect(updatedRepayments[0].notes).toBe("Corrected amount");
+
+    // 5. Standalone loan with borrower email notifies the matching user
+    const createStandaloneRes = await request(app)
+      .post("/api/loans")
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        borrowerName: "Dave Outside",
+        borrowerEmail: "dave-user@example.com",
+        amount: "800.00",
+        loanType: "lent",
+        lendingDate: "2026-09-12"
+      });
+
+    expect(createStandaloneRes.status).toBe(201);
+    const standaloneLoan = createStandaloneRes.body.loan;
+    expect(standaloneLoan.loan_type).toBe("lent");
+
+    // Check Dave received loan notification
+    const daveNotifs = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer dave-user");
+
+    expect(daveNotifs.status).toBe(200);
+    const foundNotif = daveNotifs.body.notifications.find((n: any) => n.metadata?.loanId === standaloneLoan.id);
+    expect(foundNotif).toBeDefined();
+
+    // 6. Test standalone repayment update
+    const addStandaloneRepRes = await request(app)
+      .post(`/api/loans/${standaloneLoan.id}/repayments`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        amount: "800.00",
+        repaymentDate: "2026-09-13"
+      });
+
+    expect(addStandaloneRepRes.status).toBe(201);
+    const standRepId = addStandaloneRepRes.body.loan.repayments[0].id;
+
+    const updateStandRepRes = await request(app)
+      .put(`/api/loans/${standaloneLoan.id}/repayments/${standRepId}`)
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        amount: "750.00"
+      });
+
+    expect(updateStandRepRes.status).toBe(200);
+    expect(updateStandRepRes.body.loan.repayments[0].amount).toBe("750.00");
+  });
 });

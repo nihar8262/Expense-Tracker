@@ -11,6 +11,7 @@ export interface BorrowerMiniStatementModalProps {
   currencySymbol?: string;
   walletMembers?: Array<{ id: string; display_name: string; email?: string | null }>;
   onOpenRepayment?: (loan: WalletLoan) => void;
+  onOpenEditLoan?: (loan: WalletLoan) => void;
 }
 
 interface BorrowerOption {
@@ -19,8 +20,10 @@ interface BorrowerOption {
   email: string | null;
   loans: WalletLoan[];
   totalLent: number;
+  totalBorrowed: number;
   remainingBalance: number;
   hasOverdue: boolean;
+  role: "borrower" | "lender" | "contact";
 }
 
 interface MonthlyStatementRow {
@@ -42,6 +45,7 @@ interface StatementLedgerEvent {
   amount: number;
   notes: string | null;
   loanId: string;
+  loanType?: "lent" | "borrowed";
   loanPrincipal?: number;
   interestInfo?: string;
   dueDate?: string | null;
@@ -98,6 +102,8 @@ export function calculateLoanFinancials(loan: WalletLoan) {
   }
 
   const totalDue = principal + accruedInterest;
+  const isOverpaid = totalRepaid > totalDue;
+  const overpaidAmount = isOverpaid ? totalRepaid - totalDue : 0;
   const remainingBalance = Math.max(0, totalDue - totalRepaid);
   const isFullyPaid = totalRepaid >= totalDue && totalDue > 0;
   const progressPercent = totalDue > 0 ? Math.min(100, Math.round((totalRepaid / totalDue) * 100)) : 100;
@@ -110,6 +116,8 @@ export function calculateLoanFinancials(loan: WalletLoan) {
     totalRepaid,
     remainingBalance,
     isFullyPaid,
+    isOverpaid,
+    overpaidAmount,
     progressPercent,
     isOverdue
   };
@@ -130,7 +138,8 @@ export function BorrowerMiniStatementModal({
   formatCurrency,
   currencySymbol = "₹",
   walletMembers = [],
-  onOpenRepayment
+  onOpenRepayment,
+  onOpenEditLoan
 }: BorrowerMiniStatementModalProps) {
   // 1. Group loans by borrower
   const borrowerOptions = useMemo<BorrowerOption[]>(() => {
@@ -170,21 +179,39 @@ export function BorrowerMiniStatementModal({
     const options: BorrowerOption[] = [];
     for (const item of map.values()) {
       let totalLent = 0;
+      let totalBorrowed = 0;
       let remainingBalance = 0;
       let hasOverdue = false;
+      let borrowedCount = 0;
+      let lentCount = 0;
 
       for (const l of item.loans) {
         const fin = calculateLoanFinancials(l);
-        totalLent += fin.principal;
+        if (l.loan_type === "borrowed") {
+          totalBorrowed += fin.principal;
+          borrowedCount++;
+        } else {
+          totalLent += fin.principal;
+          lentCount++;
+        }
         remainingBalance += fin.remainingBalance;
         if (fin.isOverdue) hasOverdue = true;
+      }
+
+      let role: "borrower" | "lender" | "contact" = "borrower";
+      if (borrowedCount > 0 && lentCount === 0) {
+        role = "lender";
+      } else if (borrowedCount > 0 && lentCount > 0) {
+        role = "contact";
       }
 
       options.push({
         ...item,
         totalLent,
+        totalBorrowed,
         remainingBalance,
-        hasOverdue
+        hasOverdue,
+        role
       });
     }
 
@@ -378,6 +405,7 @@ export function BorrowerMiniStatementModal({
 
     for (const loan of currentBorrower.loans) {
       const fin = calculateLoanFinancials(loan);
+      const isBorrowed = loan.loan_type === "borrowed";
       const interestLabel = Number(loan.interest_rate) > 0
         ? `${loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}`
         : undefined;
@@ -389,6 +417,7 @@ export function BorrowerMiniStatementModal({
         amount: fin.principal,
         notes: loan.notes,
         loanId: loan.id,
+        loanType: isBorrowed ? "borrowed" : "lent",
         loanPrincipal: fin.principal,
         interestInfo: interestLabel,
         dueDate: loan.due_date,
@@ -403,7 +432,8 @@ export function BorrowerMiniStatementModal({
             type: "repayment",
             amount: parseFloat(rep.amount) || 0,
             notes: rep.notes,
-            loanId: loan.id
+            loanId: loan.id,
+            loanType: isBorrowed ? "borrowed" : "lent"
           });
         }
       }
@@ -422,6 +452,9 @@ export function BorrowerMiniStatementModal({
 
   if (!isOpen) return null;
 
+  const isLenderMode = currentBorrower?.role === "lender";
+  const isMixedMode = currentBorrower?.role === "contact";
+
   return (
     <ModalFrame onClose={onClose} className="flex max-h-[92vh] max-w-4xl flex-col p-0 overflow-hidden shadow-2xl">
       {/* Modal Header */}
@@ -433,10 +466,14 @@ export function BorrowerMiniStatementModal({
             </span>
             <div>
               <h2 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-ink">
-                Borrower Mini Statement
+                {isLenderMode ? "Lender Mini Statement" : isMixedMode ? "Contact Mini Statement" : "Borrower Mini Statement"}
               </h2>
               <p className="text-xs text-secondary">
-                Consolidated ledger, monthly borrowings, repayments, and dues for this person
+                {isLenderMode
+                  ? "Consolidated ledger, monthly borrowings, payments to lender, and dues"
+                  : isMixedMode
+                    ? "Consolidated ledger, monthly loans, repayments, and dues for this person"
+                    : "Consolidated ledger, monthly loans lent, repayments received, and dues for this person"}
               </p>
             </div>
           </div>
@@ -478,7 +515,9 @@ export function BorrowerMiniStatementModal({
               )}
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-secondary font-medium">Select Borrower:</span>
+                  <span className="text-xs text-secondary font-medium">
+                    {isLenderMode ? "Select Lender:" : isMixedMode ? "Select Contact:" : "Select Borrower:"}
+                  </span>
                   <select
                     value={selectedKey}
                     onChange={(e) => setSelectedKey(e.target.value)}
@@ -486,7 +525,7 @@ export function BorrowerMiniStatementModal({
                   >
                     {borrowerOptions.map((b) => (
                       <option key={b.key} value={b.key}>
-                        {b.name} ({b.loans.length} loan{b.loans.length !== 1 ? "s" : ""}) {b.hasOverdue ? "⚠️ Overdue" : ""}
+                        {b.name} ({b.loans.length} loan{b.loans.length !== 1 ? "s" : ""}) {b.role === "lender" ? "• Lender" : b.role === "borrower" ? "• Borrower" : ""} {b.hasOverdue ? "⚠️ Overdue" : ""}
                       </option>
                     ))}
                   </select>
@@ -523,7 +562,7 @@ export function BorrowerMiniStatementModal({
           </div>
         ) : (
           <div className="mt-3 p-3 bg-zinc-100 dark:bg-zinc-800 rounded-xl text-xs text-secondary">
-            No borrowers found in current loans list.
+            No contacts found in current loans list.
           </div>
         )}
       </div>
@@ -538,36 +577,36 @@ export function BorrowerMiniStatementModal({
           <>
             {/* Top Consolidated Metrics Cards */}
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-              {/* Total Principal Lent */}
+              {/* Total Principal Lent or Borrowed */}
               <div className="rounded-2xl border border-[color:var(--border)] bg-blue-50/40 dark:bg-blue-950/20 p-3.5 space-y-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
-                  Total Lent
+                  {isLenderMode ? "Total Borrowed" : isMixedMode ? "Total Principal" : "Total Lent"}
                 </span>
                 <strong className="block text-xl font-extrabold text-ink truncate">
                   {formatCurrency(borrowerFinancials.totalPrincipal.toFixed(2))}
                 </strong>
                 <span className="text-[11px] text-secondary">
-                  Across all months
+                  {isLenderMode ? "Principal from lender" : "Across all loans"}
                 </span>
               </div>
 
               {/* Total Accrued Interest */}
               <div className="rounded-2xl border border-[color:var(--border)] bg-purple-50/40 dark:bg-purple-950/20 p-3.5 space-y-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
-                  Total Interest
+                  {isLenderMode ? "Interest to Pay" : isMixedMode ? "Total Interest" : "Interest Receivable"}
                 </span>
                 <strong className="block text-xl font-extrabold text-purple-700 dark:text-purple-300 truncate">
                   +{formatCurrency(borrowerFinancials.totalAccruedInterest.toFixed(2))}
                 </strong>
                 <span className="text-[11px] text-secondary">
-                  Accrued interest
+                  {isLenderMode ? "Payable interest" : "Accrued interest"}
                 </span>
               </div>
 
-              {/* Total Repaid */}
+              {/* Total Repaid / Paid Back */}
               <div className="rounded-2xl border border-[color:var(--border)] bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 space-y-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                  Total Repaid
+                  {isLenderMode ? "Total Paid Back" : isMixedMode ? "Total Repayments" : "Total Repaid"}
                 </span>
                 <strong className="block text-xl font-extrabold text-emerald-700 dark:text-emerald-300 truncate">
                   {formatCurrency(borrowerFinancials.totalRepaid.toFixed(2))}
@@ -580,13 +619,13 @@ export function BorrowerMiniStatementModal({
               {/* Current Outstanding Balance */}
               <div className="rounded-2xl border border-[color:var(--border)] bg-amber-50/40 dark:bg-amber-950/20 p-3.5 space-y-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-                  Outstanding
+                  {isLenderMode ? "Remaining Debt" : isMixedMode ? "Outstanding Balance" : "Outstanding"}
                 </span>
                 <strong className={cn("block text-xl font-extrabold truncate", borrowerFinancials.outstandingBalance > 0 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400")}>
                   {formatCurrency(borrowerFinancials.outstandingBalance.toFixed(2))}
                 </strong>
                 <span className="text-[11px] text-secondary">
-                  Remaining balance
+                  {isLenderMode ? "Remaining to pay" : "Remaining balance"}
                 </span>
               </div>
 
@@ -661,7 +700,7 @@ export function BorrowerMiniStatementModal({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-ink">
-                    Month-by-Month Borrowing &amp; Repayment History
+                    Month-by-Month {isLenderMode ? "Borrowing & Payment History" : isMixedMode ? "Loan & Repayment History" : "Lending & Collection History"}
                   </h3>
                   <span className="text-xs text-secondary">
                     Aggregated by calendar month
@@ -673,8 +712,12 @@ export function BorrowerMiniStatementModal({
                     <thead>
                       <tr className="border-b border-[color:var(--border)] bg-zinc-50 dark:bg-zinc-800/60 text-secondary font-semibold">
                         <th className="py-3 px-4">Month</th>
-                        <th className="py-3 px-4 text-right">Borrowed Amount</th>
-                        <th className="py-3 px-4 text-right">Repaid Amount</th>
+                        <th className="py-3 px-4 text-right">
+                          {isLenderMode ? "Borrowed Amount" : isMixedMode ? "Principal Amount" : "Lent Amount"}
+                        </th>
+                        <th className="py-3 px-4 text-right">
+                          {isLenderMode ? "Payment Made" : isMixedMode ? "Repayments" : "Repayment Received"}
+                        </th>
                         <th className="py-3 px-4 text-right">Net Movement</th>
                         <th className="py-3 px-4 text-center">Status</th>
                       </tr>
@@ -686,7 +729,9 @@ export function BorrowerMiniStatementModal({
                             <div className="flex items-center gap-2">
                               <span>{row.monthLabel}</span>
                               <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-secondary">
-                                {row.loansCount} borrow{row.loansCount !== 1 ? "s" : ""}, {row.repaymentsCount} repay{row.repaymentsCount !== 1 ? "s" : ""}
+                                {isLenderMode
+                                  ? `${row.loansCount} borrow${row.loansCount !== 1 ? "s" : ""}, ${row.repaymentsCount} paid`
+                                  : `${row.loansCount} lent, ${row.repaymentsCount} collected`}
                               </span>
                             </div>
                           </td>
@@ -706,12 +751,12 @@ export function BorrowerMiniStatementModal({
                           </td>
                           <td className="py-3.5 px-4 text-right font-bold">
                             {row.netChange > 0 ? (
-                              <span className="text-amber-600 dark:text-amber-400">
-                                +{formatCurrency(row.netChange.toFixed(2))} (Borrowed)
+                              <span className={isLenderMode ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400"}>
+                                +{formatCurrency(row.netChange.toFixed(2))} ({isLenderMode ? "Borrowed" : "Lent Out"})
                               </span>
                             ) : row.netChange < 0 ? (
                               <span className="text-emerald-600 dark:text-emerald-400">
-                                -{formatCurrency(Math.abs(row.netChange).toFixed(2))} (Repaid)
+                                -{formatCurrency(Math.abs(row.netChange).toFixed(2))} ({isLenderMode ? "Repaid" : "Collected"})
                               </span>
                             ) : (
                               <span className="text-secondary font-normal">Balanced (0)</span>
@@ -749,7 +794,7 @@ export function BorrowerMiniStatementModal({
                           {formatCurrency(borrowerFinancials.totalRepaid.toFixed(2))}
                         </td>
                         <td className="py-3 px-4 text-right text-amber-600 dark:text-amber-400">
-                          Net Outstanding: {formatCurrency(borrowerFinancials.outstandingBalance.toFixed(2))}
+                          {isLenderMode ? "Net Debt: " : "Net Outstanding: "}{formatCurrency(borrowerFinancials.outstandingBalance.toFixed(2))}
                         </td>
                         <td className="py-3 px-4 text-center text-xs text-secondary">
                           {borrowerFinancials.overdueLoansCount > 0 ? `${borrowerFinancials.overdueLoansCount} Overdue` : "All on track"}
@@ -787,7 +832,7 @@ export function BorrowerMiniStatementModal({
                         ledgerFilter === "disbursements" ? "bg-white dark:bg-zinc-900 text-ink shadow-xs" : "text-secondary hover:text-ink"
                       )}
                     >
-                      Borrowings
+                      {isLenderMode ? "Borrowings" : isMixedMode ? "Loans" : "Money Lent"}
                     </button>
                     <button
                       type="button"
@@ -797,7 +842,7 @@ export function BorrowerMiniStatementModal({
                         ledgerFilter === "repayments" ? "bg-white dark:bg-zinc-900 text-ink shadow-xs" : "text-secondary hover:text-ink"
                       )}
                     >
-                      Repayments
+                      {isLenderMode ? "Payments to Lender" : isMixedMode ? "Repayments" : "Repayments Received"}
                     </button>
                   </div>
                 </div>
@@ -808,58 +853,99 @@ export function BorrowerMiniStatementModal({
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-2xl border border-[color:var(--border)] bg-white dark:bg-zinc-900 shadow-xs divide-y divide-[color:var(--border)]">
-                    {ledgerEvents.map((evt) => (
-                      <div key={evt.id} className="p-3.5 sm:px-4 sm:py-3 flex items-center justify-between gap-3 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/40 transition-colors">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={cn(
-                            "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold",
-                            evt.type === "disbursement"
-                              ? "bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300"
-                              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300"
-                          )}>
-                            {evt.type === "disbursement" ? "↗" : "↙"}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <strong className="text-xs sm:text-sm font-bold text-ink">
-                                {evt.type === "disbursement" ? "Loan Taken" : "Repayment Made"}
-                              </strong>
-                              {evt.interestInfo && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 font-semibold">
-                                  {evt.interestInfo}
-                                </span>
-                              )}
-                              {evt.isOverdue && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-bold">
-                                  Overdue
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-secondary mt-0.5">
-                              <span>{evt.date}</span>
-                              {evt.dueDate && (
-                                <span>• Due: {evt.dueDate}</span>
-                              )}
-                              {evt.notes && (
-                                <span className="truncate italic">"{evt.notes}"</span>
-                              )}
+                    {ledgerEvents.map((evt) => {
+                      const isBorrowedLoan = evt.loanType === "borrowed";
+                      const isDisbursement = evt.type === "disbursement";
+
+                      let eventTitle = "";
+                      let badgeLabel = "";
+                      let isPositive = false;
+
+                      if (isBorrowedLoan) {
+                        if (isDisbursement) {
+                          eventTitle = "Loan Borrowed (Principal Taken)";
+                          badgeLabel = "Money Borrowed";
+                          isPositive = true;
+                        } else {
+                          eventTitle = "Payment Made to Lender";
+                          badgeLabel = "Repayment Paid";
+                          isPositive = false;
+                        }
+                      } else {
+                        if (isDisbursement) {
+                          eventTitle = "Loan Given (Principal Lent)";
+                          badgeLabel = "Money Lent";
+                          isPositive = false;
+                        } else {
+                          eventTitle = "Repayment Received (Collected)";
+                          badgeLabel = "Repayment In";
+                          isPositive = true;
+                        }
+                      }
+
+                      return (
+                        <div key={evt.id} className="p-3.5 sm:px-4 sm:py-3 flex items-center justify-between gap-3 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/40 transition-colors">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={cn(
+                              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold",
+                              isPositive
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300"
+                                : "bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300"
+                            )}>
+                              {isPositive ? "↙" : "↗"}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <strong className="text-xs sm:text-sm font-bold text-ink">
+                                  {eventTitle}
+                                </strong>
+                                {evt.interestInfo && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 font-semibold">
+                                    {evt.interestInfo}
+                                  </span>
+                                )}
+                                {evt.isOverdue && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-bold">
+                                    Overdue
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-secondary mt-0.5">
+                                <span>{evt.date}</span>
+                                {evt.dueDate && (
+                                  <span>• Due: {evt.dueDate}</span>
+                                )}
+                                {evt.notes && (
+                                  <span className="truncate italic">"{evt.notes}"</span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="text-right shrink-0">
-                          <strong className={cn(
-                            "text-sm sm:text-base font-extrabold",
-                            evt.type === "disbursement" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
-                          )}>
-                            {evt.type === "disbursement" ? "+" : "-"}{formatCurrency(evt.amount.toFixed(2))}
-                          </strong>
-                          <span className="block text-[10px] text-secondary capitalize">
-                            {evt.type}
-                          </span>
+                          <div className="text-right shrink-0">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <strong className={cn(
+                                "text-sm sm:text-base font-extrabold",
+                                isPositive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                              )}>
+                                {isPositive ? "+" : "-"}{formatCurrency(evt.amount.toFixed(2))}
+                              </strong>
+                              <span className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
+                                isPositive
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                                  : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                              )}>
+                                {isPositive ? "Credited" : "Debited"}
+                              </span>
+                            </div>
+                            <span className="block text-[10px] text-secondary">
+                              {badgeLabel}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -870,7 +956,7 @@ export function BorrowerMiniStatementModal({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-ink">
-                    Individual Loans Tracked for {currentBorrower.name}
+                    {isLenderMode ? `Individual Loans Borrowed from ${currentBorrower.name}` : `Individual Loans Tracked for ${currentBorrower.name}`}
                   </h3>
                   <span className="text-xs text-secondary">
                     {currentBorrower.loans.length} loan record{currentBorrower.loans.length !== 1 ? "s" : ""}
@@ -880,6 +966,7 @@ export function BorrowerMiniStatementModal({
                 <div className="grid gap-3 sm:grid-cols-2">
                   {currentBorrower.loans.map((loan) => {
                     const fin = calculateLoanFinancials(loan);
+                    const isLoanBorrowed = loan.loan_type === "borrowed";
 
                     return (
                       <div
@@ -895,16 +982,22 @@ export function BorrowerMiniStatementModal({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <span className="text-xs text-secondary">Lent on: {loan.lending_date}</span>
+                            <span className="text-xs text-secondary">
+                              {isLoanBorrowed ? `Borrowed on: ${loan.lending_date}` : `Lent on: ${loan.lending_date}`}
+                            </span>
                             <strong className="block text-lg font-bold text-ink">
                               {formatCurrency(fin.principal.toFixed(2))}
                             </strong>
                           </div>
 
                           <div>
-                            {fin.isFullyPaid ? (
+                            {fin.isOverpaid ? (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-900/50">
+                                ⚠️ Overpaid
+                              </span>
+                            ) : fin.isFullyPaid ? (
                               <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                                ✓ Paid
+                                {isLoanBorrowed ? "✓ Settled" : "✓ Paid"}
                               </span>
                             ) : fin.isOverdue ? (
                               <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-800 dark:bg-red-950/80 dark:text-red-300">
@@ -920,7 +1013,7 @@ export function BorrowerMiniStatementModal({
 
                         {Number(loan.interest_rate) > 0 && (
                           <div className="text-xs flex items-center justify-between text-secondary pt-1 border-t border-[color:var(--border)]">
-                            <span>Interest ({loan.interest_rate}% {loan.interest_rate_period}):</span>
+                            <span>{isLoanBorrowed ? "Interest to Pay" : "Interest"} ({loan.interest_rate}% {loan.interest_rate_period}):</span>
                             <span className="font-semibold text-purple-600 dark:text-purple-400">
                               +{formatCurrency(fin.accruedInterest.toFixed(2))}
                             </span>
@@ -929,7 +1022,9 @@ export function BorrowerMiniStatementModal({
 
                         <div className="space-y-1 pt-1">
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-secondary">Repaid: {formatCurrency(fin.totalRepaid.toFixed(2))}</span>
+                            <span className="text-secondary">
+                              {isLoanBorrowed ? "Paid Back:" : "Repaid:"} {formatCurrency(fin.totalRepaid.toFixed(2))}
+                            </span>
                             <span className="font-bold text-ink">{fin.progressPercent}%</span>
                           </div>
                           <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
@@ -940,7 +1035,15 @@ export function BorrowerMiniStatementModal({
                           </div>
                           <div className="flex items-center justify-between text-[11px] text-secondary pt-0.5">
                             <span>{loan.due_date ? `Due: ${loan.due_date}` : "No due date"}</span>
-                            <span className="font-bold text-ink">Remaining: {formatCurrency(fin.remainingBalance.toFixed(2))}</span>
+                            {fin.isOverpaid ? (
+                              <span className="font-bold text-rose-600 dark:text-rose-400">
+                                Overpaid: {formatCurrency(fin.overpaidAmount.toFixed(2))}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-ink">
+                                {isLoanBorrowed ? "Remaining to Pay:" : "Remaining:"} {formatCurrency(fin.remainingBalance.toFixed(2))}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -950,8 +1053,20 @@ export function BorrowerMiniStatementModal({
                           </p>
                         )}
 
-                        {!fin.isFullyPaid && onOpenRepayment && (
-                          <div className="pt-2 border-t border-[color:var(--border)] flex justify-end">
+                        <div className="pt-2 border-t border-[color:var(--border)] flex items-center justify-end gap-2">
+                          {onOpenEditLoan && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onOpenEditLoan(loan);
+                              }}
+                              className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {!fin.isFullyPaid && onOpenRepayment && (
                             <button
                               type="button"
                               onClick={() => {
@@ -960,10 +1075,10 @@ export function BorrowerMiniStatementModal({
                               }}
                               className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
                             >
-                              + Record Repayment
+                              {isLoanBorrowed ? "+ Pay Lender" : "+ Record Repayment"}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     );
                   })}

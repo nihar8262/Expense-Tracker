@@ -159,6 +159,7 @@ export type WalletLoan = {
 	interest_start_date: string | null;
 	due_date: string | null;
 	status: "active" | "settled" | "cancelled";
+	loan_type?: "lent" | "borrowed";
 	notes: string | null;
 	created_at: string;
 	repayments: WalletLoanRepayment[];
@@ -169,6 +170,7 @@ export type WalletLoanForm = {
 	borrowerName?: string;
 	borrowerEmail?: string;
 	walletId?: string;
+	loanType?: "lent" | "borrowed";
 	amount: string;
 	interestRate?: string | number;
 	interestType?: "percentage" | "fixed" | "none";
@@ -183,6 +185,12 @@ export type WalletLoanForm = {
 export type WalletLoanRepaymentForm = {
 	amount: string;
 	repaymentDate: string;
+	notes?: string;
+};
+
+export type WalletLoanRepaymentUpdateForm = {
+	amount?: string;
+	repaymentDate?: string;
 	notes?: string;
 };
 

@@ -353,12 +353,14 @@ export function AppRoutes() {
     updateWalletLoan,
     deleteWalletLoan,
     createWalletLoanRepayment,
+    updateWalletLoanRepayment,
     deleteWalletLoanRepayment,
     listLoans,
     createStandaloneLoan,
     updateStandaloneLoan,
     deleteStandaloneLoan,
     createStandaloneLoanRepayment,
+    updateStandaloneLoanRepayment,
     deleteStandaloneLoanRepayment
   } = useWallets();
   const {
@@ -1975,7 +1977,7 @@ export function AppRoutes() {
     try {
       const wallet = await createWalletLoan(inputWalletId, input, currentUser);
       setSelectedWallet(wallet);
-      setWalletStatusMessage("Loan record created successfully.");
+      setWalletStatusMessage(input?.loanType === "borrowed" ? "Borrowed loan recorded successfully." : "Lent loan recorded successfully.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create loan.");
@@ -2036,9 +2038,11 @@ export function AppRoutes() {
     startWalletSubmit("loan-repayment");
 
     try {
+      const targetLoan = selectedWallet?.loans?.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
       const wallet = await createWalletLoanRepayment(inputWalletId, loanId, input, currentUser);
       setSelectedWallet(wallet);
-      setWalletStatusMessage("Repayment recorded successfully.");
+      setWalletStatusMessage(isTargetBorrowed ? "Payment to lender recorded successfully." : "Repayment recorded successfully.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record repayment.");
@@ -2057,9 +2061,11 @@ export function AppRoutes() {
     startWalletSubmit("loan-repayment");
 
     try {
+      const targetLoan = selectedWallet?.loans?.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
       const wallet = await deleteWalletLoanRepayment(inputWalletId, loanId, repaymentId, currentUser);
       setSelectedWallet(wallet);
-      setWalletStatusMessage("Repayment deleted.");
+      setWalletStatusMessage(isTargetBorrowed ? "Payment deleted." : "Repayment deleted.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete repayment.");
@@ -2069,9 +2075,32 @@ export function AppRoutes() {
     }
   }
 
+  async function handleUpdateWalletLoanRepayment(inputWalletId: string, loanId: string, repaymentId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const targetLoan = selectedWallet?.loans?.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
+      const wallet = await updateWalletLoanRepayment(inputWalletId, loanId, repaymentId, input, currentUser);
+      setSelectedWallet(wallet);
+      setWalletStatusMessage(isTargetBorrowed ? "Payment updated successfully." : "Repayment updated successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update repayment.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
   async function handleCreateStandaloneLoan(input: any) {
     if (!currentUser) {
-      setWalletErrorMessage("Sign in to lend money.");
+      setWalletErrorMessage("Sign in to add a loan.");
       return false;
     }
 
@@ -2080,7 +2109,7 @@ export function AppRoutes() {
     try {
       const newLoan = await createStandaloneLoan(input, currentUser);
       setLoans((prev) => [newLoan, ...prev]);
-      setWalletStatusMessage("Loan record created successfully.");
+      setWalletStatusMessage(input?.loanType === "borrowed" ? "Borrowed loan recorded successfully." : "Lent loan recorded successfully.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to create loan.");
@@ -2141,9 +2170,11 @@ export function AppRoutes() {
     startWalletSubmit("loan-repayment");
 
     try {
+      const targetLoan = loans.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
       const updatedLoan = await createStandaloneLoanRepayment(loanId, input, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
-      setWalletStatusMessage("Repayment recorded successfully.");
+      setWalletStatusMessage(isTargetBorrowed ? "Payment to lender recorded successfully." : "Repayment recorded successfully.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to record repayment.");
@@ -2162,12 +2193,37 @@ export function AppRoutes() {
     startWalletSubmit("loan-repayment");
 
     try {
+      const targetLoan = loans.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
       const updatedLoan = await deleteStandaloneLoanRepayment(loanId, repaymentId, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
-      setWalletStatusMessage("Repayment deleted.");
+      setWalletStatusMessage(isTargetBorrowed ? "Payment deleted." : "Repayment deleted.");
       return true;
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to delete repayment.");
+      return false;
+    } finally {
+      endWalletSubmit();
+    }
+  }
+
+  async function handleUpdateStandaloneLoanRepayment(loanId: string, repaymentId: string, input: any) {
+    if (!currentUser) {
+      setWalletErrorMessage("Sign in to update repayment.");
+      return false;
+    }
+
+    startWalletSubmit("loan-repayment");
+
+    try {
+      const targetLoan = loans.find((l) => l.id === loanId);
+      const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
+      const updatedLoan = await updateStandaloneLoanRepayment(loanId, repaymentId, input, currentUser);
+      setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
+      setWalletStatusMessage(isTargetBorrowed ? "Payment updated successfully." : "Repayment updated successfully.");
+      return true;
+    } catch (error) {
+      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to update repayment.");
       return false;
     } finally {
       endWalletSubmit();
@@ -2960,12 +3016,14 @@ export function AppRoutes() {
               onUpdateWalletLoan={handleUpdateWalletLoan}
               onDeleteWalletLoan={handleDeleteWalletLoan}
               onCreateWalletLoanRepayment={handleCreateWalletLoanRepayment}
+              onUpdateWalletLoanRepayment={handleUpdateWalletLoanRepayment}
               onDeleteWalletLoanRepayment={handleDeleteWalletLoanRepayment}
               loans={loans}
               onCreateStandaloneLoan={handleCreateStandaloneLoan}
               onUpdateStandaloneLoan={handleUpdateStandaloneLoan}
               onDeleteStandaloneLoan={handleDeleteStandaloneLoan}
               onCreateStandaloneLoanRepayment={handleCreateStandaloneLoanRepayment}
+              onUpdateStandaloneLoanRepayment={handleUpdateStandaloneLoanRepayment}
               onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
               onLoadMoreExpenses={handleLoadMoreWalletExpenses}
             />

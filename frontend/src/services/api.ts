@@ -13,7 +13,8 @@ import type {
   WalletDetail,
   WalletLoan,
   WalletLoanForm,
-  WalletLoanRepaymentForm
+  WalletLoanRepaymentForm,
+  WalletLoanRepaymentUpdateForm
 } from "../types";
 import { ApiError } from "../types";
 
@@ -409,6 +410,22 @@ export async function createWalletLoanRepayment(
   return body.wallet;
 }
 
+export async function updateWalletLoanRepayment(
+  walletId: string,
+  loanId: string,
+  repaymentId: string,
+  payload: WalletLoanRepaymentUpdateForm,
+  user: User
+): Promise<WalletDetail> {
+  const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/loans/${loanId}/repayments/${repaymentId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/loans/${loanId}/repayments/${repaymentId}`;
+  const body = await apiRequest<{ wallet: WalletDetail }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: payload
+  }, "Failed to update loan repayment.");
+  return body.wallet;
+}
+
 export async function deleteWalletLoanRepayment(
   walletId: string,
   loanId: string,
@@ -478,6 +495,21 @@ export async function createStandaloneLoanRepayment(
     method: "POST",
     data: payload
   }, "Failed to record loan repayment.");
+  return body.loan;
+}
+
+export async function updateStandaloneLoanRepayment(
+  loanId: string,
+  repaymentId: string,
+  payload: WalletLoanRepaymentUpdateForm,
+  user: User
+): Promise<WalletLoan> {
+  const endpoint = API_BASE_URL ? new URL(`/api/loans/${loanId}/repayments/${repaymentId}`, API_BASE_URL).toString() : `/api/loans/${loanId}/repayments/${repaymentId}`;
+  const body = await apiRequest<{ loan: WalletLoan }>(user, {
+    url: endpoint,
+    method: "PUT",
+    data: payload
+  }, "Failed to update loan repayment.");
   return body.loan;
 }
 

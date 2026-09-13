@@ -10,6 +10,7 @@ import type {
   CreateWalletLoanInput,
   UpdateWalletLoanInput,
   CreateWalletLoanRepaymentInput,
+  UpdateWalletLoanRepaymentInput,
   ExpensesQueryInput
 } from "../lib/validation.js";
 
@@ -171,6 +172,7 @@ export type WalletLoanRecord = {
   interest_start_date: string | null;
   notes: string | null;
   status: WalletLoanStatus;
+  loan_type: "lent" | "borrowed";
   created_at: string;
   repayments: WalletLoanRepaymentRecord[];
 };
@@ -281,12 +283,14 @@ export interface ExpenseStore {
   updateWalletLoan(userId: string, walletId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletDetailRecord>;
   deleteWalletLoan(userId: string, walletId: string, loanId: string): Promise<WalletDetailRecord>;
   createWalletLoanRepayment(userId: string, walletId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletDetailRecord>;
+  updateWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletDetailRecord>;
   deleteWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string): Promise<WalletDetailRecord>;
   listLoans(userId: string): Promise<WalletLoanRecord[]>;
   createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord>;
   updateStandaloneLoan(userId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletLoanRecord>;
   deleteStandaloneLoan(userId: string, loanId: string): Promise<void>;
   createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord>;
+  updateStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletLoanRecord>;
   deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord>;
   listBillReminders(userId: string): Promise<BillReminderRecord[]>;
   createBillReminder(userId: string, input: CreateBillReminderInput): Promise<BillReminderRecord>;

@@ -349,6 +349,7 @@ export const createWalletLoanSchema = z
     }),
     interestType: z.enum(["percentage", "fixed", "none"]).default("percentage"),
     interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).default("monthly"),
+    loanType: z.enum(["lent", "borrowed"]).default("lent"),
     lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value."),
     dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
     interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
@@ -403,6 +404,7 @@ export const updateWalletLoanSchema = z.object({
   }),
   interestType: z.enum(["percentage", "fixed", "none"]).optional(),
   interestRatePeriod: z.enum(["monthly", "yearly", "one-time"]).optional(),
+  loanType: z.enum(["lent", "borrowed"]).optional(),
   lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value.").optional(),
   dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
   interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
@@ -427,6 +429,24 @@ export const createWalletLoanRepaymentSchema = z.object({
   notes: z.string().trim().max(280, "Notes is too long.").nullable().optional()
 });
 
+export const updateWalletLoanRepaymentSchema = z.object({
+  amount: z.union([z.string(), z.number()]).optional().transform((value, context) => {
+    if (value === undefined) return undefined;
+    try {
+      return parseAmountToMinorUnits(value);
+    } catch (error) {
+      context.issues.push({
+        code: z.ZodIssueCode.custom,
+        input: value,
+        message: error instanceof Error ? error.message : "Invalid repayment amount."
+      });
+      return z.NEVER;
+    }
+  }),
+  repaymentDate: z.string().trim().refine(isValidIsoDate, "Repayment date must be a valid YYYY-MM-DD value.").optional(),
+  notes: z.string().trim().max(280, "Notes is too long.").nullable().optional()
+});
+
 export const walletInviteResponseSchema = z.object({
   action: z.enum(["accept", "decline"])
 });
@@ -445,3 +465,4 @@ export type WalletInviteResponseInput = z.infer<typeof walletInviteResponseSchem
 export type CreateWalletLoanInput = z.infer<typeof createWalletLoanSchema>;
 export type UpdateWalletLoanInput = z.infer<typeof updateWalletLoanSchema>;
 export type CreateWalletLoanRepaymentInput = z.infer<typeof createWalletLoanRepaymentSchema>;
+export type UpdateWalletLoanRepaymentInput = z.infer<typeof updateWalletLoanRepaymentSchema>;

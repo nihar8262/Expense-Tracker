@@ -26,12 +26,14 @@ export function useWallets() {
     updateWalletLoan: useCallback((walletId: string, loanId: string, input: any, user: User) => api.updateWalletLoan(walletId, loanId, input, user), []),
     deleteWalletLoan: useCallback((walletId: string, loanId: string, user: User) => api.deleteWalletLoan(walletId, loanId, user), []),
     createWalletLoanRepayment: useCallback((walletId: string, loanId: string, input: any, user: User) => api.createWalletLoanRepayment(walletId, loanId, input, user), []),
+    updateWalletLoanRepayment: useCallback((walletId: string, loanId: string, repaymentId: string, input: any, user: User) => api.updateWalletLoanRepayment(walletId, loanId, repaymentId, input, user), []),
     deleteWalletLoanRepayment: useCallback((walletId: string, loanId: string, repaymentId: string, user: User) => api.deleteWalletLoanRepayment(walletId, loanId, repaymentId, user), []),
     listLoans: useCallback((user: User) => api.listLoans(user), []),
     createStandaloneLoan: useCallback((input: any, user: User) => api.createStandaloneLoan(input, user), []),
     updateStandaloneLoan: useCallback((loanId: string, input: any, user: User) => api.updateStandaloneLoan(loanId, input, user), []),
     deleteStandaloneLoan: useCallback((loanId: string, user: User) => api.deleteStandaloneLoan(loanId, user), []),
     createStandaloneLoanRepayment: useCallback((loanId: string, input: any, user: User) => api.createStandaloneLoanRepayment(loanId, input, user), []),
+    updateStandaloneLoanRepayment: useCallback((loanId: string, repaymentId: string, input: any, user: User) => api.updateStandaloneLoanRepayment(loanId, repaymentId, input, user), []),
     deleteStandaloneLoanRepayment: useCallback((loanId: string, repaymentId: string, user: User) => api.deleteStandaloneLoanRepayment(loanId, repaymentId, user), [])
   };
 }

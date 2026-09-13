@@ -26,6 +26,7 @@ import type {
   WalletBudget,
   WalletLoan,
   WalletLoanForm,
+  WalletLoanRepayment,
   WalletLoanRepaymentForm,
 } from "../types";
 
@@ -157,6 +158,12 @@ type WalletsPageProps = {
     loanId: string,
     input: WalletLoanRepaymentForm,
   ) => Promise<boolean>;
+  onUpdateWalletLoanRepayment?: (
+    walletId: string,
+    loanId: string,
+    repaymentId: string,
+    input: WalletLoanRepaymentForm,
+  ) => Promise<boolean>;
   onDeleteWalletLoanRepayment?: (
     walletId: string,
     loanId: string,
@@ -167,6 +174,7 @@ type WalletsPageProps = {
   onUpdateStandaloneLoan?: (loanId: string, input: Partial<WalletLoanForm>) => Promise<boolean>;
   onDeleteStandaloneLoan?: (loanId: string) => Promise<boolean>;
   onCreateStandaloneLoanRepayment?: (loanId: string, input: WalletLoanRepaymentForm) => Promise<boolean>;
+  onUpdateStandaloneLoanRepayment?: (loanId: string, repaymentId: string, input: WalletLoanRepaymentForm) => Promise<boolean>;
   onDeleteStandaloneLoanRepayment?: (loanId: string, repaymentId: string) => Promise<boolean>;
   currencySymbol?: string;
   onLoadMoreExpenses?: () => Promise<void>;
@@ -315,12 +323,14 @@ export function WalletsPage({
   onUpdateWalletLoan,
   onDeleteWalletLoan,
   onCreateWalletLoanRepayment,
+  onUpdateWalletLoanRepayment,
   onDeleteWalletLoanRepayment,
   loans = [],
   onCreateStandaloneLoan,
   onUpdateStandaloneLoan,
   onDeleteStandaloneLoan,
   onCreateStandaloneLoanRepayment,
+  onUpdateStandaloneLoanRepayment,
   onDeleteStandaloneLoanRepayment,
   currencySymbol = "₹",
   onLoadMoreExpenses
@@ -463,6 +473,19 @@ export function WalletsPage({
   const [repaymentNotes, setRepaymentNotes] = useState("");
   const [showRepaymentValidation, setShowRepaymentValidation] = useState(false);
 
+  // Loans View Navigation & Mode State
+  const [loanTab, setLoanTab] = useState<"lent" | "borrowed" | "statement">("lent");
+  const [loanType, setLoanType] = useState<"lent" | "borrowed">("lent");
+  const [statementSearch, setStatementSearch] = useState("");
+  const [statementFilterType, setStatementFilterType] = useState<"all" | "lent" | "borrowed" | "repayments">("all");
+
+  // Edit Repayment State
+  const [editingRepayment, setEditingRepayment] = useState<{ loan: WalletLoan; repayment: WalletLoanRepayment } | null>(null);
+  const [editRepaymentAmount, setEditRepaymentAmount] = useState("");
+  const [editRepaymentDate, setEditRepaymentDate] = useState("");
+  const [editRepaymentNotes, setEditRepaymentNotes] = useState("");
+  const [showEditRepaymentValidation, setShowEditRepaymentValidation] = useState(false);
+
   const createWalletErrors = useMemo(
     () => ({
       name: walletName.trim() ? "" : "Wallet name is required.",
@@ -568,8 +591,10 @@ export function WalletsPage({
     }
 
     const totalDue = principal + accruedInterest;
+    const isOverpaid = totalRepaid > totalDue + 0.001 && totalDue > 0;
+    const overpaidAmount = isOverpaid ? totalRepaid - totalDue : 0;
     const remainingBalance = Math.max(0, totalDue - totalRepaid);
-    const isFullyPaid = totalRepaid >= totalDue && totalDue > 0;
+    const isFullyPaid = (totalRepaid >= totalDue && totalDue > 0) || isOverpaid;
     const progressPercent = totalDue > 0 ? Math.min(100, Math.round((totalRepaid / totalDue) * 100)) : 100;
 
     const isOverdue = Boolean(loan.due_date && new Date(loan.due_date) < new Date() && remainingBalance > 0);
@@ -581,6 +606,8 @@ export function WalletsPage({
       totalRepaid,
       remainingBalance,
       isFullyPaid,
+      isOverpaid,
+      overpaidAmount,
       progressPercent,
       isOverdue
     };
@@ -635,14 +662,22 @@ export function WalletsPage({
 
   const standaloneLoansList = useMemo(() => loans || [], [loans]);
 
-  const standaloneLoansAggregate = useMemo(() => {
+  const lentLoansList = useMemo(() => {
+    return standaloneLoansList.filter((loan) => (loan.loan_type || "lent") !== "borrowed");
+  }, [standaloneLoansList]);
+
+  const borrowedLoansList = useMemo(() => {
+    return standaloneLoansList.filter((loan) => loan.loan_type === "borrowed");
+  }, [standaloneLoansList]);
+
+  const lentLoansAggregate = useMemo(() => {
     let totalLent = 0;
     let totalInterest = 0;
     let totalRepaid = 0;
     let totalRemaining = 0;
     let activeCount = 0;
 
-    for (const loan of standaloneLoansList) {
+    for (const loan of lentLoansList) {
       const { principal, accruedInterest, totalRepaid: repaid, remainingBalance, isFullyPaid } = calculateLoanFinancials(loan);
       totalLent += principal;
       totalInterest += accruedInterest;
@@ -659,12 +694,46 @@ export function WalletsPage({
       totalRepaid,
       totalRemaining,
       activeCount,
-      totalLoans: standaloneLoansList.length
+      totalLoans: lentLoansList.length
     };
-  }, [standaloneLoansList]);
+  }, [lentLoansList]);
+
+  const borrowedLoansAggregate = useMemo(() => {
+    let totalBorrowed = 0;
+    let totalInterest = 0;
+    let totalPaidBack = 0;
+    let totalRemaining = 0;
+    let activeCount = 0;
+
+    for (const loan of borrowedLoansList) {
+      const { principal, accruedInterest, totalRepaid: repaid, remainingBalance, isFullyPaid } = calculateLoanFinancials(loan);
+      totalBorrowed += principal;
+      totalInterest += accruedInterest;
+      totalPaidBack += repaid;
+      totalRemaining += remainingBalance;
+      if (!isFullyPaid) {
+        activeCount++;
+      }
+    }
+
+    return {
+      totalBorrowed,
+      totalInterest,
+      totalPaidBack,
+      totalRemaining,
+      activeCount,
+      totalLoans: borrowedLoansList.length
+    };
+  }, [borrowedLoansList]);
+
+
+  const currentCategoryLoans = useMemo(() => {
+    if (loanTab === "borrowed") return borrowedLoansList;
+    return lentLoansList;
+  }, [loanTab, lentLoansList, borrowedLoansList]);
 
   const filteredStandaloneLoans = useMemo(() => {
-    return standaloneLoansList.filter((loan) => {
+    return currentCategoryLoans.filter((loan) => {
       const bName = getLoanBorrowerName(loan).toLowerCase();
       const bEmail = (getLoanBorrowerEmail(loan) || "").toLowerCase();
       const search = standaloneSearch.trim().toLowerCase();
@@ -683,7 +752,77 @@ export function WalletsPage({
       }
       return true;
     });
-  }, [standaloneLoansList, standaloneSearch, standaloneFilterStatus, selectedWallet]);
+  }, [currentCategoryLoans, standaloneSearch, standaloneFilterStatus]);
+
+  type UnifiedStatementEntry = {
+    id: string;
+    date: string;
+    type: "loan_lent" | "loan_borrowed" | "repayment_received" | "repayment_paid";
+    counterparty: string;
+    counterpartyEmail?: string | null;
+    notes?: string | null;
+    amount: number;
+    loan: WalletLoan;
+    repaymentId?: string;
+  };
+
+  const unifiedStatementItems = useMemo(() => {
+    const items: UnifiedStatementEntry[] = [];
+    for (const loan of standaloneLoansList) {
+      const counterparty = getLoanBorrowerName(loan);
+      const counterpartyEmail = getLoanBorrowerEmail(loan);
+      const isBorrowed = loan.loan_type === "borrowed";
+
+      items.push({
+        id: `loan-${loan.id}`,
+        date: loan.lending_date,
+        type: isBorrowed ? "loan_borrowed" : "loan_lent",
+        counterparty,
+        counterpartyEmail,
+        notes: loan.notes || (isBorrowed ? "Borrowed principal received" : "Loan principal disbursed"),
+        amount: parseFloat(loan.amount) || 0,
+        loan
+      });
+
+      if (loan.repayments && loan.repayments.length > 0) {
+        for (const rep of loan.repayments) {
+          items.push({
+            id: `rep-${rep.id}`,
+            date: rep.repayment_date,
+            type: isBorrowed ? "repayment_paid" : "repayment_received",
+            counterparty,
+            counterpartyEmail,
+            notes: rep.notes || (isBorrowed ? "Installment paid to lender" : "Repayment collected from borrower"),
+            amount: parseFloat(rep.amount) || 0,
+            loan,
+            repaymentId: rep.id
+          });
+        }
+      }
+    }
+
+    return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [standaloneLoansList]);
+
+  const filteredStatementItems = useMemo(() => {
+    return unifiedStatementItems.filter((item) => {
+      const search = statementSearch.trim().toLowerCase();
+      if (search) {
+        const cp = item.counterparty.toLowerCase();
+        const em = (item.counterpartyEmail || "").toLowerCase();
+        const nt = (item.notes || "").toLowerCase();
+        if (!cp.includes(search) && !em.includes(search) && !nt.includes(search)) {
+          return false;
+        }
+      }
+
+      if (statementFilterType === "lent" && item.type !== "loan_lent") return false;
+      if (statementFilterType === "borrowed" && item.type !== "loan_borrowed") return false;
+      if (statementFilterType === "repayments" && item.type !== "repayment_received" && item.type !== "repayment_paid") return false;
+
+      return true;
+    });
+  }, [unifiedStatementItems, statementSearch, statementFilterType]);
 
   const walletLoans = useMemo(() => selectedWallet?.loans || [], [selectedWallet?.loans]);
 
@@ -742,7 +881,7 @@ export function WalletsPage({
     const isStandaloneForm = viewMode === "loans" || !selectedWallet;
     if (isStandaloneForm) {
       if (!loanBorrowerName.trim()) {
-        errors.borrower = "Borrower name is required.";
+        errors.borrower = loanType === "borrowed" ? "Lender name is required." : "Borrower name is required.";
       }
     } else {
       if (!loanBorrowerId.trim()) {
@@ -763,11 +902,11 @@ export function WalletsPage({
     }
 
     if (!loanLendingDate.trim()) {
-      errors.lendingDate = "Lending date is required.";
+      errors.lendingDate = loanType === "borrowed" ? "Borrowing date is required." : "Lending date is required.";
     }
 
     return errors;
-  }, [viewMode, selectedWallet, loanBorrowerId, loanBorrowerName, loanAmount, loanInterestRate, loanLendingDate]);
+  }, [viewMode, selectedWallet, loanBorrowerId, loanBorrowerName, loanAmount, loanInterestRate, loanLendingDate, loanType]);
 
   const repaymentErrors = useMemo(() => {
     const errors = {
@@ -1675,8 +1814,15 @@ export function WalletsPage({
     }
   }
 
-  function handleOpenCreateLoan() {
+  function handleOpenCreateLoan(type?: string | unknown) {
     setEditingLoan(null);
+    const resolvedType: "lent" | "borrowed" =
+      type === "borrowed"
+        ? "borrowed"
+        : type === "lent"
+          ? "lent"
+          : (loanTab === "borrowed" ? "borrowed" : "lent");
+    setLoanType(resolvedType);
     const nonOwnerMembers = selectedWallet?.members.filter((m) => m.role !== "owner") || [];
     setLoanBorrowerId(nonOwnerMembers[0]?.id || selectedWallet?.members[0]?.id || "");
     setLoanBorrowerName("");
@@ -1695,6 +1841,7 @@ export function WalletsPage({
 
   function handleOpenEditLoan(loan: WalletLoan) {
     setEditingLoan(loan);
+    setLoanType(loan.loan_type || "lent");
     setLoanBorrowerId(loan.borrower_member_id || "");
     setLoanBorrowerName(loan.borrower_name || "");
     setLoanBorrowerEmail(loan.borrower_email || "");
@@ -1710,6 +1857,52 @@ export function WalletsPage({
     setIsLoanModalOpen(true);
   }
 
+  function handleOpenEditRepayment(loan: WalletLoan, repayment: WalletLoanRepayment) {
+    setEditingRepayment({ loan, repayment });
+    setEditRepaymentAmount(repayment.amount);
+    setEditRepaymentDate(repayment.repayment_date);
+    setEditRepaymentNotes(repayment.notes || "");
+    setShowEditRepaymentValidation(false);
+  }
+
+  async function handleEditRepaymentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setShowEditRepaymentValidation(true);
+
+    if (!editingRepayment) return;
+    const amountVal = parseFloat(editRepaymentAmount.trim());
+    if (isNaN(amountVal) || amountVal <= 0 || !editRepaymentDate) {
+      return;
+    }
+
+    const { loan, repayment } = editingRepayment;
+    const payload: WalletLoanRepaymentForm = {
+      amount: editRepaymentAmount.trim(),
+      repaymentDate: editRepaymentDate,
+      notes: editRepaymentNotes.trim() || undefined
+    };
+
+    let success = false;
+    if (loan.wallet_id && onUpdateWalletLoanRepayment) {
+      success = await onUpdateWalletLoanRepayment(loan.wallet_id, loan.id, repayment.id, payload);
+    } else if (onUpdateStandaloneLoanRepayment) {
+      success = await onUpdateStandaloneLoanRepayment(loan.id, repayment.id, payload);
+    }
+
+    if (success) {
+      setEditingRepayment(null);
+      setSelectedLoanForDetails((prev) => {
+        if (!prev || prev.id !== loan.id) return prev;
+        const updatedRepayments = prev.repayments?.map((r) =>
+          r.id === repayment.id
+            ? { ...r, amount: payload.amount, repayment_date: payload.repaymentDate, notes: payload.notes || null }
+            : r
+        );
+        return { ...prev, repayments: updatedRepayments };
+      });
+    }
+  }
+
   async function handleLoanFormSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setShowLoanValidation(true);
@@ -1721,6 +1914,7 @@ export function WalletsPage({
     const isStandaloneForm = viewMode === "loans" || !selectedWallet || !loanBorrowerId;
 
     const payload: WalletLoanForm = {
+      loanType,
       borrowerMemberId: isStandaloneForm ? undefined : loanBorrowerId,
       borrowerName: isStandaloneForm ? loanBorrowerName.trim() : undefined,
       borrowerEmail: isStandaloneForm ? (loanBorrowerEmail.trim() || undefined) : undefined,
@@ -2284,7 +2478,7 @@ export function WalletsPage({
           </button>
         </div>
 
-        {viewMode === "loans" && (
+        {/* {viewMode === "loans" && (
           <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
             {standaloneLoansList.length > 0 && (
               <button
@@ -2304,10 +2498,10 @@ export function WalletsPage({
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
                 <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
               </svg>
-              <span>+ Lend Money</span>
+              <span>Lend Money</span>
             </button>
           </div>
-        )}
+        )} */}
       </div>
 
       {statusMessage ? (
@@ -2926,6 +3120,8 @@ export function WalletsPage({
                         totalRepaid,
                         remainingBalance,
                         isFullyPaid,
+                        isOverpaid,
+                        overpaidAmount,
                         progressPercent,
                         isOverdue
                       } = calculateLoanFinancials(loan);
@@ -2939,11 +3135,13 @@ export function WalletsPage({
                           key={loan.id}
                           className={cn(
                             "group relative flex flex-col justify-between rounded-[24px] border p-5 shadow-sm transition-all duration-200",
-                            isFullyPaid
-                              ? "border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
-                              : isOverdue
-                                ? "border-rose-500/25 bg-rose-50/30 dark:bg-rose-950/10"
-                                : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/60"
+                            isOverpaid
+                              ? "border-rose-500/40 bg-rose-50/40 dark:bg-rose-950/20"
+                              : isFullyPaid
+                                ? "border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
+                                : isOverdue
+                                  ? "border-rose-500/25 bg-rose-50/30 dark:bg-rose-950/10"
+                                  : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/60"
                           )}
                         >
                           <div className="space-y-4">
@@ -2969,7 +3167,11 @@ export function WalletsPage({
                               </div>
 
                               <div>
-                                {isFullyPaid ? (
+                                {isOverpaid ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold shadow-sm animate-pulse">
+                                    ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}
+                                  </span>
+                                ) : isFullyPaid ? (
                                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
                                     ✓ Fully Repaid
                                   </span>
@@ -3017,7 +3219,7 @@ export function WalletsPage({
                                 <span className="text-secondary">
                                   Repaid {formatCurrency(totalRepaid.toFixed(2), selectedWallet.wallet.currency)} of {formatCurrency(totalDue.toFixed(2), selectedWallet.wallet.currency)}
                                 </span>
-                                <span className={cn("font-semibold", isFullyPaid ? "text-emerald-600" : "text-ink")}>
+                                <span className={cn("font-semibold", isOverpaid ? "text-rose-600 font-bold" : isFullyPaid ? "text-emerald-600" : "text-ink")}>
                                   {progressPercent}%
                                 </span>
                               </div>
@@ -3026,7 +3228,7 @@ export function WalletsPage({
                                 <div
                                   className={cn(
                                     "h-full transition-all duration-300 rounded-full",
-                                    isFullyPaid ? "bg-emerald-500" : "bg-primary"
+                                    isOverpaid ? "bg-rose-500" : isFullyPaid ? "bg-emerald-500" : "bg-primary"
                                   )}
                                   style={{ width: `${progressPercent}%` }}
                                 />
@@ -3036,11 +3238,24 @@ export function WalletsPage({
                                 <span className="text-secondary">
                                   {loan.due_date ? `Due ${loan.due_date}` : "No due date"}
                                 </span>
-                                <span className="font-semibold text-ink">
-                                  Remaining: {formatCurrency(remainingBalance.toFixed(2), selectedWallet.wallet.currency)}
-                                </span>
+                                {isOverpaid ? (
+                                  <span className="font-bold text-rose-600 dark:text-rose-400">
+                                    Overpaid: +{formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-ink">
+                                    Remaining: {formatCurrency(remainingBalance.toFixed(2), selectedWallet.wallet.currency)}
+                                  </span>
+                                )}
                               </div>
                             </div>
+
+                            {isOverpaid && (
+                              <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:bg-rose-950/40 p-2 text-xs text-rose-800 dark:text-rose-300">
+                                <span className="font-bold">⚠️ Overpayment Alert:</span> Repayments exceed total due by{" "}
+                                <strong className="text-rose-600 dark:text-rose-400 font-extrabold">{formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}</strong>. Use Edit to update terms or adjust repayment in Timeline.
+                              </div>
+                            )}
 
                             {loan.notes && (
                               <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2 rounded-xl">
@@ -4049,391 +4264,877 @@ export function WalletsPage({
 
       {viewMode === "loans" && (
         <section className="space-y-6">
-          {/* Top Aggregate Summary Metrics Cards */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <SurfaceCard className="relative overflow-hidden p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                  Total Principal Lent
-                </p>
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                  </svg>
+          {/* Top Mode Navigation: Lent vs Borrowed vs Unified Mini-Statement */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[color:var(--border)] pb-4">
+            <div className="flex items-center gap-1.5 p-1.5 bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl border border-[color:var(--border)] shrink-0">
+              <button
+                type="button"
+                onClick={() => setLoanTab("lent")}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                  loanTab === "lent"
+                    ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                    : "text-secondary hover:text-ink"
+                )}
+              >
+                <span>💸 Money Lent</span>
+                <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold">
+                  {lentLoansList.length}
                 </span>
-              </div>
-              <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
-                {formatCurrency(standaloneLoansAggregate.totalLent.toFixed(2))}
-              </strong>
-              <span className="mt-1 block text-xs text-secondary">
-                Across {standaloneLoansAggregate.totalLoans} peer loan{standaloneLoansAggregate.totalLoans !== 1 ? "s" : ""}
-              </span>
-            </SurfaceCard>
+              </button>
 
-            <SurfaceCard className="relative overflow-hidden p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                  Accrued Interest
-                </p>
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 6a.75.75 0 0 0-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75V6Z" clipRule="evenodd" />
-                  </svg>
+              <button
+                type="button"
+                onClick={() => setLoanTab("borrowed")}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                  loanTab === "borrowed"
+                    ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                    : "text-secondary hover:text-ink"
+                )}
+              >
+                <span>📥 Money Borrowed</span>
+                <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
+                  {borrowedLoansList.length}
                 </span>
-              </div>
-              <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
-                +{formatCurrency(standaloneLoansAggregate.totalInterest.toFixed(2))}
-              </strong>
-              <span className="mt-1 block text-xs text-secondary">
-                Calculated per schedule
-              </span>
-            </SurfaceCard>
+              </button>
 
-            <SurfaceCard className="relative overflow-hidden p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                  Total Repaid
-                </p>
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
-                  </svg>
+              <button
+                type="button"
+                onClick={() => setLoanTab("statement")}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                  loanTab === "statement"
+                    ? "bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-secondary hover:text-ink"
+                )}
+              >
+                <span>📑 Mini-Statement</span>
+                <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-[10px] text-indigo-800 dark:text-indigo-300 font-semibold">
+                  {unifiedStatementItems.length}
                 </span>
-              </div>
-              <strong className="mt-3 block text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
-                {formatCurrency(standaloneLoansAggregate.totalRepaid.toFixed(2))}
-              </strong>
-              <span className="mt-1 block text-xs text-secondary">
-                Principal &amp; interest received
-              </span>
-            </SurfaceCard>
-
-            <SurfaceCard className="relative overflow-hidden p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                  Outstanding Balance
-                </p>
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
-                  </svg>
-                </span>
-              </div>
-              <strong className="mt-3 block text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
-                {formatCurrency(standaloneLoansAggregate.totalRemaining.toFixed(2))}
-              </strong>
-              <span className="mt-1 block text-xs text-secondary">
-                {standaloneLoansAggregate.activeCount} active loan{standaloneLoansAggregate.activeCount !== 1 ? "s" : ""}
-              </span>
-            </SurfaceCard>
-          </div>
-
-          {/* Controls Bar: Search & Status Filters */}
-          <SurfaceCard className="p-4 sm:p-5">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={standaloneSearch}
-                    onChange={(e) => setStandaloneSearch(e.target.value)}
-                    placeholder="Search by borrower name or email..."
-                    className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
-                  />
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
-                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
-                  </svg>
-                  {standaloneSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setStandaloneSearch("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setStandaloneFilterStatus("all")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                      standaloneFilterStatus === "all"
-                        ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
-                        : "text-secondary hover:text-ink"
-                    )}
-                  >
-                    All ({standaloneLoansList.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStandaloneFilterStatus("active")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                      standaloneFilterStatus === "active"
-                        ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
-                        : "text-secondary hover:text-ink"
-                    )}
-                  >
-                    Active
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStandaloneFilterStatus("repaid")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                      standaloneFilterStatus === "repaid"
-                        ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                        : "text-secondary hover:text-ink"
-                    )}
-                  >
-                    Repaid
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStandaloneFilterStatus("overdue")}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                      standaloneFilterStatus === "overdue"
-                        ? "bg-white dark:bg-zinc-900 text-red-600 dark:text-red-400 shadow-sm"
-                        : "text-secondary hover:text-ink"
-                    )}
-                  >
-                    Overdue
-                  </button>
-                </div>
-              </div>
+              </button>
             </div>
-          </SurfaceCard>
 
-          {/* Standalone Loans Grid */}
-          {filteredStandaloneLoans.length === 0 ? (
-            standaloneLoansList.length === 0 ? (
-              <SurfaceCard className="p-8 sm:p-12 text-center space-y-4">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 text-2xl shadow-inner">
-                  💸
-                </div>
-                <div className="space-y-2 max-w-md mx-auto">
-                  <h3 className="font-display text-xl font-bold text-ink">
-                    No peer loans tracked yet
-                  </h3>
-                  <p className="text-sm leading-6 text-secondary">
-                    Lend money to friends, family, or partners with customizable interest schedules, start months, and repayment tracking — without creating or joining a shared wallet.
-                  </p>
-                </div>
+            <div className="flex items-center gap-2">
+              {loanTab === "lent" && (
                 <button
                   type="button"
-                  className="ui-button-primary mt-2 inline-flex items-center gap-2"
-                  onClick={handleOpenCreateLoan}
+                  className="ui-button-primary !py-2 !px-4 text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => handleOpenCreateLoan("lent")}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
                     <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
                   </svg>
-                  <span>+ Lend Money to Someone</span>
+                  <span> Lend Money</span>
                 </button>
-              </SurfaceCard>
-            ) : (
-              <SurfaceCard className="p-8 text-center space-y-2">
-                <p className="text-base font-semibold text-ink">No matching loans found</p>
-                <p className="text-xs text-secondary">Try adjusting your search query or status filter.</p>
-              </SurfaceCard>
-            )
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredStandaloneLoans.map((loan) => {
-                const {
-                  principal,
-                  accruedInterest,
-                  totalDue,
-                  totalRepaid,
-                  remainingBalance,
-                  isFullyPaid,
-                  progressPercent,
-                  isOverdue
-                } = calculateLoanFinancials(loan);
+              )}
 
-                const bName = getLoanBorrowerName(loan);
-                const bEmail = getLoanBorrowerEmail(loan);
+              {loanTab === "borrowed" && (
+                <button
+                  type="button"
+                  className="ui-button-primary !py-2 !px-4 text-xs sm:text-sm font-semibold flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                  onClick={() => handleOpenCreateLoan("borrowed")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                  </svg>
+                  <span> Record Borrowed</span>
+                </button>
+              )}
 
-                return (
-                  <article
-                    key={loan.id}
-                    className={cn(
-                      "rounded-[26px] border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
-                      isFullyPaid
-                        ? "border-emerald-200/70 bg-emerald-50/25 dark:border-emerald-900/40 dark:bg-emerald-950/10"
-                        : isOverdue
-                          ? "border-red-200/80 bg-red-50/20 dark:border-red-900/40 dark:bg-red-950/10"
-                          : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/90"
-                    )}
+              {loanTab === "statement" && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="ui-button-secondary !py-2 !px-3 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    onClick={() => handleOpenCreateLoan("lent")}
                   >
-                    <div className="space-y-4">
-                      {/* Card Header: Borrower info & status badge */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <img
-                            src={getMemberAvatarUrl(bName, bEmail)}
-                            alt={bName}
-                            className="h-11 w-11 shrink-0 rounded-2xl border border-[color:var(--border)] object-cover shadow-sm"
-                          />
-                          <div className="min-w-0">
-                            <strong className="block truncate text-base font-bold text-ink">
-                              {bName}
-                            </strong>
-                            {bEmail ? (
-                              <p className="truncate text-xs text-secondary">
-                                {bEmail}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-secondary">
-                                Standalone Loan
-                              </p>
-                            )}
-                          </div>
-                        </div>
+                    <span> Lend</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ui-button-secondary !py-2 !px-3 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    onClick={() => handleOpenCreateLoan("borrowed")}
+                  >
+                    <span> Borrow</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
-                        {/* Status Badge */}
-                        <div className="shrink-0">
-                          {isFullyPaid ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                              ✓ Paid
-                            </span>
-                          ) : isOverdue ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-800 dark:bg-red-950/80 dark:text-red-300 animate-pulse">
-                              Overdue
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-950/80 dark:text-amber-300">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                      </div>
+          {/* LENT OR BORROWED VIEW */}
+          {loanTab !== "statement" ? (
+            <>
+              {/* Top Aggregate Summary Metrics Cards */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      {loanTab === "borrowed" ? "Total Principal Borrowed" : "Total Principal Lent"}
+                    </p>
+                    <span className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-xl",
+                      loanTab === "borrowed"
+                        ? "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+                        : "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400"
+                    )}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                      </svg>
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
+                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalBorrowed : lentLoansAggregate.totalLent).toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    Across {loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans} {loanTab === "borrowed" ? "borrowed loan" : "lent loan"}{(loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans) !== 1 ? "s" : ""}
+                  </span>
+                </SurfaceCard>
 
-                      {/* Financials Overview */}
-                      <div className="rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40 p-3.5 space-y-2.5">
-                        <div className="flex items-baseline justify-between">
-                          <span className="text-xs text-secondary">Principal Lent:</span>
-                          <span className="text-base font-bold text-ink">
-                            {formatCurrency(principal.toFixed(2))}
-                          </span>
-                        </div>
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      {loanTab === "borrowed" ? "Interest Payable" : "Interest Accrued"}
+                    </p>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                        <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 6a.75.75 0 0 0-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75V6Z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
+                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalInterest : lentLoansAggregate.totalInterest).toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    Calculated per terms
+                  </span>
+                </SurfaceCard>
 
-                        {Number(loan.interest_rate) > 0 && (
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-secondary">
-                              Interest ({loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}):
-                            </span>
-                            <span className="font-semibold text-purple-600 dark:text-purple-400">
-                              +{formatCurrency(accruedInterest.toFixed(2))}
-                            </span>
-                          </div>
-                        )}
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      {loanTab === "borrowed" ? "Total Paid Back" : "Total Collected"}
+                    </p>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalPaidBack : lentLoansAggregate.totalRepaid).toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    {loanTab === "borrowed" ? "Installments paid to lenders" : "Installments received"}
+                  </span>
+                </SurfaceCard>
 
-                        <div className="flex items-baseline justify-between border-t border-[color:var(--border)] pt-2">
-                          <span className="text-xs font-semibold text-secondary">Total Due:</span>
-                          <span className="text-base font-extrabold text-ink">
-                            {formatCurrency(totalDue.toFixed(2))}
-                          </span>
-                        </div>
-                      </div>
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      {loanTab === "borrowed" ? "Remaining to Pay" : "Outstanding to Collect"}
+                    </p>
+                    <span className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-xl",
+                      loanTab === "borrowed"
+                        ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                        : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+                    )}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                        <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                  </div>
+                  <strong className={cn(
+                    "mt-3 block text-2xl font-bold tracking-tight",
+                    loanTab === "borrowed" ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
+                  )}>
+                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalRemaining : lentLoansAggregate.totalRemaining).toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    {loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount} active loan{(loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount) !== 1 ? "s" : ""}
+                  </span>
+                </SurfaceCard>
+              </div>
 
-                      {/* Repayment Progress Bar */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-secondary">
-                            Repaid: <strong className="text-ink">{formatCurrency(totalRepaid.toFixed(2))}</strong>
-                          </span>
-                          <span className={cn("font-semibold", isFullyPaid ? "text-emerald-600" : "text-ink")}>
-                            {progressPercent}%
-                          </span>
-                        </div>
-
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
-                          <div
-                            className={cn(
-                              "h-full transition-all duration-300 rounded-full",
-                              isFullyPaid ? "bg-emerald-500" : "bg-primary"
-                            )}
-                            style={{ width: `${progressPercent}%` }}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between pt-1 text-xs">
-                          <span className="text-secondary">
-                            {loan.due_date ? `Due: ${loan.due_date}` : `Lent: ${loan.lending_date}`}
-                          </span>
-                          <span className="font-semibold text-ink">
-                            Remaining: {formatCurrency(remainingBalance.toFixed(2))}
-                          </span>
-                        </div>
-                      </div>
-
-                      {loan.notes && (
-                        <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2.5 rounded-xl border border-[color:var(--border)]">
-                          "{loan.notes}"
-                        </p>
+              {/* Controls Bar: Search & Status Filters */}
+              <SurfaceCard className="p-4 sm:p-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={standaloneSearch}
+                        onChange={(e) => setStandaloneSearch(e.target.value)}
+                        placeholder={loanTab === "borrowed" ? "Search by lender name or email..." : "Search by borrower name or email..."}
+                        className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
+                      />
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
+                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                      </svg>
+                      {standaloneSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setStandaloneSearch("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink cursor-pointer"
+                        >
+                          Clear
+                        </button>
                       )}
                     </div>
 
-                    {/* Actions Toolbar */}
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                          onClick={() => setSelectedLoanForDetails(loan)}
-                        >
-                          Timeline ({loan.repayments?.length || 0})
-                        </button>
-                        <button
-                          type="button"
-                          className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                          onClick={() => {
-                            const bKey = loan.borrower_member_id
-                              ? `member:${loan.borrower_member_id}`
-                              : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
-                            handleOpenBorrowerStatement(bKey);
-                          }}
-                          title="View borrower monthly mini statement"
-                        >
-                          <span>📄 Statement</span>
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        {!isFullyPaid && (
-                          <button
-                            type="button"
-                            className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold"
-                            onClick={() => handleOpenRepaymentModal(loan)}
-                          >
-                            + Repay
-                          </button>
+                    <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setStandaloneFilterStatus("all")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          standaloneFilterStatus === "all"
+                            ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
+                            : "text-secondary hover:text-ink"
                         )}
-
-                        <button
-                          type="button"
-                          className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
-                          onClick={() => handleOpenEditLoan(loan)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
-                          disabled={deletingLoanIds.includes(loan.id)}
-                          onClick={() => void handleDeleteLoanClick(loan)}
-                        >
-                          {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
-                        </button>
-                      </div>
+                      >
+                        All ({currentCategoryLoans.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStandaloneFilterStatus("active")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          standaloneFilterStatus === "active"
+                            ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        Active
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStandaloneFilterStatus("repaid")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          standaloneFilterStatus === "repaid"
+                            ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        {loanTab === "borrowed" ? "Settled" : "Repaid"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStandaloneFilterStatus("overdue")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          standaloneFilterStatus === "overdue"
+                            ? "bg-white dark:bg-zinc-900 text-red-600 dark:text-red-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        Overdue
+                      </button>
                     </div>
-                  </article>
-                );
-              })}
+                  </div>
+                </div>
+              </SurfaceCard>
+
+              {/* Loans Cards Grid */}
+              {filteredStandaloneLoans.length === 0 ? (
+                currentCategoryLoans.length === 0 ? (
+                  <SurfaceCard className="p-8 sm:p-12 text-center space-y-4">
+                    <div className={cn(
+                      "mx-auto flex h-16 w-16 items-center justify-center rounded-3xl text-2xl shadow-inner",
+                      loanTab === "borrowed"
+                        ? "bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400"
+                        : "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400"
+                    )}>
+                      {loanTab === "borrowed" ? "📥" : "💸"}
+                    </div>
+                    <div className="space-y-2 max-w-md mx-auto">
+                      <h3 className="font-display text-xl font-bold text-ink">
+                        {loanTab === "borrowed" ? "No borrowed money recorded yet" : "No peer loans tracked yet"}
+                      </h3>
+                      <p className="text-sm leading-6 text-secondary">
+                        {loanTab === "borrowed"
+                          ? "Record funds borrowed from friends, family, or lenders, schedule repayments, and track interest owed in one simple dashboard."
+                          : "Lend money with customizable interest schedules, start months, and repayment tracking without requiring a shared wallet."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={cn(
+                        "ui-button-primary mt-2 inline-flex items-center gap-2 cursor-pointer",
+                        loanTab === "borrowed" && "bg-amber-600 hover:bg-amber-700 text-white"
+                      )}
+                      onClick={() => handleOpenCreateLoan(loanTab === "borrowed" ? "borrowed" : "lent")}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                      </svg>
+                      <span>{loanTab === "borrowed" ? " Record Borrowed Money" : " Lend Money to Someone"}</span>
+                    </button>
+                  </SurfaceCard>
+                ) : (
+                  <SurfaceCard className="p-8 text-center space-y-2">
+                    <p className="text-base font-semibold text-ink">No matching loans found</p>
+                    <p className="text-xs text-secondary">Try adjusting your search query or status filter.</p>
+                  </SurfaceCard>
+                )
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredStandaloneLoans.map((loan) => {
+                    const {
+                      principal,
+                      accruedInterest,
+                      totalDue,
+                      totalRepaid,
+                      remainingBalance,
+                      isFullyPaid,
+                      isOverpaid,
+                      overpaidAmount,
+                      progressPercent,
+                      isOverdue
+                    } = calculateLoanFinancials(loan);
+
+                    const bName = getLoanBorrowerName(loan);
+                    const bEmail = getLoanBorrowerEmail(loan);
+                    const isBorrowed = loan.loan_type === "borrowed";
+
+                    return (
+                      <article
+                        key={loan.id}
+                        className={cn(
+                          "rounded-[26px] border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
+                          isOverpaid
+                            ? "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
+                            : isFullyPaid
+                              ? "border-emerald-200/70 bg-emerald-50/25 dark:border-emerald-900/40 dark:bg-emerald-950/10"
+                              : isOverdue
+                                ? "border-red-200/80 bg-red-50/20 dark:border-red-900/40 dark:bg-red-950/10"
+                                : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/90"
+                        )}
+                      >
+                        <div className="space-y-4">
+                          {/* Card Header: Person info & status badge */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <img
+                                src={getMemberAvatarUrl(bName, bEmail)}
+                                alt={bName}
+                                className="h-11 w-11 shrink-0 rounded-2xl border border-[color:var(--border)] object-cover shadow-sm"
+                              />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <strong className="block truncate text-base font-bold text-ink">
+                                    {bName}
+                                  </strong>
+                                  <span className={cn(
+                                    "rounded-md px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider",
+                                    isBorrowed ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                  )}>
+                                    {isBorrowed ? "Lender" : "Borrower"}
+                                  </span>
+                                </div>
+                                {bEmail ? (
+                                  <p className="truncate text-xs text-secondary">
+                                    {bEmail}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-secondary">
+                                    {isBorrowed ? "Borrowed Record" : "Standalone Loan"}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div className="shrink-0">
+                              {isOverpaid ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold shadow-sm animate-pulse">
+                                  ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2))}
+                                </span>
+                              ) : isFullyPaid ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                                  {isBorrowed ? "✓ Settled" : "✓ Paid"}
+                                </span>
+                              ) : isOverdue ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-800 dark:bg-red-950/80 dark:text-red-300 animate-pulse">
+                                  Overdue
+                                </span>
+                              ) : (
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold",
+                                  isBorrowed
+                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
+                                    : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300"
+                                )}>
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Financials Overview */}
+                          <div className="rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40 p-3.5 space-y-2.5">
+                            <div className="flex items-baseline justify-between">
+                              <span className="text-xs text-secondary">{isBorrowed ? "Principal Borrowed:" : "Principal Lent:"}</span>
+                              <span className="text-base font-bold text-ink">
+                                {formatCurrency(principal.toFixed(2))}
+                              </span>
+                            </div>
+
+                            {Number(loan.interest_rate) > 0 && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-secondary">
+                                  {isBorrowed ? "Interest to Pay" : "Interest"} ({loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}):
+                                </span>
+                                <span className="font-semibold text-purple-600 dark:text-purple-400">
+                                  +{formatCurrency(accruedInterest.toFixed(2))}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="flex items-baseline justify-between border-t border-[color:var(--border)] pt-2">
+                              <span className="text-xs font-semibold text-secondary">Total Due:</span>
+                              <span className="text-base font-extrabold text-ink">
+                                {formatCurrency(totalDue.toFixed(2))}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Repayment Progress Bar */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-secondary">
+                                {isBorrowed ? "Paid Back:" : "Repaid:"} <strong className="text-ink">{formatCurrency(totalRepaid.toFixed(2))}</strong>
+                              </span>
+                              <span className={cn("font-semibold", isOverpaid ? "text-rose-600 font-bold" : isFullyPaid ? "text-emerald-600" : "text-ink")}>
+                                {progressPercent}%
+                              </span>
+                            </div>
+
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                              <div
+                                className={cn(
+                                  "h-full transition-all duration-300 rounded-full",
+                                  isOverpaid ? "bg-rose-500" : isFullyPaid ? "bg-emerald-500" : "bg-primary"
+                                )}
+                                style={{ width: `${progressPercent}%` }}
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 text-xs">
+                              <span className="text-secondary">
+                                {loan.due_date ? `Due: ${loan.due_date}` : `${isBorrowed ? "Borrowed" : "Lent"}: ${loan.lending_date}`}
+                              </span>
+                              {isOverpaid ? (
+                                <span className="font-bold text-rose-600 dark:text-rose-400">
+                                  Overpaid: +{formatCurrency(overpaidAmount.toFixed(2))}
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-ink">
+                                  {isBorrowed ? "Remaining to Pay:" : "Remaining:"} {formatCurrency(remainingBalance.toFixed(2))}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {isOverpaid && (
+                            <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:bg-rose-950/40 p-2.5 text-xs text-rose-800 dark:text-rose-300">
+                              <strong className="block font-bold mb-0.5">⚠️ Overpayment Alert</strong>
+                              Repayments exceed total due by <span className="font-extrabold text-rose-600 dark:text-rose-400">{formatCurrency(overpaidAmount.toFixed(2))}</span>.
+                              You can use <strong>Edit</strong> or adjust repayment in Timeline.
+                            </div>
+                          )}
+
+                          {loan.notes && (
+                            <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2.5 rounded-xl border border-[color:var(--border)]">
+                              "{loan.notes}"
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Actions Toolbar */}
+                        <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3.5">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              onClick={() => setSelectedLoanForDetails(loan)}
+                            >
+                              Timeline ({loan.repayments?.length || 0})
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                              onClick={() => {
+                                const bKey = loan.borrower_member_id
+                                  ? `member:${loan.borrower_member_id}`
+                                  : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
+                                handleOpenBorrowerStatement(bKey);
+                              }}
+                              title="View monthly statement"
+                            >
+                              <span>📄 Statement</span>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {!isFullyPaid && (
+                              <button
+                                type="button"
+                                className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                onClick={() => handleOpenRepaymentModal(loan)}
+                              >
+                                {isBorrowed ? "+ Pay Back" : "+ Record Repayment"}
+                              </button>
+                            )}
+
+                            {/* Edit Button is ALWAYS accessible even after fully paid / overpaid */}
+                            <button
+                              type="button"
+                              className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              onClick={() => handleOpenEditLoan(loan)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              disabled={deletingLoanIds.includes(loan.id)}
+                              onClick={() => void handleDeleteLoanClick(loan)}
+                            >
+                              {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            /* UNIFIED MINI-STATEMENT VIEW */
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {/* Net Financial Position Card */}
+                {(() => {
+                  const netBalance = lentLoansAggregate.totalRemaining - borrowedLoansAggregate.totalRemaining;
+                  const isNetReceivable = netBalance > 0;
+                  const isBalanced = netBalance === 0;
+                  return (
+                    <SurfaceCard className={cn(
+                      "relative overflow-hidden p-5 border",
+                      isNetReceivable
+                        ? "border-emerald-300/80 bg-emerald-50/40 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+                        : isBalanced
+                          ? "border-zinc-300/80 bg-zinc-50/40 dark:border-zinc-800/60 dark:bg-zinc-900/20"
+                          : "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                            Net Balance
+                          </p>
+                          <span className={cn(
+                            "rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                            isNetReceivable
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                              : isBalanced
+                                ? "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
+                                : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                          )}>
+                            {isNetReceivable ? "To Collect (+)" : isBalanced ? "Balanced" : "To Pay Back (-)"}
+                          </span>
+                        </div>
+                        <span className={cn(
+                          "flex h-8 w-8 items-center justify-center rounded-xl",
+                          isNetReceivable
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
+                            : isBalanced
+                              ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                              : "bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300"
+                        )}>
+                          {isNetReceivable ? "📈" : isBalanced ? "⚖️" : "📉"}
+                        </span>
+                      </div>
+                      <strong className={cn(
+                        "mt-3 block text-2xl font-extrabold tracking-tight",
+                        isNetReceivable
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : isBalanced
+                            ? "text-ink"
+                            : "text-rose-700 dark:text-rose-400"
+                      )}>
+                        {isNetReceivable
+                          ? `+${formatCurrency(netBalance.toFixed(2))}`
+                          : isBalanced
+                            ? formatCurrency((0).toFixed(2))
+                            : `-${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
+                      </strong>
+                      <div className="mt-1 flex flex-col gap-0.5 text-xs text-secondary">
+                        <span>
+                          {isNetReceivable
+                            ? `Surplus: you will receive ${formatCurrency(Math.abs(netBalance).toFixed(2))}`
+                            : isBalanced
+                              ? "All loans and debts are evenly matched"
+                              : `Deficit: you owe lenders ${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
+                        </span>
+                        <span className="text-[11px] opacity-80">
+                          {formatCurrency(lentLoansAggregate.totalRemaining.toFixed(2))} to collect · {formatCurrency(borrowedLoansAggregate.totalRemaining.toFixed(2))} to pay back
+                        </span>
+                      </div>
+                    </SurfaceCard>
+                  );
+                })()}
+
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      Total Money Lent
+                    </p>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                      💸
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
+                    {formatCurrency(lentLoansAggregate.totalLent.toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    {lentLoansAggregate.totalLoans} loan{lentLoansAggregate.totalLoans !== 1 ? "s" : ""} issued
+                  </span>
+                </SurfaceCard>
+
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      Total Money Borrowed
+                    </p>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
+                      📥
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
+                    {formatCurrency(borrowedLoansAggregate.totalBorrowed.toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    {borrowedLoansAggregate.totalLoans} loan{borrowedLoansAggregate.totalLoans !== 1 ? "s" : ""} taken
+                  </span>
+                </SurfaceCard>
+
+                <SurfaceCard className="relative overflow-hidden p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
+                      Total Settled
+                    </p>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
+                      💰
+                    </span>
+                  </div>
+                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
+                    {formatCurrency((lentLoansAggregate.totalRepaid + borrowedLoansAggregate.totalPaidBack).toFixed(2))}
+                  </strong>
+                  <span className="mt-1 block text-xs text-secondary">
+                    Across both lent &amp; borrowed
+                  </span>
+                </SurfaceCard>
+              </div>
+
+              {/* Statement Search and Type Filter */}
+              <SurfaceCard className="p-4 sm:p-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={statementSearch}
+                        onChange={(e) => setStatementSearch(e.target.value)}
+                        placeholder="Search statement by person, email, or notes..."
+                        className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
+                      />
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
+                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                      </svg>
+                      {statementSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setStatementSearch("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setStatementFilterType("all")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          statementFilterType === "all"
+                            ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        All ({unifiedStatementItems.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStatementFilterType("lent")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          statementFilterType === "lent"
+                            ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        Lent ({unifiedStatementItems.filter((i) => i.type === "loan_lent").length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStatementFilterType("borrowed")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          statementFilterType === "borrowed"
+                            ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        Borrowed ({unifiedStatementItems.filter((i) => i.type === "loan_borrowed").length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStatementFilterType("repayments")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                          statementFilterType === "repayments"
+                            ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-sm"
+                            : "text-secondary hover:text-ink"
+                        )}
+                      >
+                        Repayments ({unifiedStatementItems.filter((i) => i.type === "repayment_received" || i.type === "repayment_paid").length})
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </SurfaceCard>
+
+              {/* Statement Ledger List */}
+              {filteredStatementItems.length === 0 ? (
+                <SurfaceCard className="p-8 sm:p-12 text-center space-y-3">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-2xl">
+                    📑
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-ink">
+                    No transactions recorded in mini-statement
+                  </h3>
+                  <p className="text-sm text-secondary max-w-sm mx-auto">
+                    Transactions and repayments from both lent and borrowed loans will automatically appear here chronologically.
+                  </p>
+                </SurfaceCard>
+              ) : (
+                <SurfaceCard className="overflow-hidden p-0">
+                  <div className="border-b border-[color:var(--border)] px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-base text-ink">Unified Loans Statement</h3>
+                      <p className="text-xs text-secondary">Complete chronological record of money lent, borrowed, and repaid</p>
+                    </div>
+                    <span className="text-xs text-secondary font-medium">
+                      {filteredStatementItems.length} record{filteredStatementItems.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-[color:var(--border)]">
+                    {filteredStatementItems.map((entry) => {
+                      const isLent = entry.type === "loan_lent";
+                      const isBorrowed = entry.type === "loan_borrowed";
+                      const isRepReceived = entry.type === "repayment_received";
+                      const isRepPaid = entry.type === "repayment_paid";
+
+                      // Cash-flow standard (Owner's bank account / cashbook perspective):
+                      // Credited (+) = Cash IN (borrowed principal received into account, or loan repayment collected from borrower)
+                      // Debited (-) = Cash OUT (loan principal given out to borrower, or repayment sent to lender)
+                      const isCredit = isBorrowed || isRepReceived;
+
+                      return (
+                        <div
+                          key={entry.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:px-6 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors gap-3"
+                        >
+                          <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                            <span className={cn(
+                              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-base shadow-sm font-semibold",
+                              isCredit
+                                ? "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300"
+                                : "bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300"
+                            )}>
+                              {isCredit ? "↙" : "↗"}
+                            </span>
+
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <strong className="text-sm font-bold text-ink">
+                                  {entry.counterparty}
+                                </strong>
+                                <span className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                                  isLent && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300",
+                                  isBorrowed && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
+                                  isRepReceived && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
+                                  isRepPaid && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                                )}>
+                                  {isLent ? "Money Lent" : isBorrowed ? "Money Borrowed" : isRepReceived ? "Repayment Received" : "Payment to Lender"}
+                                </span>
+                              </div>
+
+                              <p className="text-xs text-secondary mt-0.5 truncate">
+                                {entry.notes || (isLent ? "Loan principal disbursed to borrower" : isBorrowed ? "Borrowed principal received from lender" : isRepReceived ? "Repayment collected from borrower" : "Payment sent to lender")}
+                                {entry.counterpartyEmail && ` • ${entry.counterpartyEmail}`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pl-13 sm:pl-0">
+                            <div className="text-left sm:text-right">
+                              <div className="flex items-center sm:justify-end gap-1.5">
+                                <p className={cn(
+                                  "text-base font-extrabold",
+                                  isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                                )}>
+                                  {isCredit ? "+" : "-"}{formatCurrency(entry.amount.toFixed(2))}
+                                </p>
+                                <span className={cn(
+                                  "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
+                                  isCredit
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                                )}>
+                                  {isCredit ? "Credited" : "Debited"}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-secondary">
+                                {entry.date}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              onClick={() => setSelectedLoanForDetails(entry.loan)}
+                            >
+                              Timeline
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </SurfaceCard>
+              )}
             </div>
           )}
         </section>
@@ -4667,24 +5368,66 @@ export function WalletsPage({
           className="max-w-[540px] overflow-y-auto p-5 sm:p-6"
         >
           <SectionHeader
-            eyebrow="Peer Lending"
-            title={editingLoan ? "Edit loan terms" : viewMode === "loans" || !selectedWallet ? "Lend money to someone" : "Lend money to member"}
-            description="Set the principal, custom interest schedule, start month, and optional due date."
+            eyebrow={loanType === "borrowed" ? "Money Borrowed" : "Peer Lending"}
+            title={
+              editingLoan
+                ? (loanType === "borrowed" ? "Edit borrowed loan terms" : "Edit lent loan terms")
+                : (loanType === "borrowed" ? "Record borrowed money" : (viewMode === "loans" || !selectedWallet ? "Lend money to someone" : "Lend money to member"))
+            }
+            description={
+              loanType === "borrowed"
+                ? "Record money you borrowed from someone, repayment terms, and interest schedule."
+                : "Set the principal, custom interest schedule, start month, and optional due date."
+            }
           />
           <form
             className="mt-5 grid gap-4"
             onSubmit={handleLoanFormSubmit}
             noValidate
           >
-            {/* Borrower */}
+            {/* Loan Type Switcher (Only when creating new loan) */}
+            {!editingLoan && (
+              <div className="grid grid-cols-2 gap-2 p-1.5 bg-zinc-100 dark:bg-zinc-800/80 rounded-2xl border border-[color:var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => setLoanType("lent")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    loanType === "lent"
+                      ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                      : "text-secondary hover:text-ink"
+                  )}
+                >
+                  <span className="flex items-center gap-1.5 font-bold">💸 Money Lent</span>
+                  <span className="text-[10px] font-normal opacity-80">You gave money (Receivable)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanType("borrowed")}
+                  className={cn(
+                    "flex flex-col items-center justify-center py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    loanType === "borrowed"
+                      ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                      : "text-secondary hover:text-ink"
+                  )}
+                >
+                  <span className="flex items-center gap-1.5 font-bold">📥 Money Borrowed</span>
+                  <span className="text-[10px] font-normal opacity-80">You took money (Payable)</span>
+                </button>
+              </div>
+            )}
+
+            {/* Borrower or Lender */}
             {viewMode === "loans" || !selectedWallet || (editingLoan && editingLoan.borrower_name) ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm font-medium text-secondary">
-                  <span className="required-mark">Borrower Full Name</span>
+                  <span className="required-mark">
+                    {loanType === "borrowed" ? "Lender / Creditor Full Name" : "Borrower Full Name"}
+                  </span>
                   <input
                     value={loanBorrowerName}
                     onChange={(e) => setLoanBorrowerName(e.target.value)}
-                    placeholder="e.g. Alex Johnson"
+                    placeholder={loanType === "borrowed" ? "e.g. Sarah Connor" : "e.g. Alex Johnson"}
                     disabled={Boolean(editingLoan)}
                     required
                   />
@@ -4695,19 +5438,21 @@ export function WalletsPage({
                   )}
                 </label>
                 <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Borrower Email (Optional)
+                  {loanType === "borrowed" ? "Lender Email (Optional)" : "Borrower Email (Optional)"}
                   <input
                     type="email"
                     value={loanBorrowerEmail}
                     onChange={(e) => setLoanBorrowerEmail(e.target.value)}
-                    placeholder="alex@example.com"
+                    placeholder="contact@example.com"
                     disabled={Boolean(editingLoan)}
                   />
                 </label>
               </div>
             ) : (
               <label className="grid gap-2 text-sm font-medium text-secondary">
-                <span className="required-mark">Borrower (Wallet Member)</span>
+                <span className="required-mark">
+                  {loanType === "borrowed" ? "Lender (Wallet Member)" : "Borrower (Wallet Member)"}
+                </span>
                 <select
                   value={loanBorrowerId}
                   onChange={(e) => setLoanBorrowerId(e.target.value)}
@@ -4731,7 +5476,7 @@ export function WalletsPage({
               </label>
             )}
 
-            {/* Amount & Lending Date */}
+            {/* Amount & Lending/Borrowing Date */}
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-medium text-secondary">
                 <span className="required-mark">Principal Amount</span>
@@ -4756,7 +5501,9 @@ export function WalletsPage({
               </label>
 
               <label className="grid gap-2 text-sm font-medium text-secondary">
-                <span className="required-mark">Lending Date</span>
+                <span className="required-mark">
+                  {loanType === "borrowed" ? "Borrowing Date" : "Lending Date"}
+                </span>
                 <input
                   type="date"
                   value={loanLendingDate}
@@ -4890,9 +5637,17 @@ export function WalletsPage({
           className="max-w-[480px] p-5 sm:p-6"
         >
           <SectionHeader
-            eyebrow="Record Payback"
-            title={`Repayment from ${activeLoanForRepayment.borrower_member_name}`}
-            description="Log an installment or full repayment against this loan."
+            eyebrow={activeLoanForRepayment.loan_type === "borrowed" ? "Pay Back Lender" : "Collect Repayment"}
+            title={
+              activeLoanForRepayment.loan_type === "borrowed"
+                ? `Payment to ${getLoanBorrowerName(activeLoanForRepayment)}`
+                : `Repayment from ${getLoanBorrowerName(activeLoanForRepayment)}`
+            }
+            description={
+              activeLoanForRepayment.loan_type === "borrowed"
+                ? "Log an installment or settlement paid back to this lender."
+                : "Log an installment or full repayment received from this borrower."
+            }
           />
           <form
             className="mt-5 grid gap-4"
@@ -4900,7 +5655,9 @@ export function WalletsPage({
             noValidate
           >
             <label className="grid gap-2 text-sm font-medium text-secondary">
-              <span className="required-mark">Repayment Amount</span>
+              <span className="required-mark">
+                {activeLoanForRepayment.loan_type === "borrowed" ? "Payment Amount" : "Repayment Amount"}
+              </span>
               <div className="relative">
                 <input
                   className="pl-8"
@@ -4919,6 +5676,24 @@ export function WalletsPage({
                 </span>
               )}
             </label>
+
+            {/* Overpayment Warning */}
+            {(() => {
+              const fin = calculateLoanFinancials(activeLoanForRepayment);
+              const entered = parseFloat(repaymentAmount.trim()) || 0;
+              if (entered > fin.remainingBalance && fin.remainingBalance > 0) {
+                const diff = entered - fin.remainingBalance;
+                return (
+                  <div className="rounded-xl border border-rose-300 bg-rose-50/95 p-3 text-xs text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/60 dark:text-rose-200">
+                    <strong className="block text-rose-700 dark:text-rose-400 font-bold mb-0.5">⚠️ Overpayment Notice</strong>
+                    This amount exceeds the remaining balance ({formatCurrency(fin.remainingBalance.toFixed(2))}) by{" "}
+                    <span className="font-extrabold text-rose-900 dark:text-rose-100">{formatCurrency(diff.toFixed(2))}</span>.
+                    If recorded, this loan will be marked as <strong className="text-rose-600 dark:text-rose-400">Overpaid</strong>.
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             <label className="grid gap-2 text-sm font-medium text-secondary">
               <span className="required-mark">Payment Date</span>
@@ -4960,7 +5735,11 @@ export function WalletsPage({
                 className="ui-button-primary"
                 disabled={isSubmitting}
               >
-                {submittingAction === "loan-repayment" ? "Recording..." : "Record payback"}
+                {submittingAction === "loan-repayment"
+                  ? "Recording..."
+                  : activeLoanForRepayment.loan_type === "borrowed"
+                    ? "Record Payment Made"
+                    : "Record Repayment Received"}
               </button>
             </div>
           </form>
@@ -4981,6 +5760,8 @@ export function WalletsPage({
           totalRepaid,
           remainingBalance,
           isFullyPaid,
+          isOverpaid,
+          overpaidAmount,
           isOverdue
         } = calculateLoanFinancials(liveLoan);
 
@@ -4992,21 +5773,44 @@ export function WalletsPage({
             <div className="border-b border-[color:var(--border)] px-6 py-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <span className="section-eyebrow">Loan Details & Timeline</span>
+                  <div className="flex items-center gap-2">
+                    <span className="section-eyebrow">
+                      {liveLoan.loan_type === "borrowed" ? "Borrowed Loan Timeline" : "Lent Loan Timeline"}
+                    </span>
+                    {isOverpaid && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-[10px] font-bold shadow-sm animate-pulse">
+                        ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2), loanCurrency)}
+                      </span>
+                    )}
+                  </div>
                   <h2 className="mt-1 font-display text-2xl font-bold text-ink">
-                    {borrowerName}'s Loan
+                    {liveLoan.loan_type === "borrowed" ? `Loan from ${borrowerName}` : `Loan to ${borrowerName}`}
                   </h2>
                   {borrowerEmail && (
                     <p className="text-xs text-secondary">{borrowerEmail}</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="ui-button-secondary !py-1 !px-3 text-xs"
-                  onClick={() => setSelectedLoanForDetails(null)}
-                >
-                  Close
-                </button>
+                <div className="flex items-center gap-2">
+                  {canManageLoan && (
+                    <button
+                      type="button"
+                      className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
+                      onClick={() => {
+                        setSelectedLoanForDetails(null);
+                        handleOpenEditLoan(liveLoan);
+                      }}
+                    >
+                      ✏️ Edit Terms
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="ui-button-secondary !py-1 !px-3 text-xs"
+                    onClick={() => setSelectedLoanForDetails(null)}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -5018,23 +5822,31 @@ export function WalletsPage({
                   <p className="text-base font-bold text-ink">{formatCurrency(principal.toFixed(2), loanCurrency)}</p>
                 </div>
                 <div className="rounded-[18px] bg-amber-50/50 p-3 dark:bg-amber-950/20">
-                  <span className="text-[11px] text-amber-700 dark:text-amber-300">Interest</span>
+                  <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                    {liveLoan.loan_type === "borrowed" ? "Interest to Pay" : "Interest"}
+                  </span>
                   <p className="text-base font-bold text-ink">{formatCurrency(accruedInterest.toFixed(2), loanCurrency)}</p>
                 </div>
                 <div className="rounded-[18px] bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
-                  <span className="text-[11px] text-emerald-700 dark:text-emerald-300">Repaid</span>
+                  <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    {liveLoan.loan_type === "borrowed" ? "Paid Back" : "Repaid"}
+                  </span>
                   <p className="text-base font-bold text-ink">{formatCurrency(totalRepaid.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className="rounded-[18px] bg-purple-50/50 p-3 dark:bg-purple-950/20">
-                  <span className="text-[11px] text-purple-700 dark:text-purple-300">Balance</span>
-                  <p className="text-base font-bold text-ink">{formatCurrency(remainingBalance.toFixed(2), loanCurrency)}</p>
+                <div className={cn("rounded-[18px] p-3", isOverpaid ? "bg-rose-50/80 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800" : "bg-purple-50/50 dark:bg-purple-950/20")}>
+                  <span className={cn("text-[11px]", isOverpaid ? "text-rose-700 dark:text-rose-300 font-bold" : "text-purple-700 dark:text-purple-300")}>
+                    {isOverpaid ? "Overpaid By" : liveLoan.loan_type === "borrowed" ? "Remaining Debt" : "Balance"}
+                  </span>
+                  <p className={cn("text-base font-bold", isOverpaid ? "text-rose-600 dark:text-rose-400 font-extrabold" : "text-ink")}>
+                    {isOverpaid ? `+${formatCurrency(overpaidAmount.toFixed(2), loanCurrency)}` : formatCurrency(remainingBalance.toFixed(2), loanCurrency)}
+                  </p>
                 </div>
               </div>
 
               {/* Terms Overview */}
               <div className="rounded-[20px] border border-[color:var(--border)] p-4 space-y-2 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-secondary">Lending Date:</span>
+                  <span className="text-secondary">{liveLoan.loan_type === "borrowed" ? "Borrowed Date:" : "Lending Date:"}</span>
                   <span className="font-semibold text-ink">{liveLoan.lending_date}</span>
                 </div>
                 <div className="flex justify-between">
@@ -5071,7 +5883,9 @@ export function WalletsPage({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="font-semibold text-sm text-ink">
-                    Repayment History ({liveLoan.repayments?.length || 0})
+                    {liveLoan.loan_type === "borrowed"
+                      ? `Payment History (${liveLoan.repayments?.length || 0})`
+                      : `Repayment History (${liveLoan.repayments?.length || 0})`}
                   </h4>
                   {canManageLoan && !isFullyPaid && (
                     <button
@@ -5081,14 +5895,16 @@ export function WalletsPage({
                         handleOpenRepaymentModal(liveLoan);
                       }}
                     >
-                      + Add Payment
+                      {liveLoan.loan_type === "borrowed" ? "+ Pay Lender" : "+ Add Payment"}
                     </button>
                   )}
                 </div>
 
                 {(!liveLoan.repayments || liveLoan.repayments.length === 0) ? (
                   <p className="text-xs text-secondary text-center py-4 bg-zinc-50 dark:bg-zinc-800/30 rounded-2xl">
-                    No repayments have been recorded for this loan yet.
+                    {liveLoan.loan_type === "borrowed"
+                      ? "No payments have been made to this lender yet."
+                      : "No repayments have been recorded for this loan yet."}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -5102,18 +5918,28 @@ export function WalletsPage({
                             {formatCurrency(repayment.amount, loanCurrency)}
                           </p>
                           <p className="text-[11px] text-secondary">
+                            {liveLoan.loan_type === "borrowed" ? "Paid on " : "Received on "}
                             {repayment.repayment_date} {repayment.notes && `• ${repayment.notes}`}
                           </p>
                         </div>
                         {canManageLoan && (
-                          <button
-                            type="button"
-                            className="ui-button-danger !py-1 !px-2 text-xs"
-                            disabled={deletingLoanRepaymentIds.includes(repayment.id)}
-                            onClick={() => void handleDeleteRepaymentClick(liveLoan, repayment.id)}
-                          >
-                            {deletingLoanRepaymentIds.includes(repayment.id) ? "..." : "Delete"}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              className="ui-button-secondary !py-1 !px-2 text-xs font-semibold"
+                              onClick={() => handleOpenEditRepayment(liveLoan, repayment)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger !py-1 !px-2 text-xs"
+                              disabled={deletingLoanRepaymentIds.includes(repayment.id)}
+                              onClick={() => void handleDeleteRepaymentClick(liveLoan, repayment.id)}
+                            >
+                              {deletingLoanRepaymentIds.includes(repayment.id) ? "..." : "Delete"}
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -5124,6 +5950,103 @@ export function WalletsPage({
           </ModalFrame>
         );
       })() : null}
+
+      {/* Edit Repayment Modal */}
+      {editingRepayment ? (
+        <ModalFrame
+          onClose={() => {
+            setEditingRepayment(null);
+            setShowEditRepaymentValidation(false);
+          }}
+          className="max-w-[480px] p-5 sm:p-6"
+        >
+          <SectionHeader
+            eyebrow={editingRepayment.loan.loan_type === "borrowed" ? "Edit Payment" : "Edit Repayment"}
+            title={editingRepayment.loan.loan_type === "borrowed" ? "Update Payment to Lender" : "Update Received Repayment"}
+            description={
+              editingRepayment.loan.loan_type === "borrowed"
+                ? "Adjust the payment amount paid to this lender, date, or notes."
+                : "Adjust the repayment amount collected from this borrower, date, or notes."
+            }
+          />
+          <form
+            className="mt-5 grid gap-4"
+            onSubmit={handleEditRepaymentSubmit}
+            noValidate
+          >
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">
+                {editingRepayment.loan.loan_type === "borrowed" ? "Payment Amount" : "Repayment Amount"}
+              </span>
+              <div className="relative">
+                <input
+                  className="pl-8"
+                  value={editRepaymentAmount}
+                  onChange={(e) => setEditRepaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 dark:text-zinc-100 z-10">
+                  {currencySymbol}
+                </span>
+              </div>
+              {showEditRepaymentValidation && (!editRepaymentAmount.trim() || isNaN(parseFloat(editRepaymentAmount)) || parseFloat(editRepaymentAmount) <= 0) && (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  Amount must be greater than 0.
+                </span>
+              )}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">Payment Date</span>
+              <input
+                type="date"
+                value={editRepaymentDate}
+                onChange={(e) => setEditRepaymentDate(e.target.value)}
+                required
+              />
+              {showEditRepaymentValidation && !editRepaymentDate.trim() && (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  Payment date is required.
+                </span>
+              )}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span>Payment Reference / Notes</span>
+              <input
+                value={editRepaymentNotes}
+                onChange={(e) => setEditRepaymentNotes(e.target.value)}
+                placeholder="e.g. UPI Ref #48291, Cash payment"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => {
+                  setEditingRepayment(null);
+                  setShowEditRepaymentValidation(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button-primary"
+                disabled={isSubmitting}
+              >
+                {submittingAction === "loan-repayment"
+                  ? "Updating..."
+                  : editingRepayment.loan.loan_type === "borrowed"
+                    ? "Update Payment"
+                    : "Update Repayment"}
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
 
       <BorrowerMiniStatementModal
         isOpen={isStatementModalOpen}
@@ -5137,6 +6060,7 @@ export function WalletsPage({
         currencySymbol={currencySymbol}
         walletMembers={selectedWallet?.members}
         onOpenRepayment={(loan) => handleOpenRepaymentModal(loan)}
+        onOpenEditLoan={(loan) => handleOpenEditLoan(loan)}
       />
     </>
   );

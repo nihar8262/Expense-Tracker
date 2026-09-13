@@ -13,6 +13,7 @@ import type {
   CreateWalletLoanInput,
   UpdateWalletLoanInput,
   CreateWalletLoanRepaymentInput,
+  UpdateWalletLoanRepaymentInput,
   ExpensesQueryInput
 } from "../lib/validation.js";
 import {
@@ -166,6 +167,7 @@ type StoredWalletLoan = {
   interestStartDate: string | null;
   notes: string | null;
   status: "active" | "settled" | "cancelled";
+  loanType: "lent" | "borrowed";
   createdAt: string;
 };
 
@@ -540,6 +542,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       interest_start_date: loan.interestStartDate,
       notes: loan.notes,
       status: loan.status,
+      loan_type: loan.loanType ?? "lent",
       created_at: loan.createdAt,
       repayments
     };
@@ -1452,16 +1455,22 @@ export function createMemoryExpenseStore(): ExpenseStore {
       const matchesMember = mem && (mem.userId === userId || (mem.email && mem.email.toLowerCase() === normalizedEmail));
 
       if (matchesEmail || matchesMember) {
+        const isBorrowed = loan.loanType === "borrowed";
         createNotificationIfMissing({
           userId,
           type: "loan-issued",
-          title: `Loan issued: ${formatMinorUnits(loan.amountMinor)}`,
-          message: `You have an active loan of ${formatMinorUnits(loan.amountMinor)} recorded.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+          title: isBorrowed
+            ? `Loan record from member: ${formatMinorUnits(loan.amountMinor)}`
+            : `Loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+          message: isBorrowed
+            ? `A member recorded a loan of ${formatMinorUnits(loan.amountMinor)} borrowed from you.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`
+            : `You have an active loan of ${formatMinorUnits(loan.amountMinor)} issued to you.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
           scheduledFor: null,
           metadata: {
             loanId: loan.id,
             amount: formatMinorUnits(loan.amountMinor),
-            dueDate: loan.dueDate || ""
+            dueDate: loan.dueDate || "",
+            loanType: loan.loanType || "lent"
           },
           dedupeKey: `loan-issued:${loan.id}`
         });
@@ -1772,6 +1781,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       interestStartDate: input.interestStartDate ?? null,
       notes: input.notes?.trim() || null,
       status: "active",
+      loanType: input.loanType ?? "lent",
       createdAt: new Date().toISOString()
     };
 
@@ -1789,19 +1799,25 @@ export function createMemoryExpenseStore(): ExpenseStore {
       }
     }
 
-    if (borrowerUserId) {
+    if (borrowerUserId && borrowerUserId !== wallet.ownerUserId) {
+      const isBorrowed = (loan.loanType || "lent") === "borrowed";
       createNotificationIfMissing({
         userId: borrowerUserId,
         type: "loan-issued",
-        title: `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
-        message: `${ownerMember.displayName} issued a loan of ${formatMinorUnits(loan.amountMinor)} to you in ${wallet.name}.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+        title: isBorrowed
+          ? `Loan record added: ${formatMinorUnits(loan.amountMinor)}`
+          : `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+        message: isBorrowed
+          ? `${ownerMember.displayName} recorded a loan of ${formatMinorUnits(loan.amountMinor)} borrowed from you in ${wallet.name}.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`
+          : `${ownerMember.displayName} issued a loan of ${formatMinorUnits(loan.amountMinor)} to you in ${wallet.name}.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
         scheduledFor: null,
         metadata: {
           loanId: loan.id,
           walletId,
           amount: formatMinorUnits(loan.amountMinor),
           dueDate: loan.dueDate || "",
-          lenderName: ownerMember.displayName
+          lenderName: ownerMember.displayName,
+          loanType: loan.loanType || "lent"
         },
         dedupeKey: `loan-issued:${loan.id}`
       });
@@ -1922,6 +1938,34 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return buildWalletDetail(walletId);
   }
 
+  async function updateWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletDetailRecord> {
+    const wallet = assertWalletAccess(userId, walletId);
+
+    if (wallet.ownerUserId !== userId) {
+      throw new WalletValidationError("Only the wallet owner can update loan repayments.");
+    }
+
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.walletId !== walletId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const existingRepayment = walletLoanRepayments.get(repaymentId);
+    if (!existingRepayment || existingRepayment.loanId !== loanId) {
+      throw new WalletLoanNotFoundError("Repayment not found.");
+    }
+
+    const updated: StoredWalletLoanRepayment = {
+      ...existingRepayment,
+      amountMinor: input.amount !== undefined ? input.amount : existingRepayment.amountMinor,
+      repaymentDate: input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate,
+      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes
+    };
+
+    walletLoanRepayments.set(repaymentId, updated);
+    return buildWalletDetail(walletId);
+  }
+
   async function listLoans(userId: string): Promise<WalletLoanRecord[]> {
     return [...walletLoans.values()]
       .filter((loan) => loan.ownerUserId === userId)
@@ -1947,6 +1991,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
       interestStartDate: input.interestStartDate ?? null,
       notes: input.notes?.trim() || null,
       status: "active",
+      loanType: input.loanType ?? "lent",
       createdAt: new Date().toISOString()
     };
 
@@ -1962,17 +2007,23 @@ export function createMemoryExpenseStore(): ExpenseStore {
           break;
         }
       }
-      if (borrowerUserId) {
+      if (borrowerUserId && borrowerUserId !== userId) {
+        const isBorrowed = (loan.loanType || "lent") === "borrowed";
         createNotificationIfMissing({
           userId: borrowerUserId,
           type: "loan-issued",
-          title: `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
-          message: `A loan of ${formatMinorUnits(loan.amountMinor)} has been recorded for you.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
+          title: isBorrowed
+            ? `Loan record added: ${formatMinorUnits(loan.amountMinor)}`
+            : `New loan issued: ${formatMinorUnits(loan.amountMinor)}`,
+          message: isBorrowed
+            ? `A loan record of ${formatMinorUnits(loan.amountMinor)} borrowed from you was recorded.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`
+            : `A loan of ${formatMinorUnits(loan.amountMinor)} has been recorded for you.${loan.dueDate ? ` Due date: ${loan.dueDate}.` : ""}`,
           scheduledFor: null,
           metadata: {
             loanId: loan.id,
             amount: formatMinorUnits(loan.amountMinor),
-            dueDate: loan.dueDate || ""
+            dueDate: loan.dueDate || "",
+            loanType: loan.loanType || "lent"
           },
           dedupeKey: `loan-issued:${loan.id}`
         });
@@ -2001,7 +2052,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
       dueDate: input.dueDate !== undefined ? input.dueDate : existingLoan.dueDate,
       interestStartDate: input.interestStartDate !== undefined ? input.interestStartDate : existingLoan.interestStartDate,
       notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingLoan.notes,
-      status: input.status ?? existingLoan.status
+      status: input.status ?? existingLoan.status,
+      loanType: input.loanType ?? existingLoan.loanType ?? "lent"
     };
 
     walletLoans.set(loanId, updated);
@@ -2053,6 +2105,28 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
 
     walletLoanRepayments.delete(repaymentId);
+    return mapLoanRecord(existingLoan);
+  }
+
+  async function updateStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletLoanRecord> {
+    const existingLoan = walletLoans.get(loanId);
+    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const existingRepayment = walletLoanRepayments.get(repaymentId);
+    if (!existingRepayment || existingRepayment.loanId !== loanId) {
+      throw new WalletLoanNotFoundError("Repayment not found.");
+    }
+
+    const updated: StoredWalletLoanRepayment = {
+      ...existingRepayment,
+      amountMinor: input.amount !== undefined ? input.amount : existingRepayment.amountMinor,
+      repaymentDate: input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate,
+      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes
+    };
+
+    walletLoanRepayments.set(repaymentId, updated);
     return mapLoanRecord(existingLoan);
   }
 
@@ -2663,12 +2737,14 @@ export function createMemoryExpenseStore(): ExpenseStore {
     updateWalletLoan,
     deleteWalletLoan,
     createWalletLoanRepayment,
+    updateWalletLoanRepayment,
     deleteWalletLoanRepayment,
     listLoans,
     createStandaloneLoan,
     updateStandaloneLoan,
     deleteStandaloneLoan,
     createStandaloneLoanRepayment,
+    updateStandaloneLoanRepayment,
     deleteStandaloneLoanRepayment,
     listBillReminders,
     createBillReminder,

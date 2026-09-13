@@ -13,12 +13,14 @@ import {
   handleUpdateWalletLoan,
   handleDeleteWalletLoan,
   handleCreateWalletLoanRepayment,
+  handleUpdateWalletLoanRepayment,
   handleDeleteWalletLoanRepayment,
   handleListLoans,
   handleCreateStandaloneLoan,
   handleUpdateStandaloneLoan,
   handleDeleteStandaloneLoan,
   handleCreateStandaloneLoanRepayment,
+  handleUpdateStandaloneLoanRepayment,
   handleDeleteStandaloneLoanRepayment,
   handleDeleteAccount,
   handleDeleteBillReminder,
@@ -489,6 +491,18 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
     );
   });
 
+  app.put("/api/wallets/:walletId/loans/:loanId/repayments/:repaymentId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateWalletLoanRepayment(request.body, request.params.walletId, request.params.loanId, request.params.repaymentId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update loan repayment."
+    );
+  });
+
   app.delete("/api/wallets/:walletId/loans/:loanId/repayments/:repaymentId", async (request, response) => {
     return withAuthenticatedUser(
       request,
@@ -558,6 +572,18 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to record loan repayment."
+    );
+  });
+
+  app.put("/api/loans/:loanId/repayments/:repaymentId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateStandaloneLoanRepayment(request.body, request.params.loanId, request.params.repaymentId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update loan repayment."
     );
   });
 
