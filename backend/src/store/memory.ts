@@ -169,9 +169,11 @@ type StoredWalletLoan = {
   status: "active" | "settled" | "cancelled";
   loanType: "lent" | "borrowed";
   createdAt: string;
+  creatorName?: string | null;
+  creatorEmail?: string | null;
 };
 
-type StoredNotification = {
+export type StoredNotification = {
   id: string;
   userId: string;
   type: NotificationType;
@@ -179,6 +181,7 @@ type StoredNotification = {
   message: string;
   status: "unread" | "read";
   createdAt: string;
+  readAt?: string | null;
   scheduledFor: string | null;
   metadata: Record<string, string> | null;
   dedupeKey: string;
@@ -305,6 +308,7 @@ function mapNotification(notification: StoredNotification): NotificationRecord {
     message: notification.message,
     status: notification.status,
     created_at: notification.createdAt,
+    read_at: notification.readAt ?? null,
     scheduled_for: notification.scheduledFor,
     metadata: notification.metadata
   };
@@ -470,7 +474,12 @@ function buildPercentageSplits(totalAmount: number, splits: CreateWalletExpenseI
   }));
 }
 
-export function createMemoryExpenseStore(): ExpenseStore {
+export type MemoryExpenseStore = ExpenseStore & {
+  getNotificationsMap: () => Map<string, StoredNotification>;
+  pruneExpiredBudgetNotifications: (now?: Date, userId?: string) => void;
+};
+
+export function createMemoryExpenseStore(): MemoryExpenseStore {
   const expenses = new Map<string, StoredExpense>();
   const budgets = new Map<string, StoredBudget>();
   const idempotencyRequests = new Map<string, StoredIdempotency>();
@@ -514,8 +523,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
     const displayLoanType = isOwner ? originalLoanType : (originalLoanType === "lent" ? "borrowed" : "lent");
 
     // Look up creator's display name and email if available
-    let creatorName = loan.ownerUserId || "Creator";
-    let creatorEmail: string | null = null;
+    let creatorName = loan.creatorName || "Loan Owner";
+    let creatorEmail: string | null = loan.creatorEmail || null;
     const prefs = reminderPreferences.get(loan.ownerUserId);
     if (prefs?.displayName) {
       creatorName = prefs.displayName;
@@ -523,9 +532,17 @@ export function createMemoryExpenseStore(): ExpenseStore {
     for (const m of walletMembers.values()) {
       if (m.userId === loan.ownerUserId) {
         if (m.displayName) creatorName = m.displayName;
-        if (m.email) creatorEmail = m.email;
+        if (!creatorEmail && m.email) creatorEmail = m.email;
         break;
       }
+    }
+    if (
+      creatorName === loan.ownerUserId ||
+      /^[0-9a-f-]{20,}$/i.test(creatorName) ||
+      creatorName.startsWith("auth0|") ||
+      creatorName.startsWith("firebase:")
+    ) {
+      creatorName = creatorEmail ? creatorEmail.split("@")[0] : "Loan Owner";
     }
 
     const lender = loan.lenderMemberId ? walletMembers.get(loan.lenderMemberId) : null;
@@ -761,7 +778,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     const loanRecords: WalletLoanRecord[] = [...walletLoans.values()]
       .filter((loan) => loan.walletId === walletId)
       .sort((a, b) => b.lendingDate.localeCompare(a.lendingDate) || b.createdAt.localeCompare(a.createdAt))
-      .map(mapLoanRecord);
+      .map((loan) => mapLoanRecord(loan));
 
     return {
       wallet: mapWallet(wallet),
@@ -865,24 +882,34 @@ export function createMemoryExpenseStore(): ExpenseStore {
   }
 
   function pruneExpiredBudgetNotifications(now = new Date(), userId?: string) {
-    const cutoff = now.getTime() - 24 * 60 * 60 * 1000;
+    const cutoff24h = now.getTime() - 24 * 60 * 60 * 1000;
+    const cutoff7d = now.getTime() - 7 * 24 * 60 * 60 * 1000;
 
     for (const [notificationId, notification] of notifications.entries()) {
       if (userId && notification.userId !== userId) {
         continue;
       }
 
-      if (notification.type !== "budget-threshold" && notification.type !== "budget-overspent") {
-        continue;
-      }
-
       const createdAt = Date.parse(notification.createdAt);
+      const readAt = notification.readAt ? Date.parse(notification.readAt) : null;
 
-      if (Number.isNaN(createdAt) || createdAt >= cutoff) {
+      if ((notification.type === "budget-threshold" || notification.type === "budget-overspent") && !Number.isNaN(createdAt) && createdAt < cutoff24h) {
+        notifications.delete(notificationId);
         continue;
       }
 
-      notifications.delete(notificationId);
+      if (notification.status === "read") {
+        const checkTime = readAt && !Number.isNaN(readAt) ? readAt : createdAt;
+        if (!Number.isNaN(checkTime) && checkTime < cutoff24h) {
+          notifications.delete(notificationId);
+          continue;
+        }
+      }
+
+      if (notification.status === "unread" && !Number.isNaN(createdAt) && createdAt < cutoff7d) {
+        notifications.delete(notificationId);
+        continue;
+      }
     }
   }
 
@@ -2022,6 +2049,25 @@ export function createMemoryExpenseStore(): ExpenseStore {
   }
 
   async function createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord> {
+    let resolvedCreatorName = input.creatorName?.trim() || null;
+    let resolvedCreatorEmail = input.creatorEmail?.trim() || null;
+    if (!resolvedCreatorName) {
+      const prefs = reminderPreferences.get(userId);
+      if (prefs?.displayName) resolvedCreatorName = prefs.displayName;
+      for (const m of walletMembers.values()) {
+        if (m.userId === userId) {
+          if (!resolvedCreatorName && m.displayName) resolvedCreatorName = m.displayName;
+          if (!resolvedCreatorEmail && m.email) resolvedCreatorEmail = m.email;
+        }
+      }
+    }
+    if (!resolvedCreatorName && resolvedCreatorEmail) {
+      resolvedCreatorName = resolvedCreatorEmail.split("@")[0];
+    }
+    if (!resolvedCreatorName) {
+      resolvedCreatorName = "Loan Owner";
+    }
+
     const loan: StoredWalletLoan = {
       id: randomUUID(),
       ownerUserId: userId,
@@ -2040,7 +2086,9 @@ export function createMemoryExpenseStore(): ExpenseStore {
       notes: input.notes?.trim() || null,
       status: "active",
       loanType: input.loanType ?? "lent",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      creatorName: resolvedCreatorName,
+      creatorEmail: resolvedCreatorEmail
     };
 
     walletLoans.set(loan.id, loan);
@@ -2149,6 +2197,34 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
 
     walletLoanRepayments.set(repayment.id, repayment);
+
+    if (existingLoan.ownerUserId && existingLoan.ownerUserId !== userId) {
+      let payerName = userEmail?.split("@")[0] || "A member";
+      const payerPrefs = reminderPreferences.get(userId);
+      if (payerPrefs?.displayName) payerName = payerPrefs.displayName;
+      for (const m of walletMembers.values()) {
+        if (m.userId === userId && m.displayName) {
+          payerName = m.displayName;
+          break;
+        }
+      }
+
+      createNotificationIfMissing({
+        userId: existingLoan.ownerUserId,
+        type: "loan-repayment",
+        title: `Repayment received: ${formatMinorUnits(input.amount)}`,
+        message: `${payerName} recorded a repayment of ${formatMinorUnits(input.amount)} towards the loan.${input.notes?.trim() ? ` Note: ${input.notes.trim()}.` : ""}`,
+        scheduledFor: null,
+        metadata: {
+          loanId,
+          repaymentId: repayment.id,
+          amount: formatMinorUnits(input.amount),
+          payerUserId: userId
+        },
+        dedupeKey: `loan-repayment:${loanId}:${repayment.id}`
+      });
+    }
+
     return mapLoanRecord(existingLoan, userId);
   }
 
@@ -2263,14 +2339,17 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
 
     notification.status = "read";
+    notification.readAt = notification.readAt || new Date().toISOString();
     notifications.set(notificationId, notification);
     return mapNotification(notification);
   }
 
   async function markAllNotificationsRead(userId: string): Promise<void> {
+    const nowIso = new Date().toISOString();
     for (const notification of notifications.values()) {
       if (notification.userId === userId) {
         notification.status = "read";
+        notification.readAt = notification.readAt || nowIso;
       }
     }
   }
@@ -2819,6 +2898,8 @@ export function createMemoryExpenseStore(): ExpenseStore {
     upsertWalletReminderPreferences,
     runNotificationChecks,
     deleteUserData,
-    searchExpensesSemantic
+    searchExpensesSemantic,
+    getNotificationsMap: () => notifications,
+    pruneExpiredBudgetNotifications
   };
 }

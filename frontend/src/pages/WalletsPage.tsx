@@ -438,8 +438,6 @@ export function WalletsPage({
   const [isRepaymentModalOpen, setIsRepaymentModalOpen] = useState(false);
   const [activeLoanForRepayment, setActiveLoanForRepayment] = useState<WalletLoan | null>(null);
   const [selectedLoanForDetails, setSelectedLoanForDetails] = useState<WalletLoan | null>(null);
-  const [loanFilterBorrower, setLoanFilterBorrower] = useState("all");
-  const [loanFilterStatus, setLoanFilterStatus] = useState("all");
   const [standaloneSearch, setStandaloneSearch] = useState("");
   const [standaloneFilterStatus, setStandaloneFilterStatus] = useState("all");
   const [deletingLoanIds, setDeletingLoanIds] = useState<string[]>([]);
@@ -642,16 +640,33 @@ export function WalletsPage({
     });
   }, [loans, selectedWallet, currentUserId, currentUserEmail]);
 
+  function isRawUserId(val?: string | null): boolean {
+    if (!val || typeof val !== "string") return false;
+    const trimmed = val.trim();
+    return /^[0-9a-fA-F-]{20,}$/.test(trimmed) || trimmed.startsWith("auth0|") || trimmed.startsWith("user_");
+  }
+
   function getLoanBorrowerName(loan: WalletLoan): string {
-    if (loan.borrower_name) return loan.borrower_name;
+    if (loan.is_owner === false) {
+      if (loan.creator_name && !isRawUserId(loan.creator_name)) return loan.creator_name;
+      if (loan.creator_email) return loan.creator_email.split("@")[0];
+      return "Loan Owner";
+    }
+
+    if (loan.borrower_name && !isRawUserId(loan.borrower_name)) return loan.borrower_name;
+    if (loan.borrower_member_name && !isRawUserId(loan.borrower_member_name)) return loan.borrower_member_name;
     if (loan.borrower_member_id && selectedWallet?.members) {
       const m = selectedWallet.members.find((member) => member.id === loan.borrower_member_id);
-      if (m) return m.display_name;
+      if (m?.display_name && !isRawUserId(m.display_name)) return m.display_name;
     }
+    if (loan.borrower_email) return loan.borrower_email.split("@")[0];
     return "Borrower";
   }
 
   function getLoanBorrowerEmail(loan: WalletLoan): string | null {
+    if (loan.is_owner === false) {
+      return loan.creator_email || null;
+    }
     if (loan.borrower_email) return loan.borrower_email;
     if (loan.borrower_member_id && selectedWallet?.members) {
       const m = selectedWallet.members.find((member) => member.id === loan.borrower_member_id);
@@ -824,51 +839,7 @@ export function WalletsPage({
     });
   }, [unifiedStatementItems, statementSearch, statementFilterType]);
 
-  const walletLoans = useMemo(() => selectedWallet?.loans || [], [selectedWallet?.loans]);
 
-  const walletLoansAggregate = useMemo(() => {
-    let totalLent = 0;
-    let totalInterest = 0;
-    let totalRepaid = 0;
-    let totalRemaining = 0;
-    let activeCount = 0;
-
-    for (const loan of walletLoans) {
-      const { principal, accruedInterest, totalRepaid: repaid, remainingBalance, isFullyPaid } = calculateLoanFinancials(loan);
-      totalLent += principal;
-      totalInterest += accruedInterest;
-      totalRepaid += repaid;
-      totalRemaining += remainingBalance;
-      if (!isFullyPaid) {
-        activeCount++;
-      }
-    }
-
-    return {
-      totalLent,
-      totalInterest,
-      totalRepaid,
-      totalRemaining,
-      activeCount,
-      totalLoans: walletLoans.length
-    };
-  }, [walletLoans]);
-
-  const filteredWalletLoans = useMemo(() => {
-    return walletLoans.filter((loan) => {
-      if (loanFilterBorrower !== "all" && loan.borrower_member_id !== loanFilterBorrower) {
-        return false;
-      }
-      const { isFullyPaid } = calculateLoanFinancials(loan);
-      if (loanFilterStatus === "active" && isFullyPaid) {
-        return false;
-      }
-      if (loanFilterStatus === "repaid" && !isFullyPaid) {
-        return false;
-      }
-      return true;
-    });
-  }, [walletLoans, loanFilterBorrower, loanFilterStatus]);
 
   const loanErrors = useMemo(() => {
     const errors = {
@@ -2968,365 +2939,6 @@ export function WalletsPage({
                 </div>
               </SurfaceCard>
 
-              {/* Peer Loans & Interest Hub Section */}
-              <SurfaceCard className="space-y-6 p-5 sm:p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <SectionHeader
-                    eyebrow="Lending & Credit"
-                    title="Peer Loans & Interest Hub"
-                    description="Owner-managed personal loans with custom interest schedules, starting months, and repayment tracking."
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    {isWalletOwner ? (
-                      <button
-                        type="button"
-                        className="ui-button-primary flex items-center gap-2"
-                        onClick={handleOpenCreateLoan}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                          <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                        </svg>
-                        Lend money
-                      </button>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 text-zinc-500">
-                          <path fillRule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clipRule="evenodd" />
-                        </svg>
-                        Managed by Wallet Owner
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Metrics Banner */}
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-[20px] border border-blue-500/15 bg-blue-50/50 p-4 dark:border-blue-500/20 dark:bg-blue-950/20">
-                    <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Total Principal Lent</p>
-                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
-                      {formatCurrency(walletLoansAggregate.totalLent.toFixed(2), selectedWallet.wallet.currency)}
-                    </p>
-                    <span className="text-[11px] text-secondary">{walletLoansAggregate.totalLoans} loan{walletLoansAggregate.totalLoans === 1 ? "" : "s"} total</span>
-                  </div>
-
-                  <div className="rounded-[20px] border border-amber-500/15 bg-amber-50/50 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
-                    <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Accrued Interest</p>
-                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
-                      {formatCurrency(walletLoansAggregate.totalInterest.toFixed(2), selectedWallet.wallet.currency)}
-                    </p>
-                    <span className="text-[11px] text-secondary">Earned across active loans</span>
-                  </div>
-
-                  <div className="rounded-[20px] border border-emerald-500/15 bg-emerald-50/50 p-4 dark:border-emerald-500/20 dark:bg-emerald-950/20">
-                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Total Repaid</p>
-                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
-                      {formatCurrency(walletLoansAggregate.totalRepaid.toFixed(2), selectedWallet.wallet.currency)}
-                    </p>
-                    <span className="text-[11px] text-secondary">Recovered installments</span>
-                  </div>
-
-                  <div className="rounded-[20px] border border-purple-500/15 bg-purple-50/50 p-4 dark:border-purple-500/20 dark:bg-purple-950/20">
-                    <p className="text-xs font-medium text-purple-700 dark:text-purple-300">Outstanding Balance</p>
-                    <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
-                      {formatCurrency(walletLoansAggregate.totalRemaining.toFixed(2), selectedWallet.wallet.currency)}
-                    </p>
-                    <span className="text-[11px] text-secondary">{walletLoansAggregate.activeCount} active loan{walletLoansAggregate.activeCount === 1 ? "" : "s"}</span>
-                  </div>
-                </div>
-
-                {/* Filters */}
-                {walletLoans.length > 0 && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border)] pb-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        value={loanFilterBorrower}
-                        onChange={(e) => setLoanFilterBorrower(e.target.value)}
-                        className="text-xs py-1.5 px-3 rounded-xl"
-                      >
-                        <option value="all">All Borrowers</option>
-                        {selectedWallet.members.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.display_name}
-                          </option>
-                        ))}
-                      </select>
-
-                      <select
-                        value={loanFilterStatus}
-                        onChange={(e) => setLoanFilterStatus(e.target.value)}
-                        className="text-xs py-1.5 px-3 rounded-xl"
-                      >
-                        <option value="all">All Statuses</option>
-                        <option value="active">Active Only</option>
-                        <option value="repaid">Fully Repaid</option>
-                      </select>
-
-                      <button
-                        type="button"
-                        className="ui-button-secondary !py-1.5 !px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                        onClick={() => {
-                          const initialKey = loanFilterBorrower !== "all" ? `member:${loanFilterBorrower}` : null;
-                          handleOpenBorrowerStatement(initialKey);
-                        }}
-                        title="View monthly mini statement for members"
-                      >
-                        <span>📄 Mini Statement</span>
-                      </button>
-                    </div>
-
-                    <span className="text-xs text-secondary font-medium">
-                      Showing {filteredWalletLoans.length} of {walletLoans.length} loans
-                    </span>
-                  </div>
-                )}
-
-                {/* Loans List */}
-                {walletLoans.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-10">
-                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                      </svg>
-                    </div>
-                    <h3 className="mt-3 text-base font-semibold text-ink">No loans recorded yet</h3>
-                    <p className="mt-1 max-w-sm text-sm text-secondary">
-                      {isWalletOwner
-                        ? "Lend funds to members of this wallet, configure interest rate schedules, and record repayments seamlessly."
-                        : "No peer loans have been issued by the wallet owner yet."}
-                    </p>
-                    {isWalletOwner && (
-                      <button
-                        type="button"
-                        className="ui-button-primary mt-4 flex items-center gap-2"
-                        onClick={handleOpenCreateLoan}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                          <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                        </svg>
-                        Lend money
-                      </button>
-                    )}
-                  </div>
-                ) : filteredWalletLoans.length === 0 ? (
-                  <EmptyState
-                    title="No loans match the filter"
-                    description="Change your borrower or status filter to view other loans."
-                  />
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {filteredWalletLoans.map((loan) => {
-                      const {
-                        totalDue,
-                        totalRepaid,
-                        remainingBalance,
-                        isFullyPaid,
-                        isOverpaid,
-                        overpaidAmount,
-                        progressPercent,
-                        isOverdue
-                      } = calculateLoanFinancials(loan);
-
-                      const borrower = selectedWallet.members.find(
-                        (m) => m.id === loan.borrower_member_id
-                      );
-
-                      return (
-                        <article
-                          key={loan.id}
-                          className={cn(
-                            "group relative flex flex-col justify-between rounded-[24px] border p-5 shadow-sm transition-all duration-200",
-                            isOverpaid
-                              ? "border-rose-500/40 bg-rose-50/40 dark:bg-rose-950/20"
-                              : isFullyPaid
-                                ? "border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/10"
-                                : isOverdue
-                                  ? "border-rose-500/25 bg-rose-50/30 dark:bg-rose-950/10"
-                                  : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/60"
-                          )}
-                        >
-                          <div className="space-y-4">
-                            {/* Header: Borrower info + Status */}
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <img
-                                  src={getMemberAvatarUrl(
-                                    loan.borrower_member_name || borrower?.display_name || "Borrower",
-                                    borrower?.email
-                                  )}
-                                  alt={loan.borrower_member_name || "Borrower"}
-                                  className="h-10 w-10 shrink-0 rounded-full border border-[color:var(--border)] object-cover"
-                                />
-                                <div className="min-w-0">
-                                  <strong className="block text-base font-semibold text-ink truncate">
-                                    {loan.borrower_member_name || borrower?.display_name || "Unknown Member"}
-                                  </strong>
-                                  <p className="text-xs text-secondary">
-                                    Lent on {loan.lending_date}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div>
-                                {isOverpaid ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold shadow-sm animate-pulse">
-                                    ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}
-                                  </span>
-                                ) : isFullyPaid ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                                    ✓ Fully Repaid
-                                  </span>
-                                ) : isOverdue ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
-                                    ⚠️ Overdue
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-                                    Active Loan
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Loan Amount & Terms */}
-                            <div className="grid grid-cols-2 gap-3 rounded-[18px] bg-zinc-50/80 p-3.5 dark:bg-zinc-800/40">
-                              <div>
-                                <span className="text-[11px] font-medium text-secondary">Principal Lent</span>
-                                <p className="text-lg font-bold text-ink">
-                                  {formatCurrency(loan.amount, selectedWallet.wallet.currency)}
-                                </p>
-                              </div>
-
-                              <div>
-                                <span className="text-[11px] font-medium text-secondary">Interest Schedule</span>
-                                <p className="text-sm font-semibold text-ink truncate">
-                                  {loan.interest_rate > 0
-                                    ? loan.interest_type === "percentage"
-                                      ? `${loan.interest_rate}% / ${loan.interest_rate_period}`
-                                      : `${formatCurrency(String(loan.interest_rate), selectedWallet.wallet.currency)} fixed`
-                                    : "Zero Interest"}
-                                </p>
-                                {loan.interest_start_date && (
-                                  <p className="text-[11px] text-secondary truncate">
-                                    Starts {loan.interest_start_date}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Progress & Remaining */}
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between text-xs font-medium">
-                                <span className="text-secondary">
-                                  Repaid {formatCurrency(totalRepaid.toFixed(2), selectedWallet.wallet.currency)} of {formatCurrency(totalDue.toFixed(2), selectedWallet.wallet.currency)}
-                                </span>
-                                <span className={cn("font-semibold", isOverpaid ? "text-rose-600 font-bold" : isFullyPaid ? "text-emerald-600" : "text-ink")}>
-                                  {progressPercent}%
-                                </span>
-                              </div>
-
-                              <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
-                                <div
-                                  className={cn(
-                                    "h-full transition-all duration-300 rounded-full",
-                                    isOverpaid ? "bg-rose-500" : isFullyPaid ? "bg-emerald-500" : "bg-primary"
-                                  )}
-                                  style={{ width: `${progressPercent}%` }}
-                                />
-                              </div>
-
-                              <div className="flex items-center justify-between pt-1 text-xs">
-                                <span className="text-secondary">
-                                  {loan.due_date ? `Due ${loan.due_date}` : "No due date"}
-                                </span>
-                                {isOverpaid ? (
-                                  <span className="font-bold text-rose-600 dark:text-rose-400">
-                                    Overpaid: +{formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}
-                                  </span>
-                                ) : (
-                                  <span className="font-semibold text-ink">
-                                    Remaining: {formatCurrency(remainingBalance.toFixed(2), selectedWallet.wallet.currency)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {isOverpaid && (
-                              <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:bg-rose-950/40 p-2 text-xs text-rose-800 dark:text-rose-300">
-                                <span className="font-bold">⚠️ Overpayment Alert:</span> Repayments exceed total due by{" "}
-                                <strong className="text-rose-600 dark:text-rose-400 font-extrabold">{formatCurrency(overpaidAmount.toFixed(2), selectedWallet.wallet.currency)}</strong>. Use Edit to update terms or adjust repayment in Timeline.
-                              </div>
-                            )}
-
-                            {loan.notes && (
-                              <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2 rounded-xl">
-                                "{loan.notes}"
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Actions */}
-                          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                                onClick={() => setSelectedLoanForDetails(loan)}
-                              >
-                                Timeline ({loan.repayments?.length || 0})
-                              </button>
-                              <button
-                                type="button"
-                                className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                                onClick={() => {
-                                  const bKey = loan.borrower_member_id
-                                    ? `member:${loan.borrower_member_id}`
-                                    : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
-                                  handleOpenBorrowerStatement(bKey);
-                                }}
-                                title="View member monthly mini statement"
-                              >
-                                <span>📄 Statement</span>
-                              </button>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              {isWalletOwner && !isFullyPaid && (
-                                <button
-                                  type="button"
-                                  className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold"
-                                  onClick={() => handleOpenRepaymentModal(loan)}
-                                >
-                                  + Repay
-                                </button>
-                              )}
-
-                              {isWalletOwner && (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
-                                    onClick={() => handleOpenEditLoan(loan)}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
-                                    disabled={deletingLoanIds.includes(loan.id)}
-                                    onClick={() => void handleDeleteLoanClick(loan)}
-                                  >
-                                    {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-              </SurfaceCard>
 
               <BudgetTrackerSection
                 sectionTitle="Group budget tracking"
@@ -4625,31 +4237,31 @@ export function WalletsPage({
                                 className="h-11 w-11 shrink-0 rounded-2xl border border-[color:var(--border)] object-cover shadow-sm"
                               />
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <strong className="block truncate text-base font-bold text-ink">
+                                <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                                  <strong className="block truncate text-base font-bold text-ink max-w-[130px] sm:max-w-[180px]">
                                     {bName}
                                   </strong>
                                   <span className={cn(
-                                    "rounded-md px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider",
+                                    "rounded-md px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider shrink-0",
                                     isBorrowed ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
                                   )}>
                                     {isBorrowed ? "Lender" : "Borrower"}
                                   </span>
                                   {loan.is_owner === false && (
                                     <span
-                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[10px] font-bold tracking-wider"
-                                      title={`Recorded by ${loan.creator_name || loan.creator_email || "creator"}`}
+                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[10px] font-bold tracking-wider shrink-0"
+                                      title={`Recorded by ${bName}`}
                                     >
                                       Shared with you
                                     </span>
                                   )}
                                 </div>
                                 {loan.is_owner === false ? (
-                                  <p className="truncate text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-                                    Shared by {loan.creator_name || loan.creator_email || "Creator"}
+                                  <p className="truncate text-xs text-indigo-600 dark:text-indigo-400 font-medium max-w-[180px] sm:max-w-[240px]">
+                                    Shared by {bName}
                                   </p>
                                 ) : bEmail ? (
-                                  <p className="truncate text-xs text-secondary">
+                                  <p className="truncate text-xs text-secondary max-w-[180px] sm:max-w-[240px]">
                                     {bEmail}
                                   </p>
                                 ) : (
@@ -5774,7 +5386,7 @@ export function WalletsPage({
         const liveLoan = (selectedLoanForDetails.wallet_id ? selectedWallet?.loans?.find((l) => l.id === selectedLoanForDetails.id) : loans.find((l) => l.id === selectedLoanForDetails.id)) || selectedLoanForDetails;
         const borrowerName = getLoanBorrowerName(liveLoan);
         const borrowerEmail = getLoanBorrowerEmail(liveLoan);
-        const canManageLoan = !liveLoan.wallet_id || isWalletOwner;
+        const canManageLoan = liveLoan.is_owner !== false;
         const loanCurrency = liveLoan.wallet_id ? selectedWallet?.wallet.currency : undefined;
 
         const {
@@ -5910,7 +5522,7 @@ export function WalletsPage({
                       ? `Payment History (${liveLoan.repayments?.length || 0})`
                       : `Repayment History (${liveLoan.repayments?.length || 0})`}
                   </h4>
-                  {canManageLoan && !isFullyPaid && (
+                  {!isFullyPaid && (
                     <button
                       type="button"
                       className="ui-button-primary !py-1 !px-2.5 text-xs"

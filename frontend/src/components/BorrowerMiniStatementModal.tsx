@@ -143,13 +143,22 @@ export function BorrowerMiniStatementModal({
 }: BorrowerMiniStatementModalProps) {
   // 1. Group loans by borrower
   const borrowerOptions = useMemo<BorrowerOption[]>(() => {
+    const isRawUserId = (val?: string | null): boolean => {
+      if (!val || typeof val !== "string") return false;
+      const trimmed = val.trim();
+      return /^[0-9a-fA-F-]{20,}$/.test(trimmed) || trimmed.startsWith("auth0|") || trimmed.startsWith("user_");
+    };
+
     const map = new Map<string, { key: string; name: string; email: string | null; loans: WalletLoan[] }>();
 
     for (const loan of loans) {
       let bName = loan.borrower_name || loan.borrower_member_name;
       let bEmail = loan.borrower_email;
 
-      if (loan.borrower_member_id && walletMembers.length > 0) {
+      if (loan.is_owner === false) {
+        bName = loan.creator_name || (loan.creator_email ? loan.creator_email.split("@")[0] : "Loan Owner");
+        bEmail = loan.creator_email || null;
+      } else if (loan.borrower_member_id && walletMembers.length > 0) {
         const mem = walletMembers.find((m) => m.id === loan.borrower_member_id);
         if (mem) {
           bName = mem.display_name;
@@ -157,10 +166,14 @@ export function BorrowerMiniStatementModal({
         }
       }
 
-      const finalName = bName ? bName.trim() : "Unknown Borrower";
-      const key = loan.borrower_member_id
-        ? `member:${loan.borrower_member_id}`
-        : `name:${finalName.toLowerCase()}`;
+      if (isRawUserId(bName)) {
+        bName = bEmail ? bEmail.split("@")[0] : (loan.is_owner === false ? "Loan Owner" : "Borrower");
+      }
+
+      const finalName = bName ? bName.trim() : (loan.is_owner === false ? "Loan Owner" : "Borrower");
+      const key = loan.is_owner === false
+        ? `owner:${loan.owner_user_id || finalName.toLowerCase()}`
+        : (loan.borrower_member_id ? `member:${loan.borrower_member_id}` : `name:${finalName.toLowerCase()}`);
 
       const existing = map.get(key);
       if (existing) {

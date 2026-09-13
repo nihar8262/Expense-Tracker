@@ -66,7 +66,7 @@ module.exports = async function handler(request, response) {
         return sendResult(response, result);
       }
       if (request.method === "POST") {
-        const result = await createStandaloneLoanForUser(user.id, request.body);
+        const result = await createStandaloneLoanForUser(user.id, request.body, user.name, user.email);
         return sendResult(response, result);
       }
       return methodNotAllowed(response, "GET, POST");

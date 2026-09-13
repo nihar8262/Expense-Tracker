@@ -532,7 +532,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       request,
       response,
       async (user) => {
-        const result = await handleCreateStandaloneLoan(request.body, user.id, store);
+        const result = await handleCreateStandaloneLoan(request.body, user.id, store, user.name, user.email);
         return response.status(result.status).json(result.body);
       },
       "Failed to create loan."

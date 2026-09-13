@@ -538,6 +538,7 @@ describe("Wallet Loans & Lending API", () => {
       .post("/api/loans")
       .set("Authorization", "Bearer owner-user")
       .send({
+        creatorName: "Alice Owner",
         borrowerName: "Dave Outside",
         borrowerEmail: "dave-user@example.com",
         amount: "2500.00",
@@ -550,6 +551,7 @@ describe("Wallet Loans & Lending API", () => {
     const loanId = createRes.body.loan.id;
     expect(createRes.body.loan.loan_type).toBe("lent");
     expect(createRes.body.loan.is_owner).toBe(true);
+    expect(createRes.body.loan.creator_name).toBe("Alice Owner");
 
     // 2. Dave logs in and lists loans
     const daveListRes = await request(app)
@@ -565,8 +567,9 @@ describe("Wallet Loans & Lending API", () => {
     expect(mirroredLoan.loan_type).toBe("borrowed");
     expect(mirroredLoan.is_owner).toBe(false);
     expect(mirroredLoan.amount).toBe("2500.00");
-    // Counterparty shown as creator
-    expect(mirroredLoan.borrower_name).toBe("owner-user");
+    // Counterparty shown as creator's friendly display name (NOT a raw UUID)
+    expect(mirroredLoan.borrower_name).toBe("Alice Owner");
+    expect(mirroredLoan.creator_name).toBe("Alice Owner");
 
     // 3. Dave cannot edit loan terms or delete loan
     const editRes = await request(app)
@@ -606,5 +609,88 @@ describe("Wallet Loans & Lending API", () => {
     expect(ownerLoan.is_owner).toBe(true);
     expect(ownerLoan.repayments).toHaveLength(1);
     expect(ownerLoan.repayments[0].amount).toBe("1000.00");
+
+    // 6. Owner received an in-box alert about Dave's repayment!
+    const ownerNotifs = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", "Bearer owner-user");
+
+    expect(ownerNotifs.status).toBe(200);
+    const repayAlert = ownerNotifs.body.notifications.find((n: any) => n.type === "loan-repayment");
+    expect(repayAlert).toBeDefined();
+    expect(repayAlert.title).toContain("Repayment");
+    expect(repayAlert.message).toContain("1000.00");
+  });
+
+  it("prunes read notifications after 24 hours and unread notifications after 1 week", async () => {
+    const { store } = buildApp();
+    const userId = "prune-test-user";
+    const now = new Date("2026-09-20T12:00:00.000Z");
+
+    const memoryNotifications = store.getNotificationsMap();
+    memoryNotifications.set("notif-1", {
+      id: "notif-1",
+      userId,
+      type: "daily-log",
+      title: "Fresh unread",
+      message: "Keep this",
+      status: "unread",
+      createdAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      scheduledFor: null,
+      metadata: null,
+      dedupeKey: "notif:1"
+    });
+
+    memoryNotifications.set("notif-2", {
+      id: "notif-2",
+      userId,
+      type: "daily-log",
+      title: "Old unread",
+      message: "Prune this",
+      status: "unread",
+      createdAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+      scheduledFor: null,
+      metadata: null,
+      dedupeKey: "notif:2"
+    });
+
+    memoryNotifications.set("notif-3", {
+      id: "notif-3",
+      userId,
+      type: "loan-repayment",
+      title: "Fresh read",
+      message: "Keep this read",
+      status: "read",
+      createdAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      readAt: new Date(now.getTime() - 10 * 60 * 60 * 1000).toISOString(),
+      scheduledFor: null,
+      metadata: null,
+      dedupeKey: "notif:3"
+    });
+
+    memoryNotifications.set("notif-4", {
+      id: "notif-4",
+      userId,
+      type: "loan-repayment",
+      title: "Old read",
+      message: "Prune this read",
+      status: "read",
+      createdAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      readAt: new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString(),
+      scheduledFor: null,
+      metadata: null,
+      dedupeKey: "notif:4"
+    });
+
+    // Prune with reference time `now`
+    await store.pruneExpiredBudgetNotifications(now, userId);
+
+    const remaining = [...store.getNotificationsMap().values()].filter((n) => n.userId === userId);
+    const titles = remaining.map((n) => n.title);
+
+    expect(titles).toContain("Fresh unread");
+    expect(titles).toContain("Fresh read");
+    expect(titles).not.toContain("Old unread");
+    expect(titles).not.toContain("Old read");
   });
 });

@@ -353,7 +353,9 @@ export const createWalletLoanSchema = z
     lendingDate: z.string().trim().refine(isValidIsoDate, "Lending date must be a valid YYYY-MM-DD value."),
     dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
     interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
-    notes: z.string().trim().max(280, "Notes is too long.").nullable().optional()
+    notes: z.string().trim().max(280, "Notes is too long.").nullable().optional(),
+    creatorName: z.string().trim().max(120).nullable().optional(),
+    creatorEmail: z.string().trim().max(320).nullable().optional()
   })
   .superRefine((value, context) => {
     if (!value.borrowerMemberId && !value.borrowerName) {

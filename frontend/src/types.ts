@@ -219,11 +219,12 @@ export type WalletHistoryPagination = {
 
 export type Notification = {
 	id: string;
-	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue";
+	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue" | "loan-repayment";
 	title: string;
 	message: string;
 	status: "unread" | "read";
 	created_at: string;
+	read_at?: string | null;
 	scheduled_for: string | null;
 	metadata: Record<string, string> | null;
 };

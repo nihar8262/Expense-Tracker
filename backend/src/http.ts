@@ -1097,7 +1097,13 @@ export async function handleListLoans(userId: string, userEmail: string | null |
   }
 }
 
-export async function handleCreateStandaloneLoan(rawBody: unknown, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+export async function handleCreateStandaloneLoan(
+  rawBody: unknown,
+  userId: string,
+  store: ExpenseStore,
+  userName?: string | null,
+  userEmail?: string | null
+): Promise<HandlerResponse> {
   const result = createWalletLoanSchema.safeParse(rawBody);
 
   if (!result.success) {
@@ -1111,7 +1117,12 @@ export async function handleCreateStandaloneLoan(rawBody: unknown, userId: strin
   }
 
   try {
-    const loan = await store.createStandaloneLoan(userId, result.data);
+    const payload = {
+      ...result.data,
+      creatorName: result.data.creatorName || userName || undefined,
+      creatorEmail: result.data.creatorEmail || userEmail || undefined
+    };
+    const loan = await store.createStandaloneLoan(userId, payload);
     return {
       status: 201,
       body: { loan }

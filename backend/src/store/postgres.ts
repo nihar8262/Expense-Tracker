@@ -28,6 +28,7 @@ import {
   NotificationNotFoundError,
   type NotificationCheckResult,
   type NotificationRecord,
+  type NotificationType,
   type ReminderPreferencesRecord,
   type CreateExpenseResult,
   type ExpenseRecord,
@@ -189,6 +190,7 @@ type NotificationRow = {
   message: string;
   notification_status: "unread" | "read";
   created_at: string | Date;
+  read_at?: string | Date | null;
   scheduled_for: string | Date | null;
   metadata_json: string | null;
   dedupe_key: string;
@@ -321,7 +323,15 @@ function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord
   const originalLoanType = (row.loan_type as "lent" | "borrowed") ?? "lent";
   const displayLoanType = isOwner ? originalLoanType : (originalLoanType === "lent" ? "borrowed" : "lent");
 
-  const creatorName = row.creator_name || "Creator";
+  let creatorName = row.creator_name || "Loan Owner";
+  if (
+    creatorName === row.owner_user_id ||
+    /^[0-9a-f-]{20,}$/i.test(creatorName) ||
+    creatorName.startsWith("auth0|") ||
+    creatorName.startsWith("firebase:")
+  ) {
+    creatorName = row.creator_email ? row.creator_email.split("@")[0] : "Loan Owner";
+  }
   const creatorEmail = row.creator_email || null;
 
   let lenderMemberName = row.lender_member_name ?? "You";
@@ -338,7 +348,7 @@ function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord
 
   return {
     id: row.id,
-    owner_user_id: row.owner_user_id ?? null,
+    owner_user_id: row.owner_user_id ?? "unknown",
     wallet_id: row.wallet_id ?? null,
     lender_member_id: row.lender_member_id ?? null,
     lender_member_name: lenderMemberName,
@@ -388,6 +398,7 @@ function mapNotification(row: NotificationRow): NotificationRecord {
     message: row.message,
     status: row.notification_status,
     created_at: asIsoTimestamp(row.created_at),
+    read_at: row.read_at ? asIsoTimestamp(row.read_at) : null,
     scheduled_for: row.scheduled_for ? asIsoTimestamp(row.scheduled_for) : null,
     metadata: row.metadata_json ? (JSON.parse(row.metadata_json) as Record<string, string>) : null
   };
@@ -753,6 +764,8 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS owner_user_id TEXT`;
       await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_name VARCHAR(120)`;
       await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_email VARCHAR(320)`;
+      await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS creator_name VARCHAR(120) DEFAULT NULL`;
+      await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS creator_email VARCHAR(320) DEFAULT NULL`;
       await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS loan_type VARCHAR(16) NOT NULL DEFAULT 'lent'`;
       await sql`ALTER TABLE wallet_loans ALTER COLUMN wallet_id DROP NOT NULL`;
       await sql`ALTER TABLE wallet_loans ALTER COLUMN lender_member_id DROP NOT NULL`;
@@ -829,8 +842,18 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`ALTER TABLE wallet_members ADD COLUMN IF NOT EXISTS invite_status VARCHAR(16) NOT NULL DEFAULT 'linked'`;
       await sql`ALTER TABLE wallet_members DROP CONSTRAINT IF EXISTS wallet_members_invite_status_check`;
       await sql`ALTER TABLE wallet_members ADD CONSTRAINT wallet_members_invite_status_check CHECK (invite_status IN ('linked', 'pending', 'declined'))`;
+      await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ DEFAULT NULL`;
+      await sql`UPDATE notifications SET read_at = created_at WHERE notification_status = 'read' AND read_at IS NULL`;
       await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
-      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue'))`;
+      await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue', 'loan-repayment'))`;
+      await sql`
+        UPDATE wallet_loans 
+        SET creator_name = COALESCE(
+          (SELECT display_name FROM reminder_preferences WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' LIMIT 1),
+          (SELECT display_name FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' LIMIT 1)
+        )
+        WHERE creator_name IS NULL OR creator_name = owner_user_id OR creator_name = 'Creator' OR creator_name = 'Loan Owner'
+      `;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
       await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
       await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
@@ -989,22 +1012,29 @@ async function upsertNotification(
 }
 
 async function pruneExpiredBudgetNotifications(db: DbClient, userId?: string, now = new Date()): Promise<void> {
-  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const cutoff24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const cutoff7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   if (userId) {
     await db`
       DELETE FROM notifications
       WHERE user_id = ${userId}
-        AND (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
-        AND created_at < ${cutoff}
+        AND (
+          ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+          OR
+          (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
+          OR
+          (notification_status = ${"unread"} AND created_at < ${cutoff7d})
+        )
     `;
     return;
   }
 
   await db`
     DELETE FROM notifications
-    WHERE (notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"})
-      AND created_at < ${cutoff}
+    WHERE ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+       OR (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
+       OR (notification_status = ${"unread"} AND created_at < ${cutoff7d})
   `;
 }
 
@@ -1362,7 +1392,7 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
   };
 }
 
-async function loadLoanRecord(db: SqlOrTransaction, loanId: string, viewingUserId?: string): Promise<WalletLoanRecord> {
+async function loadLoanRecord(db: DbClient, loanId: string, viewingUserId?: string): Promise<WalletLoanRecord> {
   const loanRows = await db<(WalletLoanRow & { creator_name?: string | null; creator_email?: string | null })[]>`
     SELECT wallet_loans.id,
            wallet_loans.owner_user_id,
@@ -1384,12 +1414,26 @@ async function loadLoanRecord(db: SqlOrTransaction, loanId: string, viewingUserI
            wallet_loans.status,
            wallet_loans.loan_type,
            wallet_loans.created_at,
-           COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
-           owner_member.email AS creator_email
+           COALESCE(
+             NULLIF(wallet_loans.creator_name, ''),
+             NULLIF(owner_prefs.display_name, ''),
+             NULLIF(owner_member.display_name, ''),
+             NULLIF(any_owner_member.display_name, ''),
+             'Loan Owner'
+           ) AS creator_name,
+           COALESCE(
+             wallet_loans.creator_email,
+             owner_member.email,
+             any_owner_member.email
+           ) AS creator_email
     FROM wallet_loans
     LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
     LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
-    LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
+    LEFT JOIN wallet_members AS owner_member ON (wallet_loans.wallet_id IS NOT NULL AND owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id)
+    LEFT JOIN reminder_preferences AS owner_prefs ON owner_prefs.user_id = wallet_loans.owner_user_id
+    LEFT JOIN LATERAL (
+      SELECT display_name, email FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' ORDER BY joined_at DESC LIMIT 1
+    ) AS any_owner_member ON true
     WHERE wallet_loans.id = ${loanId}
   `;
   const loan = loanRows[0];
@@ -2480,7 +2524,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletValidationError("Owner member profile was not found.");
         }
 
-        const borrowerRows = await tx<WalletMemberRow[]>`SELECT id, user_id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${input.borrowerMemberId}`;
+        const borrowerRows = await tx<WalletMemberRow[]>`SELECT id, user_id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId} AND id = ${input.borrowerMemberId ?? null}`;
         const borrower = borrowerRows[0];
         if (!borrower) {
           throw new WalletValidationError("Borrower must be a member of this wallet.");
@@ -2588,17 +2632,17 @@ export function createPostgresExpenseStore(): ExpenseStore {
           borrowerEmail = borrowerRows[0].email;
         }
 
-        const updatedBorrowerId = input.borrowerMemberId ?? currentLoan.borrower_member_id;
-        const updatedBorrowerName = input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : borrowerName;
-        const updatedBorrowerEmail = input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : borrowerEmail;
+        const updatedBorrowerId = (input.borrowerMemberId ?? currentLoan.borrower_member_id) ?? null;
+        const updatedBorrowerName = (input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : borrowerName) ?? null;
+        const updatedBorrowerEmail = (input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : borrowerEmail) ?? null;
         const updatedAmountMinor = input.amount !== undefined ? input.amount : currentLoan.amount_minor;
         const updatedInterestRateBasisPoints = input.interestRate !== undefined ? input.interestRate : currentLoan.interest_rate_basis_points;
         const updatedInterestType = input.interestType ?? currentLoan.interest_type;
         const updatedInterestRatePeriod = input.interestRatePeriod ?? currentLoan.interest_rate_period;
         const updatedLendingDate = input.lendingDate ?? asIsoDate(currentLoan.lending_date);
-        const updatedDueDate = input.dueDate !== undefined ? input.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null);
-        const updatedInterestStartDate = input.interestStartDate !== undefined ? input.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null);
-        const updatedNotes = input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes;
+        const updatedDueDate = (input.dueDate !== undefined ? input.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null)) ?? null;
+        const updatedInterestStartDate = (input.interestStartDate !== undefined ? input.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null)) ?? null;
+        const updatedNotes = (input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes) ?? null;
         const updatedStatus = input.status ?? currentLoan.status;
         const updatedLoanType = input.loanType ?? currentLoan.loan_type ?? "lent";
 
@@ -2776,12 +2820,26 @@ export function createPostgresExpenseStore(): ExpenseStore {
                wallet_loans.status,
                wallet_loans.loan_type,
                wallet_loans.created_at,
-               COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
-               owner_member.email AS creator_email
+               COALESCE(
+                 NULLIF(wallet_loans.creator_name, ''),
+                 NULLIF(owner_prefs.display_name, ''),
+                 NULLIF(owner_member.display_name, ''),
+                 NULLIF(any_owner_member.display_name, ''),
+                 'Loan Owner'
+               ) AS creator_name,
+               COALESCE(
+                 wallet_loans.creator_email,
+                 owner_member.email,
+                 any_owner_member.email
+               ) AS creator_email
         FROM wallet_loans
         LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
         LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
-        LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
+        LEFT JOIN wallet_members AS owner_member ON (wallet_loans.wallet_id IS NOT NULL AND owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id)
+        LEFT JOIN reminder_preferences AS owner_prefs ON owner_prefs.user_id = wallet_loans.owner_user_id
+        LEFT JOIN LATERAL (
+          SELECT display_name, email FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' ORDER BY joined_at DESC LIMIT 1
+        ) AS any_owner_member ON true
         WHERE wallet_loans.owner_user_id = ${userId}
            OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
            OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
@@ -2810,13 +2868,41 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await ensureSchema(sql);
 
       return sql.begin(async (tx) => {
+        let resolvedCreatorName = input.creatorName?.trim() || null;
+        let resolvedCreatorEmail = input.creatorEmail?.trim() || null;
+        if (!resolvedCreatorName) {
+          const prefRows = await tx<{ display_name: string | null }[]>`
+            SELECT display_name FROM reminder_preferences WHERE user_id = ${userId} AND display_name IS NOT NULL AND display_name != '' LIMIT 1
+          `;
+          if (prefRows[0]?.display_name) {
+            resolvedCreatorName = prefRows[0].display_name;
+          } else {
+            const memberRows = await tx<{ display_name: string; email: string | null }[]>`
+              SELECT display_name, email FROM wallet_members WHERE user_id = ${userId} AND display_name IS NOT NULL AND display_name != '' LIMIT 1
+            `;
+            if (memberRows[0]?.display_name) {
+              resolvedCreatorName = memberRows[0].display_name;
+              if (!resolvedCreatorEmail && memberRows[0].email) {
+                resolvedCreatorEmail = memberRows[0].email;
+              }
+            }
+          }
+        }
+        if (!resolvedCreatorName && resolvedCreatorEmail) {
+          resolvedCreatorName = resolvedCreatorEmail.split("@")[0];
+        }
+        if (!resolvedCreatorName) {
+          resolvedCreatorName = "Loan Owner";
+        }
+
         const loanId = randomUUID();
         await tx`
           INSERT INTO wallet_loans (
             id, owner_user_id, wallet_id, lender_member_id, borrower_member_id,
             borrower_name, borrower_email, amount_minor,
             interest_rate_basis_points, interest_type, interest_rate_period, loan_type,
-            lending_date, due_date, interest_start_date, notes, status, created_at
+            lending_date, due_date, interest_start_date, notes, status, created_at,
+            creator_name, creator_email
           ) VALUES (
             ${loanId},
             ${userId},
@@ -2835,7 +2921,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${input.interestStartDate ?? null},
             ${input.notes?.trim() || null},
             ${"active"},
-            ${new Date().toISOString()}
+            ${new Date().toISOString()},
+            ${resolvedCreatorName},
+            ${resolvedCreatorEmail}
           )
         `;
 
@@ -2882,17 +2970,17 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletLoanNotFoundError();
         }
 
-        const updatedBorrowerName = input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : currentLoan.borrower_name;
-        const updatedBorrowerEmail = input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : currentLoan.borrower_email;
-        const updatedBorrowerMemberId = input.borrowerMemberId !== undefined ? input.borrowerMemberId : currentLoan.borrower_member_id;
+        const updatedBorrowerName = (input.borrowerName !== undefined ? (input.borrowerName?.trim() || null) : currentLoan.borrower_name) ?? null;
+        const updatedBorrowerEmail = (input.borrowerEmail !== undefined ? (input.borrowerEmail?.trim() || null) : currentLoan.borrower_email) ?? null;
+        const updatedBorrowerMemberId = (input.borrowerMemberId !== undefined ? input.borrowerMemberId : currentLoan.borrower_member_id) ?? null;
         const updatedAmountMinor = input.amount !== undefined ? input.amount : currentLoan.amount_minor;
         const updatedInterestRateBasisPoints = input.interestRate !== undefined ? input.interestRate : currentLoan.interest_rate_basis_points;
         const updatedInterestType = input.interestType ?? currentLoan.interest_type;
         const updatedInterestRatePeriod = input.interestRatePeriod ?? currentLoan.interest_rate_period;
         const updatedLendingDate = input.lendingDate ?? asIsoDate(currentLoan.lending_date);
-        const updatedDueDate = input.dueDate !== undefined ? input.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null);
-        const updatedInterestStartDate = input.interestStartDate !== undefined ? input.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null);
-        const updatedNotes = input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes;
+        const updatedDueDate = (input.dueDate !== undefined ? input.dueDate : (currentLoan.due_date ? asIsoDate(currentLoan.due_date) : null)) ?? null;
+        const updatedInterestStartDate = (input.interestStartDate !== undefined ? input.interestStartDate : (currentLoan.interest_start_date ? asIsoDate(currentLoan.interest_start_date) : null)) ?? null;
+        const updatedNotes = (input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes) ?? null;
         const updatedStatus = input.status ?? currentLoan.status;
         const updatedLoanType = input.loanType ?? currentLoan.loan_type ?? "lent";
 
@@ -2944,11 +3032,12 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletLoanNotFoundError();
         }
 
+        const repaymentId = randomUUID();
         await tx`
           INSERT INTO wallet_loan_repayments (
             id, loan_id, amount_minor, repayment_date, notes, created_at
           ) VALUES (
-            ${randomUUID()},
+            ${repaymentId},
             ${loanId},
             ${input.amount},
             ${input.repaymentDate},
@@ -2956,6 +3045,32 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${new Date().toISOString()}
           )
         `;
+
+        const ownerUserId = loanRows[0].owner_user_id;
+        if (ownerUserId && ownerUserId !== userId) {
+          const payerPrefs = await tx<{ display_name: string | null }[]>`
+            SELECT display_name FROM reminder_preferences WHERE user_id = ${userId} AND display_name IS NOT NULL AND display_name != '' LIMIT 1
+          `;
+          const payerMember = await tx<{ display_name: string | null }[]>`
+            SELECT display_name FROM wallet_members WHERE user_id = ${userId} AND display_name IS NOT NULL AND display_name != '' LIMIT 1
+          `;
+          const payerName = payerPrefs[0]?.display_name || payerMember[0]?.display_name || userEmail?.split("@")[0] || "A member";
+
+          await upsertNotification(tx, {
+            userId: ownerUserId,
+            type: "loan-repayment",
+            title: `Repayment received: ${formatMinorUnits(input.amount)}`,
+            message: `${payerName} recorded a repayment of ${formatMinorUnits(input.amount)} towards the loan.${input.notes?.trim() ? ` Note: ${input.notes.trim()}.` : ""}`,
+            scheduledFor: null,
+            metadata: {
+              loanId,
+              repaymentId,
+              amount: formatMinorUnits(input.amount),
+              payerUserId: userId
+            },
+            dedupeKey: `loan-repayment:${loanId}:${repaymentId}`
+          });
+        }
 
         return loadLoanRecord(tx, loanId, userId);
       });
@@ -3062,7 +3177,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await pruneExpiredBudgetNotifications(sql, userId);
 
       const rows = await sql<NotificationRow[]>`
-        SELECT id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key
+        SELECT id, user_id, notification_type, title, message, notification_status, created_at, read_at, scheduled_for, metadata_json, dedupe_key
         FROM notifications
         WHERE user_id = ${userId}
         ORDER BY created_at DESC
@@ -3076,9 +3191,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
       const rows = await sql<NotificationRow[]>`
         UPDATE notifications
-        SET notification_status = ${"read"}
+        SET notification_status = ${"read"},
+            read_at = COALESCE(read_at, NOW())
         WHERE id = ${notificationId} AND user_id = ${userId}
-        RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key
+        RETURNING id, user_id, notification_type, title, message, notification_status, created_at, read_at, scheduled_for, metadata_json, dedupe_key
       `;
 
       if (!rows[0]) {
@@ -3090,7 +3206,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
     async markAllNotificationsRead(userId: string): Promise<void> {
       await ensureSchema(sql);
-      await sql`UPDATE notifications SET notification_status = ${"read"} WHERE user_id = ${userId}`;
+      await sql`UPDATE notifications SET notification_status = ${"read"}, read_at = COALESCE(read_at, NOW()) WHERE user_id = ${userId}`;
     },
 
     async deleteNotification(userId: string, notificationId: string): Promise<void> {
