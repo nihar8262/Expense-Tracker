@@ -40,14 +40,33 @@ async function buildAuthorizedHeaders(user: User, extraHeaders: Record<string, s
 function createApiError(error: unknown, fallbackMessage: string): ApiError {
   if (axios.isAxiosError(error)) {
     const status = error.response?.status ?? 0;
-    const body = error.response?.data as { error?: string } | null | undefined;
-    const apiError = new ApiError(body?.error ?? error.message ?? fallbackMessage, status);
+    const data = error.response?.data;
+    let message = fallbackMessage;
+    if (typeof data === "string" && data.trim()) {
+      message = data;
+    } else if (data && typeof data === "object") {
+      const errorField = (data as Record<string, unknown>).error;
+      const messageField = (data as Record<string, unknown>).message;
+      if (typeof errorField === "string" && errorField.trim()) {
+        message = errorField;
+      } else if (typeof messageField === "string" && messageField.trim()) {
+        message = messageField;
+      } else if (errorField && typeof errorField === "object") {
+        message = (errorField as Record<string, unknown>).message as string || JSON.stringify(errorField);
+      }
+    } else if (error.message) {
+      message = error.message;
+    }
+    if (!message || message === "[object Object]") {
+      message = fallbackMessage;
+    }
+    const apiError = new ApiError(message, status);
     apiError.retryable = status === 0 || status >= 500;
     return apiError;
   }
 
   if (error instanceof Error) {
-    return new ApiError(error.message, 0);
+    return new ApiError(error.message || fallbackMessage, 0);
   }
 
   return new ApiError(fallbackMessage, 0);

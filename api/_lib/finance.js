@@ -2115,7 +2115,6 @@ async function createStandaloneLoanForUser(userId, rawBody) {
         });
       }
     }
-    `;
 
     return loadLoanRecord(tx, loanId);
   });

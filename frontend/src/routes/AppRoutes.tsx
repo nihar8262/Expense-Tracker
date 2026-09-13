@@ -310,9 +310,32 @@ export function AppRoutes() {
   const navigate = useNavigate();
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
+  const addToast = useCallback((message: unknown, type: "success" | "error" | "info" = "success") => {
+    let cleanMsg = "";
+    if (typeof message === "string") {
+      cleanMsg = message;
+    } else if (message instanceof Error) {
+      cleanMsg = message.message;
+    } else if (message && typeof message === "object") {
+      const errorField = (message as Record<string, unknown>).error;
+      const messageField = (message as Record<string, unknown>).message;
+      if (typeof errorField === "string") {
+        cleanMsg = errorField;
+      } else if (typeof messageField === "string") {
+        cleanMsg = messageField;
+      } else {
+        cleanMsg = JSON.stringify(message);
+      }
+    } else {
+      cleanMsg = String(message ?? "Notification");
+    }
+
+    if (!cleanMsg || cleanMsg === "[object Object]") {
+      cleanMsg = type === "error" ? "A server error occurred. Please try again." : "Success";
+    }
+
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((current) => [...current, { id, type, message }]);
+    setToasts((current) => [...current, { id, type, message: cleanMsg }]);
     setTimeout(() => {
       setToasts((current) => current.filter((t) => t.id !== id));
     }, 10000);
