@@ -292,7 +292,7 @@ function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranu
         ? expense.date
         : granularity === "weekly"
           ? getIsoDateString(getStartOfWeek(parsedDate))
-        : `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
+          : `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
 
     const existingItems = buckets.get(key) ?? [];
     existingItems.push({
@@ -791,11 +791,11 @@ export function AppRoutes() {
     if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
     }
-     
+
     const today = new Date();
     const currentYear = today.getFullYear().toString();
     const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-     
+
     if (selectedTimeRange === "all") {
       return Number(dashboardWallet.walletAggregation.total_amount).toFixed(2);
     } else if (selectedTimeRange === "month") {
@@ -879,16 +879,16 @@ export function AppRoutes() {
     let activeCategories = agg.category_totals;
     let expenseCount = agg.expense_count;
     let rawTotal = Number(agg.total_amount);
-    
+
     const today = new Date();
     const currentYear = today.getFullYear().toString();
     const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-    
+
     if (selectedTimeRange === "month") {
       const currentMonthExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentMonthStr));
       expenseCount = currentMonthExpenses.length;
       rawTotal = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-      
+
       const categoryTotals: Record<string, number> = {};
       for (const e of currentMonthExpenses) {
         categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
@@ -902,7 +902,7 @@ export function AppRoutes() {
       const currentYearExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentYear));
       expenseCount = currentYearExpenses.length;
       rawTotal = currentYearExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
-      
+
       const categoryTotals: Record<string, number> = {};
       for (const e of currentYearExpenses) {
         categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
@@ -915,7 +915,7 @@ export function AppRoutes() {
     } else if (selectedTimeRange === "week") {
       expenseCount = dashboardVisibleExpenses.length;
       rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
-      
+
       const categoryTotals: Record<string, number> = {};
       for (const e of dashboardVisibleExpenses) {
         categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
@@ -934,12 +934,12 @@ export function AppRoutes() {
       const platforms = c.platforms && c.platforms.length > 0
         ? c.platforms
         : Array.from(
-            new Set(
-              dashboardWallet.expenses
-                .filter((e) => e.category === c.category)
-                .map((e) => e.platform || "others")
-            )
-          );
+          new Set(
+            dashboardWallet.expenses
+              .filter((e) => e.category === c.category)
+              .map((e) => e.platform || "others")
+          )
+        );
       const platformShares = c.platform_shares && c.platform_shares.length > 0
         ? c.platform_shares.map(p => ({ platform: p.platform, amount: Number(p.total) }))
         : undefined;
@@ -1210,7 +1210,7 @@ export function AppRoutes() {
     try {
       setNotifications(await listNotifications(user));
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : "Failed to load notifications.");
+      console.warn("Could not load notifications:", error);
     }
   }
 
@@ -1336,9 +1336,17 @@ export function AppRoutes() {
 
     void loadWallets(currentUser);
     void loadLoans(currentUser);
-    void runChecksAndReloadNotifications(currentUser);
     void loadBillReminders(currentUser);
     void loadReminderPreferences(currentUser);
+    void loadNotifications(currentUser);
+
+    // Defer heavy background checks (budget threshold scans, overdue alerts) by 12s
+    // to prioritize instant rendering of critical financial cards and wallets
+    const checksTimer = setTimeout(() => {
+      void runChecksAndReloadNotifications(currentUser);
+    }, 12000);
+
+    return () => clearTimeout(checksTimer);
   }, [authLoading, currentUser]);
 
   useEffect(() => {
@@ -2905,185 +2913,185 @@ export function AppRoutes() {
         {page === "dashboard" ? (
           <ErrorBoundary>
             <DashboardPage
-            activeExpenses={dashboardVisibleExpenses}
-            categories={dashboardViewMode === "wallet" ? dashboardCategories : categories}
-            dashboardInsights={dashboardInsights}
-            wallets={wallets}
-            dashboardViewMode={dashboardViewMode}
-            dashboardWalletId={dashboardWalletId}
-            currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
-            onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); setSelectedPlatform(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
-            onDashboardWalletIdChange={setDashboardWalletId}
-            budgetForm={budgetForm}
-            budgetCategoryOptions={dashboardBudgetCategoryOptions}
-            currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
-            currentMonthBudgetSummaries={dashboardCurrentMonthBudgetSummaries}
-            currentMonthBudgetOverview={dashboardCurrentMonthBudgetOverview}
-            budgetHistoryGroups={dashboardBudgetHistoryGroups}
-            budgetHistoryRange={budgetHistoryRange}
-            chartDisplayType={chartDisplayType}
-            selectedCategory={selectedCategory}
-            selectedTimeRange={selectedTimeRange}
-            selectedPlatform={selectedPlatform}
-            onSelectedPlatformChange={setSelectedPlatform}
-            chartGranularity={chartGranularity}
-            total={total}
-            dashboardStats={dashboardStats}
-            spendTrend={spendTrend}
-            trendDetailLookup={trendDetailLookup}
-            chartSummary={chartSummary}
-            editingBudgetId={editingBudgetId}
-            deletingBudgetIds={deletingBudgetIds}
-            isBudgetLoading={isBudgetLoading}
-            isBudgetSubmitting={isBudgetSubmitting}
-            isBudgetHistoryOpen={isBudgetHistoryOpen}
-            budgetStatusMessage={budgetStatusMessage}
-            budgetErrorMessage={budgetErrorMessage}
-            formatCurrency={formatCurrency}
-            onBudgetFormChange={handleBudgetFormChange}
-            onBudgetSubmit={handleDashboardBudgetSubmit}
-            onBudgetEditCancel={handleBudgetEditCancel}
-            onBudgetEditStart={handleBudgetEditStart}
-            onBudgetDelete={handleDashboardBudgetDelete}
-            onBudgetHistoryRangeChange={setBudgetHistoryRange}
-            onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
-            onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}
-            onSelectedCategoryChange={setSelectedCategory}
-            onSelectedTimeRangeChange={setSelectedTimeRange}
-            onChartDisplayTypeChange={setChartDisplayType}
-            onChartGranularityChange={setChartGranularity}
-          />
-          </ErrorBoundary>
-        ) : page === "expenses" ? (
-            <ExpensesPage
-              currentUserPresent={Boolean(currentUser)}
-              authLoading={authLoading}
-              form={form}
-              editingExpenseId={editingExpenseId}
-              isSubmitting={isSubmitting}
-              statusMessage={statusMessage}
-              errorMessage={errorMessage}
-              customCategoryName={customCategoryName}
+              activeExpenses={dashboardVisibleExpenses}
+              categories={dashboardViewMode === "wallet" ? dashboardCategories : categories}
+              dashboardInsights={dashboardInsights}
+              wallets={wallets}
+              dashboardViewMode={dashboardViewMode}
+              dashboardWalletId={dashboardWalletId}
+              currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
+              onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); setSelectedPlatform(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
+              onDashboardWalletIdChange={setDashboardWalletId}
+              budgetForm={budgetForm}
+              budgetCategoryOptions={dashboardBudgetCategoryOptions}
+              currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
+              currentMonthBudgetSummaries={dashboardCurrentMonthBudgetSummaries}
+              currentMonthBudgetOverview={dashboardCurrentMonthBudgetOverview}
+              budgetHistoryGroups={dashboardBudgetHistoryGroups}
+              budgetHistoryRange={budgetHistoryRange}
+              chartDisplayType={chartDisplayType}
               selectedCategory={selectedCategory}
               selectedTimeRange={selectedTimeRange}
               selectedPlatform={selectedPlatform}
-              sortNewestFirst={sortNewestFirst}
-              categories={categories}
-              expenseMonthOptions={expenseMonthOptions}
-              visibleExpenses={paginatedExpenses}
-              totalVisibleExpenses={visibleExpenses.length}
-              currentExpensesPage={currentExpensesPage}
-              totalExpensePages={totalExpensePages}
-              expensesPageSize={EXPENSES_PAGE_SIZE}
-              availableCategoryOptions={availableCategoryOptions}
-              selectedCategoryOption={selectedCategoryOption}
-              isOtherCategorySelected={isOtherCategorySelected}
-              selectedExpenseIds={selectedExpenseIds}
-              selectedVisibleExpenseIds={selectedVisibleExpenseIds}
-              areAllVisibleExpensesSelected={areAllVisibleExpensesSelected}
-              deletingExpenseIds={deletingExpenseIds}
-              isLoading={isLoading}
-              formatCurrency={formatCurrency}
-              currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
-              resolveCategoryIcon={resolveCategoryIcon}
-              onFormChange={setForm}
-              onCategorySelect={handleCategorySelect}
-              onCustomCategoryNameChange={setCustomCategoryName}
-              onCreateCustomCategory={handleCreateCustomCategory}
-              onSubmit={handleSubmit}
-              onEditCancel={handleEditCancel}
-              onSelectedCategoryChange={setSelectedCategory}
-              onSortNewestFirstChange={setSortNewestFirst}
-              onSelectedTimeRangeChange={setSelectedTimeRange}
               onSelectedPlatformChange={setSelectedPlatform}
-              onExpensesPageChange={setCurrentExpensesPage}
-              onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
-              onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
-              onToggleExpenseSelection={handleToggleExpenseSelection}
-              onEditStart={handleEditStart}
-              onDeleteExpense={handleDeleteExpense}
-              onClearFilters={handleClearExpenseFilters}
-            />
-          ) : page === "wallets" ? (
-            <WalletsPage
-              wallets={wallets}
-              selectedWallet={selectedWallet}
-              selectedWalletId={selectedWalletId}
-              currentUserId={currentUser.uid}
-              currentUserEmail={currentUser.email}
-              budgetCategoryOptions={budgetCategoryOptions}
-              isLoading={isWalletLoading}
-              isSubmitting={isWalletSubmitting}
-              submittingAction={walletSubmittingAction}
-              statusMessage={walletStatusMessage}
-              errorMessage={walletErrorMessage}
+              chartGranularity={chartGranularity}
+              total={total}
+              dashboardStats={dashboardStats}
+              spendTrend={spendTrend}
+              trendDetailLookup={trendDetailLookup}
+              chartSummary={chartSummary}
+              editingBudgetId={editingBudgetId}
+              deletingBudgetIds={deletingBudgetIds}
+              isBudgetLoading={isBudgetLoading}
+              isBudgetSubmitting={isBudgetSubmitting}
+              isBudgetHistoryOpen={isBudgetHistoryOpen}
+              budgetStatusMessage={budgetStatusMessage}
+              budgetErrorMessage={budgetErrorMessage}
               formatCurrency={formatCurrency}
-              currencySymbol={selectedWallet ? getCurrencySymbol(selectedWallet.wallet.currency) : getCurrencySymbol(reminderPreferences?.default_currency)}
-              onSelectWallet={setSelectedWalletId}
-              onCreateWallet={handleCreateWallet}
-              onUpdateWallet={handleUpdateWallet}
-              onDeleteWallet={handleDeleteWallet}
-              onLeaveWallet={handleLeaveWallet}
-              onAddWalletMember={handleAddWalletMember}
-              onRemoveWalletMember={handleRemoveWalletMember}
-              onCreateWalletExpense={handleCreateWalletExpense}
-              onUpdateWalletExpense={handleUpdateWalletExpense}
-              onDeleteWalletExpenses={handleDeleteWalletExpenses}
-              onCreateWalletBudget={handleCreateWalletBudget}
-              onUpdateWalletBudget={handleUpdateWalletBudget}
-              onDeleteWalletBudget={handleDeleteWalletBudget}
-              onCreateWalletSettlement={handleCreateWalletSettlement}
-              onUpdateWalletSettlement={handleUpdateWalletSettlement}
-              onDeleteWalletSettlement={handleDeleteWalletSettlement}
-              onCreateWalletLoan={handleCreateWalletLoan}
-              onUpdateWalletLoan={handleUpdateWalletLoan}
-              onDeleteWalletLoan={handleDeleteWalletLoan}
-              onCreateWalletLoanRepayment={handleCreateWalletLoanRepayment}
-              onUpdateWalletLoanRepayment={handleUpdateWalletLoanRepayment}
-              onDeleteWalletLoanRepayment={handleDeleteWalletLoanRepayment}
-              loans={loans}
-              onCreateStandaloneLoan={handleCreateStandaloneLoan}
-              onUpdateStandaloneLoan={handleUpdateStandaloneLoan}
-              onDeleteStandaloneLoan={handleDeleteStandaloneLoan}
-              onCreateStandaloneLoanRepayment={handleCreateStandaloneLoanRepayment}
-              onUpdateStandaloneLoanRepayment={handleUpdateStandaloneLoanRepayment}
-              onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
-              onLoadMoreExpenses={handleLoadMoreWalletExpenses}
+              onBudgetFormChange={handleBudgetFormChange}
+              onBudgetSubmit={handleDashboardBudgetSubmit}
+              onBudgetEditCancel={handleBudgetEditCancel}
+              onBudgetEditStart={handleBudgetEditStart}
+              onBudgetDelete={handleDashboardBudgetDelete}
+              onBudgetHistoryRangeChange={setBudgetHistoryRange}
+              onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
+              onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}
+              onSelectedCategoryChange={setSelectedCategory}
+              onSelectedTimeRangeChange={setSelectedTimeRange}
+              onChartDisplayTypeChange={setChartDisplayType}
+              onChartGranularityChange={setChartGranularity}
             />
-          ) : page === "alerts" ? (
-            <AlertsPage
-              notifications={notifications}
-              billReminders={billReminders}
-              isSavingPreferences={isSavingReminderPreferences}
-              isSavingBillReminder={isSavingBillReminder}
-              isRunningChecks={isRunningNotificationChecks}
-              preferences={activeReminderPreferences}
-              wallets={wallets}
-              preferenceScope={preferenceScope}
-              onPreferenceScopeChange={handlePreferenceScopeChange}
-              onMarkRead={handleMarkNotificationRead}
-              onMarkAllRead={handleMarkAllNotificationsRead}
-              onDeleteNotification={handleDeleteNotification}
-              onRefreshChecks={handleRunNotificationChecks}
-              onRespondToWalletInvite={handleRespondToWalletInvite}
-              onSaveBillReminder={handleSaveBillReminder}
-              onDeleteBillReminder={handleDeleteBillReminder}
-              onPreferencesChange={handleReminderPreferencesChange}
-              onSavePreferences={handleSaveReminderPreferences}
-            />
-          ) : (
-            <ProfilePage
-              currentUser={currentUser}
-              reminderPreferences={reminderPreferences}
-              isSavingReminderPreferences={isSavingReminderPreferences}
-              onReminderPreferencesChange={handleReminderPreferencesChange}
-              onSaveReminderPreferences={handleSaveReminderPreferences}
-              onUpdateProfile={handleUpdateProfile}
-              isUpdatingProfile={isUpdatingProfile}
-              onOpenDeleteAccountModal={openDeleteAccountModal}
-              isDeletingAccount={isDeletingAccount}
-            />
-          )}
+          </ErrorBoundary>
+        ) : page === "expenses" ? (
+          <ExpensesPage
+            currentUserPresent={Boolean(currentUser)}
+            authLoading={authLoading}
+            form={form}
+            editingExpenseId={editingExpenseId}
+            isSubmitting={isSubmitting}
+            statusMessage={statusMessage}
+            errorMessage={errorMessage}
+            customCategoryName={customCategoryName}
+            selectedCategory={selectedCategory}
+            selectedTimeRange={selectedTimeRange}
+            selectedPlatform={selectedPlatform}
+            sortNewestFirst={sortNewestFirst}
+            categories={categories}
+            expenseMonthOptions={expenseMonthOptions}
+            visibleExpenses={paginatedExpenses}
+            totalVisibleExpenses={visibleExpenses.length}
+            currentExpensesPage={currentExpensesPage}
+            totalExpensePages={totalExpensePages}
+            expensesPageSize={EXPENSES_PAGE_SIZE}
+            availableCategoryOptions={availableCategoryOptions}
+            selectedCategoryOption={selectedCategoryOption}
+            isOtherCategorySelected={isOtherCategorySelected}
+            selectedExpenseIds={selectedExpenseIds}
+            selectedVisibleExpenseIds={selectedVisibleExpenseIds}
+            areAllVisibleExpensesSelected={areAllVisibleExpensesSelected}
+            deletingExpenseIds={deletingExpenseIds}
+            isLoading={isLoading}
+            formatCurrency={formatCurrency}
+            currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
+            resolveCategoryIcon={resolveCategoryIcon}
+            onFormChange={setForm}
+            onCategorySelect={handleCategorySelect}
+            onCustomCategoryNameChange={setCustomCategoryName}
+            onCreateCustomCategory={handleCreateCustomCategory}
+            onSubmit={handleSubmit}
+            onEditCancel={handleEditCancel}
+            onSelectedCategoryChange={setSelectedCategory}
+            onSortNewestFirstChange={setSortNewestFirst}
+            onSelectedTimeRangeChange={setSelectedTimeRange}
+            onSelectedPlatformChange={setSelectedPlatform}
+            onExpensesPageChange={setCurrentExpensesPage}
+            onDeleteSelectedExpenses={handleDeleteSelectedExpenses}
+            onToggleSelectAllVisibleExpenses={handleToggleSelectAllVisibleExpenses}
+            onToggleExpenseSelection={handleToggleExpenseSelection}
+            onEditStart={handleEditStart}
+            onDeleteExpense={handleDeleteExpense}
+            onClearFilters={handleClearExpenseFilters}
+          />
+        ) : page === "wallets" ? (
+          <WalletsPage
+            wallets={wallets}
+            selectedWallet={selectedWallet}
+            selectedWalletId={selectedWalletId}
+            currentUserId={currentUser.uid}
+            currentUserEmail={currentUser.email}
+            budgetCategoryOptions={budgetCategoryOptions}
+            isLoading={isWalletLoading}
+            isSubmitting={isWalletSubmitting}
+            submittingAction={walletSubmittingAction}
+            statusMessage={walletStatusMessage}
+            errorMessage={walletErrorMessage}
+            formatCurrency={formatCurrency}
+            currencySymbol={selectedWallet ? getCurrencySymbol(selectedWallet.wallet.currency) : getCurrencySymbol(reminderPreferences?.default_currency)}
+            onSelectWallet={setSelectedWalletId}
+            onCreateWallet={handleCreateWallet}
+            onUpdateWallet={handleUpdateWallet}
+            onDeleteWallet={handleDeleteWallet}
+            onLeaveWallet={handleLeaveWallet}
+            onAddWalletMember={handleAddWalletMember}
+            onRemoveWalletMember={handleRemoveWalletMember}
+            onCreateWalletExpense={handleCreateWalletExpense}
+            onUpdateWalletExpense={handleUpdateWalletExpense}
+            onDeleteWalletExpenses={handleDeleteWalletExpenses}
+            onCreateWalletBudget={handleCreateWalletBudget}
+            onUpdateWalletBudget={handleUpdateWalletBudget}
+            onDeleteWalletBudget={handleDeleteWalletBudget}
+            onCreateWalletSettlement={handleCreateWalletSettlement}
+            onUpdateWalletSettlement={handleUpdateWalletSettlement}
+            onDeleteWalletSettlement={handleDeleteWalletSettlement}
+            onCreateWalletLoan={handleCreateWalletLoan}
+            onUpdateWalletLoan={handleUpdateWalletLoan}
+            onDeleteWalletLoan={handleDeleteWalletLoan}
+            onCreateWalletLoanRepayment={handleCreateWalletLoanRepayment}
+            onUpdateWalletLoanRepayment={handleUpdateWalletLoanRepayment}
+            onDeleteWalletLoanRepayment={handleDeleteWalletLoanRepayment}
+            loans={loans}
+            onCreateStandaloneLoan={handleCreateStandaloneLoan}
+            onUpdateStandaloneLoan={handleUpdateStandaloneLoan}
+            onDeleteStandaloneLoan={handleDeleteStandaloneLoan}
+            onCreateStandaloneLoanRepayment={handleCreateStandaloneLoanRepayment}
+            onUpdateStandaloneLoanRepayment={handleUpdateStandaloneLoanRepayment}
+            onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
+            onLoadMoreExpenses={handleLoadMoreWalletExpenses}
+          />
+        ) : page === "alerts" ? (
+          <AlertsPage
+            notifications={notifications}
+            billReminders={billReminders}
+            isSavingPreferences={isSavingReminderPreferences}
+            isSavingBillReminder={isSavingBillReminder}
+            isRunningChecks={isRunningNotificationChecks}
+            preferences={activeReminderPreferences}
+            wallets={wallets}
+            preferenceScope={preferenceScope}
+            onPreferenceScopeChange={handlePreferenceScopeChange}
+            onMarkRead={handleMarkNotificationRead}
+            onMarkAllRead={handleMarkAllNotificationsRead}
+            onDeleteNotification={handleDeleteNotification}
+            onRefreshChecks={handleRunNotificationChecks}
+            onRespondToWalletInvite={handleRespondToWalletInvite}
+            onSaveBillReminder={handleSaveBillReminder}
+            onDeleteBillReminder={handleDeleteBillReminder}
+            onPreferencesChange={handleReminderPreferencesChange}
+            onSavePreferences={handleSaveReminderPreferences}
+          />
+        ) : (
+          <ProfilePage
+            currentUser={currentUser}
+            reminderPreferences={reminderPreferences}
+            isSavingReminderPreferences={isSavingReminderPreferences}
+            onReminderPreferencesChange={handleReminderPreferencesChange}
+            onSaveReminderPreferences={handleSaveReminderPreferences}
+            onUpdateProfile={handleUpdateProfile}
+            isUpdatingProfile={isUpdatingProfile}
+            onOpenDeleteAccountModal={openDeleteAccountModal}
+            isDeletingAccount={isDeletingAccount}
+          />
+        )}
       </SignedInLayout>
     );
   }
@@ -3140,8 +3148,8 @@ export function AppRoutes() {
               toast.type === "success"
                 ? "border-emerald-500/20 text-emerald-950 dark:text-emerald-50"
                 : toast.type === "error"
-                ? "border-red-500/20 text-red-950 dark:text-red-50"
-                : "border-zinc-500/20 text-zinc-950 dark:text-zinc-50"
+                  ? "border-red-500/20 text-red-950 dark:text-red-50"
+                  : "border-zinc-500/20 text-zinc-950 dark:text-zinc-50"
             )}
           >
             <div className="flex items-start gap-2.5 min-w-0">

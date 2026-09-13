@@ -791,7 +791,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
         CREATE TABLE IF NOT EXISTS notifications (
           id UUID PRIMARY KEY,
           user_id TEXT NOT NULL,
-          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue')),
+          notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue', 'loan-repayment')),
           title VARCHAR(120) NOT NULL,
           message VARCHAR(280) NOT NULL,
           notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')),
@@ -849,10 +849,19 @@ async function ensureSchema(sql: Sql): Promise<void> {
       await sql`
         UPDATE wallet_loans 
         SET creator_name = COALESCE(
+          (SELECT display_name FROM wallet_members WHERE wallet_id = wallet_loans.wallet_id AND user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' LIMIT 1),
           (SELECT display_name FROM reminder_preferences WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' LIMIT 1),
-          (SELECT display_name FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' LIMIT 1)
+          (SELECT display_name FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND display_name IS NOT NULL AND display_name != '' ORDER BY joined_at DESC LIMIT 1)
         )
         WHERE creator_name IS NULL OR creator_name = owner_user_id OR creator_name = 'Creator' OR creator_name = 'Loan Owner'
+      `;
+      await sql`
+        UPDATE wallet_loans 
+        SET creator_email = COALESCE(
+          (SELECT email FROM wallet_members WHERE wallet_id = wallet_loans.wallet_id AND user_id = wallet_loans.owner_user_id AND email IS NOT NULL AND email != '' LIMIT 1),
+          (SELECT email FROM wallet_members WHERE user_id = wallet_loans.owner_user_id AND email IS NOT NULL AND email != '' ORDER BY joined_at DESC LIMIT 1)
+        )
+        WHERE creator_email IS NULL
       `;
       await sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`;
       await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS platform VARCHAR(50) DEFAULT NULL`;
@@ -1011,31 +1020,77 @@ async function upsertNotification(
   return rows[0] ? mapNotification(rows[0]) : null;
 }
 
+function isUndefinedColumnError(err: unknown, column: string): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: unknown; column_name?: unknown };
+  if (e.code === "42703") {
+    if (!column) return true;
+    const msg = typeof e.message === "string" ? e.message.toLowerCase() : "";
+    const col = column.toLowerCase();
+    const colName = typeof e.column_name === "string" ? e.column_name.toLowerCase() : "";
+    return msg.includes(col) || colName === col;
+  }
+  return false;
+}
+
 async function pruneExpiredBudgetNotifications(db: DbClient, userId?: string, now = new Date()): Promise<void> {
   const cutoff24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const cutoff7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  if (userId) {
+  try {
+    if (userId) {
+      await db`
+        DELETE FROM notifications
+        WHERE user_id = ${userId}
+          AND (
+            ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+            OR
+            (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
+            OR
+            (notification_status = ${"unread"} AND created_at < ${cutoff7d})
+          )
+      `;
+      return;
+    }
+
     await db`
       DELETE FROM notifications
-      WHERE user_id = ${userId}
-        AND (
-          ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
-          OR
-          (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
-          OR
-          (notification_status = ${"unread"} AND created_at < ${cutoff7d})
-        )
+      WHERE ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+         OR (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
+         OR (notification_status = ${"unread"} AND created_at < ${cutoff7d})
     `;
-    return;
-  }
+  } catch (err) {
+    if (!isUndefinedColumnError(err, "read_at")) {
+      console.warn("Notification pruning failed; skipping destructive fallback:", err);
+      return;
+    }
+    console.warn("Retrying notification pruning without read_at:", err);
+    try {
+      if (userId) {
+        await db`
+          DELETE FROM notifications
+          WHERE user_id = ${userId}
+            AND (
+              ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+              OR
+              (notification_status = ${"read"} AND created_at < ${cutoff24h})
+              OR
+              (notification_status = ${"unread"} AND created_at < ${cutoff7d})
+            )
+        `;
+        return;
+      }
 
-  await db`
-    DELETE FROM notifications
-    WHERE ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
-       OR (notification_status = ${"read"} AND COALESCE(read_at, created_at) < ${cutoff24h})
-       OR (notification_status = ${"unread"} AND created_at < ${cutoff7d})
-  `;
+      await db`
+        DELETE FROM notifications
+        WHERE ((notification_type = ${"budget-threshold"} OR notification_type = ${"budget-overspent"}) AND created_at < ${cutoff24h})
+           OR (notification_status = ${"read"} AND created_at < ${cutoff24h})
+           OR (notification_status = ${"unread"} AND created_at < ${cutoff7d})
+      `;
+    } catch (fallbackErr) {
+      console.warn("Notification pruning fallback failed:", fallbackErr);
+    }
+  }
 }
 
 async function loadWalletDetail(db: DbClient, walletId: string, pagination = getDefaultWalletHistoryPagination()): Promise<WalletDetailRecord> {

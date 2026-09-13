@@ -21,7 +21,7 @@ class AuthenticationConfigurationError extends Error {
 
 let sqlClient;
 let schemaReady;
-const RUN_SCHEMA_SETUP_ON_REQUEST = process.env.RUN_SCHEMA_SETUP_ON_REQUEST === "true";
+const RUN_SCHEMA_SETUP_ON_REQUEST = process.env.RUN_SCHEMA_SETUP_ON_REQUEST !== "false";
 const DEFAULT_WALLET_HISTORY_LIMIT = 50;
 const MAX_WALLET_HISTORY_LIMIT = 100;
 
@@ -587,6 +587,18 @@ async function safeSchemaStep(stepName, action) {
   }
 }
 
+function isUndefinedColumnError(err, column) {
+  if (!err) return false;
+  if (err.code === "42703") {
+    if (!column) return true;
+    const msg = typeof err.message === "string" ? err.message.toLowerCase() : "";
+    const col = column.toLowerCase();
+    const colName = typeof err.column_name === "string" ? err.column_name.toLowerCase() : "";
+    return msg.includes(col) || colName === col;
+  }
+  return false;
+}
+
 async function ensureSchema(sql) {
   if (!RUN_SCHEMA_SETUP_ON_REQUEST) {
     return;
@@ -650,6 +662,15 @@ async function ensureSchema(sql) {
       await safeSchemaStep("notifications dedupe key backfill", () => sql`UPDATE notifications SET dedupe_key = CONCAT('legacy:', id::text) WHERE dedupe_key IS NULL OR dedupe_key = ''`);
       await safeSchemaStep("notifications type check drop", () => sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`);
       await safeSchemaStep("notifications type check update", () => sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue', 'loan-repayment'))`);
+      await safeSchemaStep("wallet_loans backfill creator_name from wallet_members", () => sql`
+        UPDATE wallet_loans wl
+        SET creator_name = COALESCE(
+          (SELECT display_name FROM wallet_members wm WHERE wm.wallet_id = wl.wallet_id AND wm.user_id = wl.owner_user_id AND wm.display_name IS NOT NULL AND wm.display_name != '' LIMIT 1),
+          (SELECT display_name FROM wallet_members wm WHERE wm.user_id = wl.owner_user_id AND wm.display_name IS NOT NULL AND wm.display_name != '' ORDER BY wm.joined_at DESC LIMIT 1)
+        )
+        WHERE (wl.creator_name IS NULL OR wl.creator_name = wl.owner_user_id OR wl.creator_name = 'Creator' OR wl.creator_name = 'Loan Owner')
+          AND wl.owner_user_id IS NOT NULL
+      `);
       await safeSchemaStep("wallet_loans backfill creator_name from reminder_preferences", () => sql`
         UPDATE wallet_loans wl
         SET creator_name = rp.display_name
@@ -660,16 +681,14 @@ async function ensureSchema(sql) {
           AND rp.display_name IS NOT NULL
           AND rp.display_name != ''
       `);
-      await safeSchemaStep("wallet_loans backfill creator_name from wallet_members", () => sql`
+      await safeSchemaStep("wallet_loans backfill creator_email from wallet_members", () => sql`
         UPDATE wallet_loans wl
-        SET creator_name = wm.display_name,
-            creator_email = COALESCE(wl.creator_email, wm.email)
-        FROM wallet_members wm
-        WHERE (wl.creator_name IS NULL OR wl.creator_name = wl.owner_user_id OR wl.creator_name = 'Creator' OR wl.creator_name = 'Loan Owner')
+        SET creator_email = COALESCE(
+          (SELECT email FROM wallet_members wm WHERE wm.wallet_id = wl.wallet_id AND wm.user_id = wl.owner_user_id AND wm.email IS NOT NULL AND wm.email != '' LIMIT 1),
+          (SELECT email FROM wallet_members wm WHERE wm.user_id = wl.owner_user_id AND wm.email IS NOT NULL AND wm.email != '' ORDER BY wm.joined_at DESC LIMIT 1)
+        )
+        WHERE wl.creator_email IS NULL
           AND wl.owner_user_id IS NOT NULL
-          AND wm.user_id = wl.owner_user_id
-          AND wm.display_name IS NOT NULL
-          AND wm.display_name != ''
       `);
       await safeSchemaStep("notifications backfill read_at", () => sql`
         UPDATE notifications
@@ -718,10 +737,6 @@ async function ensureSchema(sql) {
 
       await safeSchemaStep("wallet budget index", () => sql`CREATE INDEX IF NOT EXISTS wallet_budgets_wallet_id_budget_month_idx ON wallet_budgets (wallet_id, budget_month DESC, created_at DESC)`);
       await safeSchemaStep("bill reminders index", () => sql`CREATE INDEX IF NOT EXISTS bill_reminders_user_id_due_date_idx ON bill_reminders (user_id, due_date ASC, created_at ASC)`);
-      await safeSchemaStep("notifications type constraint update", async () => {
-        await sql`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_notification_type_check`;
-        await sql`ALTER TABLE notifications ADD CONSTRAINT notifications_notification_type_check CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response'))`;
-      });
       await safeSchemaStep("reminder preferences default_currency column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS default_currency VARCHAR(10) DEFAULT 'USD'`);
       await safeSchemaStep("reminder preferences default_timezone column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS default_timezone VARCHAR(100) DEFAULT 'UTC'`);
       await safeSchemaStep("reminder preferences display_name column", () => sql`ALTER TABLE reminder_preferences ADD COLUMN IF NOT EXISTS display_name VARCHAR(120) DEFAULT NULL`);
@@ -2070,7 +2085,7 @@ async function loadLoanRecord(sql, loanId, viewingUserId) {
       SELECT wm.display_name, wm.email
       FROM wallet_members wm
       WHERE wm.user_id = wallet_loans.owner_user_id
-      ORDER BY (wm.display_name IS NOT NULL AND wm.display_name != '') DESC, wm.joined_at DESC
+      ORDER BY (wallet_loans.wallet_id IS NOT NULL AND wm.wallet_id = wallet_loans.wallet_id) DESC, (wm.display_name IS NOT NULL AND wm.display_name != '') DESC, wm.joined_at DESC
       LIMIT 1
     ) AS owner_member ON TRUE
     WHERE wallet_loans.id = ${loanId}
@@ -2095,53 +2110,234 @@ async function listLoansForUser(userId, userEmail) {
   await ensureSchema(sql);
   const normalizedEmail = userEmail ? userEmail.trim().toLowerCase() : null;
 
-  const loanRows = await sql`
-    SELECT wallet_loans.id,
-           wallet_loans.owner_user_id,
-           wallet_loans.wallet_id,
-           wallet_loans.lender_member_id,
-           COALESCE(lender_member.display_name, 'You') AS lender_member_name,
-           wallet_loans.borrower_member_id,
-           COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
-           wallet_loans.borrower_name,
-           wallet_loans.borrower_email,
-           wallet_loans.amount_minor,
-           wallet_loans.interest_rate_basis_points,
-           wallet_loans.interest_type,
-           wallet_loans.interest_rate_period,
-           wallet_loans.lending_date,
-           wallet_loans.due_date,
-           wallet_loans.interest_start_date,
-           wallet_loans.notes,
-           wallet_loans.status,
-           wallet_loans.loan_type,
-           wallet_loans.created_at,
-           COALESCE(
-             wallet_loans.creator_name,
-             owner_pref.display_name,
-             owner_member.display_name,
-             wallet_loans.borrower_name
-           ) AS creator_name,
-           COALESCE(
-             wallet_loans.creator_email,
-             owner_member.email
-           ) AS creator_email
-    FROM wallet_loans
-    LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
-    LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
-    LEFT JOIN reminder_preferences AS owner_pref ON owner_pref.user_id = wallet_loans.owner_user_id
-    LEFT JOIN LATERAL (
-      SELECT wm.display_name, wm.email
-      FROM wallet_members wm
-      WHERE wm.user_id = wallet_loans.owner_user_id
-      ORDER BY (wm.display_name IS NOT NULL AND wm.display_name != '') DESC, wm.joined_at DESC
-      LIMIT 1
-    ) AS owner_member ON TRUE
-    WHERE wallet_loans.owner_user_id = ${userId}
-       OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
-       OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
-    ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
-  `;
+  let loanRows;
+  try {
+    loanRows = await sql`
+      SELECT wallet_loans.id,
+             wallet_loans.owner_user_id,
+             wallet_loans.wallet_id,
+             wallet_loans.lender_member_id,
+             COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+             wallet_loans.borrower_member_id,
+             COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+             wallet_loans.borrower_name,
+             wallet_loans.borrower_email,
+             wallet_loans.amount_minor,
+             wallet_loans.interest_rate_basis_points,
+             wallet_loans.interest_type,
+             wallet_loans.interest_rate_period,
+             wallet_loans.lending_date,
+             wallet_loans.due_date,
+             wallet_loans.interest_start_date,
+             wallet_loans.notes,
+             wallet_loans.status,
+             wallet_loans.loan_type,
+             wallet_loans.created_at,
+             COALESCE(
+               wallet_loans.creator_name,
+               owner_pref.display_name,
+               owner_member.display_name,
+               wallet_loans.borrower_name
+             ) AS creator_name,
+             COALESCE(
+               wallet_loans.creator_email,
+               owner_member.email
+             ) AS creator_email
+      FROM wallet_loans
+      LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+      LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+      LEFT JOIN reminder_preferences AS owner_pref ON owner_pref.user_id = wallet_loans.owner_user_id
+      LEFT JOIN LATERAL (
+        SELECT wm.display_name, wm.email
+        FROM wallet_members wm
+        WHERE wm.user_id = wallet_loans.owner_user_id
+        ORDER BY (wallet_loans.wallet_id IS NOT NULL AND wm.wallet_id = wallet_loans.wallet_id) DESC, (wm.display_name IS NOT NULL AND wm.display_name != '') DESC, wm.joined_at DESC
+        LIMIT 1
+      ) AS owner_member ON TRUE
+      WHERE wallet_loans.owner_user_id = ${userId}
+         OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
+         OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+      ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+    `;
+  } catch (primaryErr) {
+    console.warn("Retrying listLoansForUser with reduced enrichment fallback:", primaryErr);
+    try {
+      loanRows = await sql`
+        SELECT wallet_loans.id,
+               wallet_loans.owner_user_id,
+               wallet_loans.wallet_id,
+               wallet_loans.lender_member_id,
+               COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+               wallet_loans.borrower_member_id,
+               COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+               wallet_loans.borrower_name,
+               wallet_loans.borrower_email,
+               wallet_loans.amount_minor,
+               wallet_loans.interest_rate_basis_points,
+               wallet_loans.interest_type,
+               wallet_loans.interest_rate_period,
+               wallet_loans.lending_date,
+               wallet_loans.due_date,
+               wallet_loans.interest_start_date,
+               wallet_loans.notes,
+               wallet_loans.status,
+               COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+               wallet_loans.created_at,
+               'Loan Owner' AS creator_name,
+               NULL AS creator_email
+        FROM wallet_loans
+        LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+        LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+        WHERE wallet_loans.owner_user_id = ${userId}
+           OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
+           OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+        ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+      `;
+    } catch (reducedErr) {
+      if (isUndefinedColumnError(reducedErr, "borrower_name")) {
+        console.warn("Retrying listLoansForUser without borrower_name, keeping borrower_email:", reducedErr);
+        try {
+          loanRows = await sql`
+            SELECT wallet_loans.id,
+                   wallet_loans.owner_user_id,
+                   wallet_loans.wallet_id,
+                   wallet_loans.lender_member_id,
+                   COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+                   wallet_loans.borrower_member_id,
+                   COALESCE(borrower_member.display_name, 'Borrower') AS borrower_member_name,
+                   NULL AS borrower_name,
+                   wallet_loans.borrower_email,
+                   wallet_loans.amount_minor,
+                   wallet_loans.interest_rate_basis_points,
+                   wallet_loans.interest_type,
+                   wallet_loans.interest_rate_period,
+                   wallet_loans.lending_date,
+                   wallet_loans.due_date,
+                   wallet_loans.interest_start_date,
+                   wallet_loans.notes,
+                   wallet_loans.status,
+                   COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.created_at,
+                   'Loan Owner' AS creator_name,
+                   NULL AS creator_email
+            FROM wallet_loans
+            LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+            LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+            WHERE wallet_loans.owner_user_id = ${userId}
+               OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
+               OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+            ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+          `;
+        } catch (noNameErr) {
+          if (!isUndefinedColumnError(noNameErr, "borrower_email")) {
+            throw noNameErr;
+          }
+          console.warn("Retrying listLoansForUser without borrower_email predicate:", noNameErr);
+          loanRows = await sql`
+            SELECT wallet_loans.id,
+                   wallet_loans.owner_user_id,
+                   wallet_loans.wallet_id,
+                   wallet_loans.lender_member_id,
+                   COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+                   wallet_loans.borrower_member_id,
+                   COALESCE(borrower_member.display_name, 'Borrower') AS borrower_member_name,
+                   NULL AS borrower_name,
+                   NULL AS borrower_email,
+                   wallet_loans.amount_minor,
+                   wallet_loans.interest_rate_basis_points,
+                   wallet_loans.interest_type,
+                   wallet_loans.interest_rate_period,
+                   wallet_loans.lending_date,
+                   wallet_loans.due_date,
+                   wallet_loans.interest_start_date,
+                   wallet_loans.notes,
+                   wallet_loans.status,
+                   COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.created_at,
+                   'Loan Owner' AS creator_name,
+                   NULL AS creator_email
+            FROM wallet_loans
+            LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+            LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+            WHERE wallet_loans.owner_user_id = ${userId}
+               OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+            ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+          `;
+        }
+      } else if (isUndefinedColumnError(reducedErr, "borrower_email")) {
+        console.warn("Retrying listLoansForUser without borrower_email predicate, keeping borrower_name:", reducedErr);
+        try {
+          loanRows = await sql`
+            SELECT wallet_loans.id,
+                   wallet_loans.owner_user_id,
+                   wallet_loans.wallet_id,
+                   wallet_loans.lender_member_id,
+                   COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+                   wallet_loans.borrower_member_id,
+                   COALESCE(borrower_member.display_name, wallet_loans.borrower_name, 'Borrower') AS borrower_member_name,
+                   wallet_loans.borrower_name,
+                   NULL AS borrower_email,
+                   wallet_loans.amount_minor,
+                   wallet_loans.interest_rate_basis_points,
+                   wallet_loans.interest_type,
+                   wallet_loans.interest_rate_period,
+                   wallet_loans.lending_date,
+                   wallet_loans.due_date,
+                   wallet_loans.interest_start_date,
+                   wallet_loans.notes,
+                   wallet_loans.status,
+                   COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.created_at,
+                   'Loan Owner' AS creator_name,
+                   NULL AS creator_email
+            FROM wallet_loans
+            LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+            LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+            WHERE wallet_loans.owner_user_id = ${userId}
+               OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+            ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+          `;
+        } catch (noEmailErr) {
+          if (!isUndefinedColumnError(noEmailErr, "borrower_name")) {
+            throw noEmailErr;
+          }
+          console.warn("Retrying listLoansForUser with neither borrower_email nor borrower_name:", noEmailErr);
+          loanRows = await sql`
+            SELECT wallet_loans.id,
+                   wallet_loans.owner_user_id,
+                   wallet_loans.wallet_id,
+                   wallet_loans.lender_member_id,
+                   COALESCE(lender_member.display_name, 'You') AS lender_member_name,
+                   wallet_loans.borrower_member_id,
+                   COALESCE(borrower_member.display_name, 'Borrower') AS borrower_member_name,
+                   NULL AS borrower_name,
+                   NULL AS borrower_email,
+                   wallet_loans.amount_minor,
+                   wallet_loans.interest_rate_basis_points,
+                   wallet_loans.interest_type,
+                   wallet_loans.interest_rate_period,
+                   wallet_loans.lending_date,
+                   wallet_loans.due_date,
+                   wallet_loans.interest_start_date,
+                   wallet_loans.notes,
+                   wallet_loans.status,
+                   COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.created_at,
+                   'Loan Owner' AS creator_name,
+                   NULL AS creator_email
+            FROM wallet_loans
+            LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
+            LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+            WHERE wallet_loans.owner_user_id = ${userId}
+               OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
+            ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
+          `;
+        }
+      } else {
+        throw reducedErr;
+      }
+    }
+  }
 
   const loanIds = loanRows.map((loan) => loan.id);
   const repaymentRows = loanIds.length === 0 ? [] : await sql`
@@ -2498,9 +2694,20 @@ async function deleteBillReminderForUser(userId, billReminderId) {
 async function listNotificationsForUser(userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
-  await pruneExpiredBudgetNotifications(sql, userId);
-  const rows = await sql`SELECT id, user_id, notification_type, title, message, notification_status, created_at, read_at, scheduled_for, metadata_json, dedupe_key FROM notifications WHERE user_id = ${userId} ORDER BY created_at DESC`;
-  return { status: 200, body: { notifications: rows.map(mapNotification) } };
+  try {
+    await pruneExpiredBudgetNotifications(sql, userId);
+  } catch (pruneErr) {
+    console.warn("Failed to prune notifications, continuing:", pruneErr);
+  }
+
+  try {
+    const rows = await sql`SELECT id, user_id, notification_type, title, message, notification_status, created_at, read_at, scheduled_for, metadata_json, dedupe_key FROM notifications WHERE user_id = ${userId} ORDER BY created_at DESC`;
+    return { status: 200, body: { notifications: rows.map(mapNotification) } };
+  } catch (err) {
+    console.warn("Retrying notifications query without read_at:", err);
+    const fallbackRows = await sql`SELECT id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key FROM notifications WHERE user_id = ${userId} ORDER BY created_at DESC`;
+    return { status: 200, body: { notifications: fallbackRows.map((r) => mapNotification({ ...r, read_at: null })) } };
+  }
 }
 
 async function markNotificationReadForUser(userId, notificationId) {
@@ -2574,24 +2781,55 @@ async function pruneExpiredBudgetNotifications(sql, userId = null, now = new Dat
   const readCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const unreadCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  if (userId) {
+  try {
+    if (userId) {
+      await sql`
+        DELETE FROM notifications
+        WHERE user_id = ${userId}
+          AND (
+            (notification_status = 'read' AND COALESCE(read_at, created_at) < ${readCutoff})
+            OR
+            (notification_status = 'unread' AND created_at < ${unreadCutoff})
+          )
+      `;
+      return;
+    }
+
     await sql`
       DELETE FROM notifications
-      WHERE user_id = ${userId}
-        AND (
-          (notification_status = 'read' AND COALESCE(read_at, created_at) < ${readCutoff})
-          OR
-          (notification_status = 'unread' AND created_at < ${unreadCutoff})
-        )
+      WHERE (notification_status = 'read' AND COALESCE(read_at, created_at) < ${readCutoff})
+         OR (notification_status = 'unread' AND created_at < ${unreadCutoff})
     `;
-    return;
-  }
+  } catch (err) {
+    if (!isUndefinedColumnError(err, "read_at")) {
+      console.warn("Notification pruning failed; skipping destructive fallback:", err);
+      return;
+    }
 
-  await sql`
-    DELETE FROM notifications
-    WHERE (notification_status = 'read' AND COALESCE(read_at, created_at) < ${readCutoff})
-       OR (notification_status = 'unread' AND created_at < ${unreadCutoff})
-  `;
+    console.warn("Retrying notification pruning without read_at:", err);
+    try {
+      if (userId) {
+        await sql`
+          DELETE FROM notifications
+          WHERE user_id = ${userId}
+            AND (
+              (notification_status = 'read' AND created_at < ${readCutoff})
+              OR
+              (notification_status = 'unread' AND created_at < ${unreadCutoff})
+            )
+        `;
+        return;
+      }
+
+      await sql`
+        DELETE FROM notifications
+        WHERE (notification_status = 'read' AND created_at < ${readCutoff})
+           OR (notification_status = 'unread' AND created_at < ${unreadCutoff})
+      `;
+    } catch (fallbackErr) {
+      console.warn("Notification pruning fallback failed:", fallbackErr);
+    }
+  }
 }
 
 function getTodayIsoDate(baseDate = new Date()) {
