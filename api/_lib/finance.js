@@ -399,17 +399,36 @@ function mapWalletLoanRepayment(row) {
   };
 }
 
-function mapWalletLoan(row, repayments = []) {
+function mapWalletLoan(row, repayments = [], viewingUserId) {
+  const isOwner = viewingUserId ? row.owner_user_id === viewingUserId : true;
+  const originalLoanType = row.loan_type || "lent";
+  const displayLoanType = isOwner ? originalLoanType : (originalLoanType === "lent" ? "borrowed" : "lent");
+
+  const creatorName = row.creator_name || "Creator";
+  const creatorEmail = row.creator_email || null;
+
+  let lenderMemberName = row.lender_member_name ?? "You";
+  let borrowerMemberName = row.borrower_member_name ?? row.borrower_name ?? "Borrower";
+  let borrowerName = row.borrower_name ?? row.borrower_member_name ?? null;
+  let borrowerEmail = row.borrower_email ?? null;
+
+  if (!isOwner) {
+    borrowerName = creatorName;
+    borrowerMemberName = creatorName;
+    borrowerEmail = creatorEmail;
+    lenderMemberName = creatorName;
+  }
+
   return {
     id: row.id,
     owner_user_id: row.owner_user_id ?? null,
     wallet_id: row.wallet_id ?? null,
     lender_member_id: row.lender_member_id ?? null,
-    lender_member_name: row.lender_member_name ?? "You",
+    lender_member_name: lenderMemberName,
     borrower_member_id: row.borrower_member_id ?? null,
-    borrower_member_name: row.borrower_member_name ?? row.borrower_name ?? "Borrower",
-    borrower_name: row.borrower_name ?? row.borrower_member_name ?? null,
-    borrower_email: row.borrower_email ?? null,
+    borrower_member_name: borrowerMemberName,
+    borrower_name: borrowerName,
+    borrower_email: borrowerEmail,
     amount: formatMinorUnits(Number(row.amount_minor)),
     interest_rate: row.interest_rate_basis_points ? row.interest_rate_basis_points / 100 : 0,
     interest_type: row.interest_type,
@@ -419,9 +438,12 @@ function mapWalletLoan(row, repayments = []) {
     interest_start_date: row.interest_start_date ? asIsoDate(row.interest_start_date) : null,
     notes: row.notes,
     status: row.status,
-    loan_type: row.loan_type || "lent",
+    loan_type: displayLoanType,
     created_at: asIsoTimestamp(row.created_at),
-    repayments
+    repayments,
+    is_owner: isOwner,
+    creator_name: creatorName,
+    creator_email: creatorEmail
   };
 }
 
@@ -1956,7 +1978,7 @@ async function deleteWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
   return { status: 200, body: { wallet } };
 }
 
-async function loadLoanRecord(sql, loanId) {
+async function loadLoanRecord(sql, loanId, viewingUserId) {
   const loanRows = await sql`
     SELECT wallet_loans.id,
            wallet_loans.owner_user_id,
@@ -1977,10 +1999,13 @@ async function loadLoanRecord(sql, loanId) {
            wallet_loans.notes,
            wallet_loans.status,
            wallet_loans.loan_type,
-           wallet_loans.created_at
+           wallet_loans.created_at,
+           COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
+           owner_member.email AS creator_email
     FROM wallet_loans
     LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
     LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
     WHERE wallet_loans.id = ${loanId}
   `;
   const loan = loanRows[0];
@@ -1995,12 +2020,13 @@ async function loadLoanRecord(sql, loanId) {
     ORDER BY repayment_date ASC, created_at ASC
   `;
 
-  return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment));
+  return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment), viewingUserId);
 }
 
-async function listLoansForUser(userId) {
+async function listLoansForUser(userId, userEmail) {
   const sql = getSqlClient();
   await ensureSchema(sql);
+  const normalizedEmail = userEmail ? userEmail.trim().toLowerCase() : null;
 
   const loanRows = await sql`
     SELECT wallet_loans.id,
@@ -2022,11 +2048,16 @@ async function listLoansForUser(userId) {
            wallet_loans.notes,
            wallet_loans.status,
            wallet_loans.loan_type,
-           wallet_loans.created_at
+           wallet_loans.created_at,
+           COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
+           owner_member.email AS creator_email
     FROM wallet_loans
     LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
     LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
     WHERE wallet_loans.owner_user_id = ${userId}
+       OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
+       OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
     ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
   `;
 
@@ -2045,7 +2076,7 @@ async function listLoansForUser(userId) {
     repaymentsByLoanId.set(repayment.loan_id, records);
   }
 
-  const loans = loanRows.map((loan) => mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? []));
+  const loans = loanRows.map((loan) => mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? [], userId));
   return { status: 200, body: { loans } };
 }
 
@@ -2186,16 +2217,24 @@ async function deleteStandaloneLoanForUser(userId, loanId) {
   return { status: 200, body: { ok: true } };
 }
 
-async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody) {
+async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody, userEmail) {
   const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
   if (!result.success) {
     return { status: 400, body: { error: "Invalid loan repayment payload.", details: result.error.flatten() } };
   }
   const sql = getSqlClient();
   await ensureSchema(sql);
+  const normalizedEmail = userEmail ? userEmail.trim().toLowerCase() : null;
 
   const loan = await sql.begin(async (tx) => {
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+    const loanRows = await tx`
+      SELECT id, owner_user_id 
+      FROM wallet_loans 
+      WHERE id = ${loanId} 
+        AND (owner_user_id = ${userId}
+             OR (${normalizedEmail}::text IS NOT NULL AND borrower_email IS NOT NULL AND lower(borrower_email) = ${normalizedEmail})
+             OR borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId}))
+    `;
     if (!loanRows[0]) {
       throw new Error("Loan not found.");
     }
@@ -2212,7 +2251,7 @@ async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody) {
       )
     `;
 
-    return loadLoanRecord(tx, loanId);
+    return loadLoanRecord(tx, loanId, userId);
   });
 
   return { status: 201, body: { loan } };

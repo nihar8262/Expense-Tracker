@@ -1082,9 +1082,9 @@ export async function handleDeleteWalletLoanRepayment(walletId: string, loanId: 
   }
 }
 
-export async function handleListLoans(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+export async function handleListLoans(userId: string, userEmail: string | null | undefined, store: ExpenseStore): Promise<HandlerResponse> {
   try {
-    const loans = await store.listLoans(userId);
+    const loans = await store.listLoans(userId, userEmail);
     return {
       status: 200,
       body: { loans }
@@ -1194,7 +1194,7 @@ export async function handleDeleteStandaloneLoan(loanId: string, userId: string,
   }
 }
 
-export async function handleCreateStandaloneLoanRepayment(rawBody: unknown, loanId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+export async function handleCreateStandaloneLoanRepayment(rawBody: unknown, loanId: string, userId: string, userEmail: string | null | undefined, store: ExpenseStore): Promise<HandlerResponse> {
   const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
 
   if (!result.success) {
@@ -1208,7 +1208,7 @@ export async function handleCreateStandaloneLoanRepayment(rawBody: unknown, loan
   }
 
   try {
-    const loan = await store.createStandaloneLoanRepayment(userId, loanId, result.data);
+    const loan = await store.createStandaloneLoanRepayment(userId, loanId, result.data, userEmail);
     return {
       status: 201,
       body: { loan }

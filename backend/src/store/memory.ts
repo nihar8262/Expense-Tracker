@@ -508,12 +508,31 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return wallet;
   }
 
-  function mapLoanRecord(loan: StoredWalletLoan): WalletLoanRecord {
+  function mapLoanRecord(loan: StoredWalletLoan, viewingUserId?: string): WalletLoanRecord {
+    const isOwner = viewingUserId ? loan.ownerUserId === viewingUserId : true;
+    const originalLoanType = loan.loanType ?? "lent";
+    const displayLoanType = isOwner ? originalLoanType : (originalLoanType === "lent" ? "borrowed" : "lent");
+
+    // Look up creator's display name and email if available
+    let creatorName = loan.ownerUserId || "Creator";
+    let creatorEmail: string | null = null;
+    const prefs = reminderPreferences.get(loan.ownerUserId);
+    if (prefs?.displayName) {
+      creatorName = prefs.displayName;
+    }
+    for (const m of walletMembers.values()) {
+      if (m.userId === loan.ownerUserId) {
+        if (m.displayName) creatorName = m.displayName;
+        if (m.email) creatorEmail = m.email;
+        break;
+      }
+    }
+
     const lender = loan.lenderMemberId ? walletMembers.get(loan.lenderMemberId) : null;
     const borrower = loan.borrowerMemberId ? walletMembers.get(loan.borrowerMemberId) : null;
     const repayments = [...walletLoanRepayments.values()]
       .filter((rep) => rep.loanId === loan.id)
-      .sort((a, b) => a.repaymentDate.localeCompare(b.repaymentDate) || a.createdAt.localeCompare(b.createdAt))
+      .sort((a, b) => a.repaymentDate.localeCompare(b.repaymentDate) || a.createdAt.localeCompare(a.createdAt))
       .map((rep) => ({
         id: rep.id,
         loan_id: rep.loanId,
@@ -523,16 +542,28 @@ export function createMemoryExpenseStore(): ExpenseStore {
         created_at: rep.createdAt
       }));
 
+    let lenderMemberName = lender?.displayName ?? "You";
+    let borrowerMemberName = borrower?.displayName ?? loan.borrowerName ?? "Borrower";
+    let borrowerName = loan.borrowerName ?? borrower?.displayName ?? null;
+    let borrowerEmail = loan.borrowerEmail ?? borrower?.email ?? null;
+
+    if (!isOwner) {
+      borrowerName = creatorName;
+      borrowerMemberName = creatorName;
+      borrowerEmail = creatorEmail;
+      lenderMemberName = creatorName;
+    }
+
     return {
       id: loan.id,
       owner_user_id: loan.ownerUserId,
       wallet_id: loan.walletId,
       lender_member_id: loan.lenderMemberId,
-      lender_member_name: lender?.displayName ?? "You",
+      lender_member_name: lenderMemberName,
       borrower_member_id: loan.borrowerMemberId,
-      borrower_member_name: borrower?.displayName ?? loan.borrowerName ?? "Borrower",
-      borrower_name: loan.borrowerName ?? borrower?.displayName ?? null,
-      borrower_email: loan.borrowerEmail ?? borrower?.email ?? null,
+      borrower_member_name: borrowerMemberName,
+      borrower_name: borrowerName,
+      borrower_email: borrowerEmail,
       amount: formatMinorUnits(loan.amountMinor),
       interest_rate: loan.interestRateBasisPoints ? loan.interestRateBasisPoints / 100 : 0,
       interest_type: loan.interestType,
@@ -542,9 +573,12 @@ export function createMemoryExpenseStore(): ExpenseStore {
       interest_start_date: loan.interestStartDate,
       notes: loan.notes,
       status: loan.status,
-      loan_type: loan.loanType ?? "lent",
+      loan_type: displayLoanType,
       created_at: loan.createdAt,
-      repayments
+      repayments,
+      is_owner: isOwner,
+      creator_name: creatorName,
+      creator_email: creatorEmail
     };
   }
 
@@ -1966,11 +2000,25 @@ export function createMemoryExpenseStore(): ExpenseStore {
     return buildWalletDetail(walletId);
   }
 
-  async function listLoans(userId: string): Promise<WalletLoanRecord[]> {
+  async function listLoans(userId: string, userEmail?: string | null): Promise<WalletLoanRecord[]> {
+    const normalizedUserEmail = userEmail?.trim().toLowerCase() || null;
+
+    const userMemberIds = new Set<string>();
+    for (const m of walletMembers.values()) {
+      if (m.userId === userId || (normalizedUserEmail && m.email && m.email.toLowerCase() === normalizedUserEmail)) {
+        userMemberIds.add(m.id);
+      }
+    }
+
     return [...walletLoans.values()]
-      .filter((loan) => loan.ownerUserId === userId)
+      .filter((loan) => {
+        if (loan.ownerUserId === userId) return true;
+        if (loan.borrowerMemberId && userMemberIds.has(loan.borrowerMemberId)) return true;
+        if (normalizedUserEmail && loan.borrowerEmail && loan.borrowerEmail.trim().toLowerCase() === normalizedUserEmail) return true;
+        return false;
+      })
       .sort((a, b) => b.lendingDate.localeCompare(a.lendingDate) || b.createdAt.localeCompare(a.createdAt))
-      .map(mapLoanRecord);
+      .map((loan) => mapLoanRecord(loan, userId));
   }
 
   async function createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord> {
@@ -2074,9 +2122,20 @@ export function createMemoryExpenseStore(): ExpenseStore {
     }
   }
 
-  async function createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord> {
+  async function createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput, userEmail?: string | null): Promise<WalletLoanRecord> {
     const existingLoan = walletLoans.get(loanId);
-    if (!existingLoan || existingLoan.ownerUserId !== userId) {
+    if (!existingLoan) {
+      throw new WalletLoanNotFoundError();
+    }
+
+    const normalizedUserEmail = userEmail?.trim().toLowerCase() || null;
+    const isOwner = existingLoan.ownerUserId === userId;
+    const isCounterparty = Boolean(
+      (normalizedUserEmail && existingLoan.borrowerEmail && existingLoan.borrowerEmail.trim().toLowerCase() === normalizedUserEmail) ||
+      (existingLoan.borrowerMemberId && [...walletMembers.values()].some((m) => m.id === existingLoan.borrowerMemberId && (m.userId === userId || (normalizedUserEmail && m.email?.toLowerCase() === normalizedUserEmail))))
+    );
+
+    if (!isOwner && !isCounterparty) {
       throw new WalletLoanNotFoundError();
     }
 
@@ -2090,7 +2149,7 @@ export function createMemoryExpenseStore(): ExpenseStore {
     };
 
     walletLoanRepayments.set(repayment.id, repayment);
-    return mapLoanRecord(existingLoan);
+    return mapLoanRecord(existingLoan, userId);
   }
 
   async function deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord> {

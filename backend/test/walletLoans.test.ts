@@ -529,4 +529,82 @@ describe("Wallet Loans & Lending API", () => {
     expect(updateStandRepRes.status).toBe(200);
     expect(updateStandRepRes.body.loan.repayments[0].amount).toBe("750.00");
   });
+
+  it("provides mirrored view for counterparty member/email with inverted loan_type and allows repayment", async () => {
+    const { app } = buildApp();
+
+    // 1. Owner creates a loan lending money to Dave
+    const createRes = await request(app)
+      .post("/api/loans")
+      .set("Authorization", "Bearer owner-user")
+      .send({
+        borrowerName: "Dave Outside",
+        borrowerEmail: "dave-user@example.com",
+        amount: "2500.00",
+        loanType: "lent",
+        lendingDate: "2026-09-10",
+        notes: "Project advance"
+      });
+
+    expect(createRes.status).toBe(201);
+    const loanId = createRes.body.loan.id;
+    expect(createRes.body.loan.loan_type).toBe("lent");
+    expect(createRes.body.loan.is_owner).toBe(true);
+
+    // 2. Dave logs in and lists loans
+    const daveListRes = await request(app)
+      .get("/api/loans")
+      .set("Authorization", "Bearer dave-user");
+
+    expect(daveListRes.status).toBe(200);
+    const daveLoans = daveListRes.body.loans;
+    const mirroredLoan = daveLoans.find((l: any) => l.id === loanId);
+    expect(mirroredLoan).toBeDefined();
+
+    // Perspective inverted for Dave: lent -> borrowed
+    expect(mirroredLoan.loan_type).toBe("borrowed");
+    expect(mirroredLoan.is_owner).toBe(false);
+    expect(mirroredLoan.amount).toBe("2500.00");
+    // Counterparty shown as creator
+    expect(mirroredLoan.borrower_name).toBe("owner-user");
+
+    // 3. Dave cannot edit loan terms or delete loan
+    const editRes = await request(app)
+      .put(`/api/loans/${loanId}`)
+      .set("Authorization", "Bearer dave-user")
+      .send({ amount: "3000.00" });
+    expect(editRes.status).toBe(404);
+
+    const deleteRes = await request(app)
+      .delete(`/api/loans/${loanId}`)
+      .set("Authorization", "Bearer dave-user");
+    expect(deleteRes.status).toBe(404);
+
+    // 4. Dave CAN record a repayment (pay back the loan)
+    const repayRes = await request(app)
+      .post(`/api/loans/${loanId}/repayments`)
+      .set("Authorization", "Bearer dave-user")
+      .send({
+        amount: "1000.00",
+        repaymentDate: "2026-09-12",
+        notes: "First payback"
+      });
+
+    expect(repayRes.status).toBe(201);
+    expect(repayRes.body.loan.repayments).toHaveLength(1);
+    expect(repayRes.body.loan.repayments[0].amount).toBe("1000.00");
+    expect(repayRes.body.loan.loan_type).toBe("borrowed");
+    expect(repayRes.body.loan.is_owner).toBe(false);
+
+    // 5. Owner checks the loan - sees Dave's repayment, and loan_type is still "lent" for owner
+    const ownerListRes = await request(app)
+      .get("/api/loans")
+      .set("Authorization", "Bearer owner-user");
+
+    const ownerLoan = ownerListRes.body.loans.find((l: any) => l.id === loanId);
+    expect(ownerLoan.loan_type).toBe("lent");
+    expect(ownerLoan.is_owner).toBe(true);
+    expect(ownerLoan.repayments).toHaveLength(1);
+    expect(ownerLoan.repayments[0].amount).toBe("1000.00");
+  });
 });

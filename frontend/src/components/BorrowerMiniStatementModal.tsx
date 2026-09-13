@@ -1054,7 +1054,7 @@ export function BorrowerMiniStatementModal({
                         )}
 
                         <div className="pt-2 border-t border-[color:var(--border)] flex items-center justify-end gap-2">
-                          {onOpenEditLoan && (
+                          {onOpenEditLoan && loan.is_owner !== false && (
                             <button
                               type="button"
                               onClick={() => {

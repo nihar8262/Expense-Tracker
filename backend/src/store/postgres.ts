@@ -176,6 +176,8 @@ type WalletLoanRow = {
   notes: string | null;
   status: "active" | "settled" | "cancelled";
   loan_type?: "lent" | "borrowed" | null;
+  creator_name?: string | null;
+  creator_email?: string | null;
   created_at: string | Date;
 };
 
@@ -314,17 +316,36 @@ function mapWalletLoanRepayment(row: WalletLoanRepaymentRow): WalletLoanRepaymen
   };
 }
 
-function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord[] = []): WalletLoanRecord {
+function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord[] = [], viewingUserId?: string): WalletLoanRecord {
+  const isOwner = viewingUserId ? row.owner_user_id === viewingUserId : true;
+  const originalLoanType = (row.loan_type as "lent" | "borrowed") ?? "lent";
+  const displayLoanType = isOwner ? originalLoanType : (originalLoanType === "lent" ? "borrowed" : "lent");
+
+  const creatorName = row.creator_name || "Creator";
+  const creatorEmail = row.creator_email || null;
+
+  let lenderMemberName = row.lender_member_name ?? "You";
+  let borrowerMemberName = row.borrower_member_name ?? row.borrower_name ?? "Borrower";
+  let borrowerName = row.borrower_name ?? row.borrower_member_name ?? null;
+  let borrowerEmail = row.borrower_email ?? null;
+
+  if (!isOwner) {
+    borrowerName = creatorName;
+    borrowerMemberName = creatorName;
+    borrowerEmail = creatorEmail;
+    lenderMemberName = creatorName;
+  }
+
   return {
     id: row.id,
     owner_user_id: row.owner_user_id ?? null,
     wallet_id: row.wallet_id ?? null,
     lender_member_id: row.lender_member_id ?? null,
-    lender_member_name: row.lender_member_name ?? "You",
+    lender_member_name: lenderMemberName,
     borrower_member_id: row.borrower_member_id ?? null,
-    borrower_member_name: row.borrower_member_name ?? row.borrower_name ?? "Borrower",
-    borrower_name: row.borrower_name ?? row.borrower_member_name ?? null,
-    borrower_email: row.borrower_email ?? null,
+    borrower_member_name: borrowerMemberName,
+    borrower_name: borrowerName,
+    borrower_email: borrowerEmail,
     amount: formatMinorUnits(Number(row.amount_minor)),
     interest_rate: row.interest_rate_basis_points ? row.interest_rate_basis_points / 100 : 0,
     interest_type: row.interest_type,
@@ -334,9 +355,12 @@ function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord
     interest_start_date: row.interest_start_date ? asIsoDate(row.interest_start_date) : null,
     notes: row.notes,
     status: row.status,
-    loan_type: (row.loan_type as "lent" | "borrowed") ?? "lent",
+    loan_type: displayLoanType,
     created_at: asIsoTimestamp(row.created_at),
-    repayments
+    repayments,
+    is_owner: isOwner,
+    creator_name: creatorName,
+    creator_email: creatorEmail
   };
 }
 
@@ -1338,8 +1362,8 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
   };
 }
 
-async function loadLoanRecord(db: SqlOrTransaction, loanId: string): Promise<WalletLoanRecord> {
-  const loanRows = await db<WalletLoanRow[]>`
+async function loadLoanRecord(db: SqlOrTransaction, loanId: string, viewingUserId?: string): Promise<WalletLoanRecord> {
+  const loanRows = await db<(WalletLoanRow & { creator_name?: string | null; creator_email?: string | null })[]>`
     SELECT wallet_loans.id,
            wallet_loans.owner_user_id,
            wallet_loans.wallet_id,
@@ -1359,10 +1383,13 @@ async function loadLoanRecord(db: SqlOrTransaction, loanId: string): Promise<Wal
            wallet_loans.notes,
            wallet_loans.status,
            wallet_loans.loan_type,
-           wallet_loans.created_at
+           wallet_loans.created_at,
+           COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
+           owner_member.email AS creator_email
     FROM wallet_loans
     LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
     LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+    LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
     WHERE wallet_loans.id = ${loanId}
   `;
   const loan = loanRows[0];
@@ -1377,7 +1404,7 @@ async function loadLoanRecord(db: SqlOrTransaction, loanId: string): Promise<Wal
     ORDER BY repayment_date ASC, created_at ASC
   `;
 
-  return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment));
+  return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment), viewingUserId);
 }
 
 export function createPostgresExpenseStore(): ExpenseStore {
@@ -2724,10 +2751,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
       });
     },
 
-    async listLoans(userId: string): Promise<WalletLoanRecord[]> {
+    async listLoans(userId: string, userEmail?: string | null): Promise<WalletLoanRecord[]> {
       await ensureSchema(sql);
+      const normalizedEmail = userEmail?.trim().toLowerCase() || null;
 
-      const loanRows = await sql<WalletLoanRow[]>`
+      const loanRows = await sql<(WalletLoanRow & { creator_name?: string | null; creator_email?: string | null })[]>`
         SELECT wallet_loans.id,
                wallet_loans.owner_user_id,
                wallet_loans.wallet_id,
@@ -2746,11 +2774,17 @@ export function createPostgresExpenseStore(): ExpenseStore {
                wallet_loans.interest_start_date,
                wallet_loans.notes,
                wallet_loans.status,
-               wallet_loans.created_at
+               wallet_loans.loan_type,
+               wallet_loans.created_at,
+               COALESCE(owner_member.display_name, wallet_loans.owner_user_id, 'Creator') AS creator_name,
+               owner_member.email AS creator_email
         FROM wallet_loans
         LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
         LEFT JOIN wallet_members AS borrower_member ON borrower_member.id = wallet_loans.borrower_member_id
+        LEFT JOIN wallet_members AS owner_member ON owner_member.wallet_id = wallet_loans.wallet_id AND owner_member.user_id = wallet_loans.owner_user_id
         WHERE wallet_loans.owner_user_id = ${userId}
+           OR (${normalizedEmail}::text IS NOT NULL AND wallet_loans.borrower_email IS NOT NULL AND lower(wallet_loans.borrower_email) = ${normalizedEmail})
+           OR wallet_loans.borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId})
         ORDER BY wallet_loans.lending_date DESC, wallet_loans.created_at DESC
       `;
 
@@ -2769,7 +2803,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
         repaymentsByLoanId.set(repayment.loan_id, records);
       }
 
-      return loanRows.map((loan) => mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? []));
+      return loanRows.map((loan) => mapWalletLoan(loan, repaymentsByLoanId.get(loan.id) ?? [], userId));
     },
 
     async createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord> {
@@ -2893,11 +2927,19 @@ export function createPostgresExpenseStore(): ExpenseStore {
       }
     },
 
-    async createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord> {
+    async createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput, userEmail?: string | null): Promise<WalletLoanRecord> {
       await ensureSchema(sql);
+      const normalizedEmail = userEmail?.trim().toLowerCase() || null;
 
       return sql.begin(async (tx) => {
-        const loanRows = await tx<{ id: string; owner_user_id: string }[]>`SELECT id, owner_user_id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+        const loanRows = await tx<{ id: string; owner_user_id: string }[]>`
+          SELECT id, owner_user_id 
+          FROM wallet_loans 
+          WHERE id = ${loanId} 
+            AND (owner_user_id = ${userId}
+                 OR (${normalizedEmail}::text IS NOT NULL AND borrower_email IS NOT NULL AND lower(borrower_email) = ${normalizedEmail})
+                 OR borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId}))
+        `;
         if (!loanRows[0]) {
           throw new WalletLoanNotFoundError();
         }
@@ -2915,7 +2957,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
           )
         `;
 
-        return loadLoanRecord(tx, loanId);
+        return loadLoanRecord(tx, loanId, userId);
       });
     },
 

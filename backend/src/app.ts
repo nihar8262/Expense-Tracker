@@ -520,7 +520,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       request,
       response,
       async (user) => {
-        const result = await handleListLoans(user.id, store);
+        const result = await handleListLoans(user.id, user.email, store);
         return response.status(result.status).json(result.body);
       },
       "Failed to list loans."
@@ -568,7 +568,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       request,
       response,
       async (user) => {
-        const result = await handleCreateStandaloneLoanRepayment(request.body, request.params.loanId, user.id, store);
+        const result = await handleCreateStandaloneLoanRepayment(request.body, request.params.loanId, user.id, user.email, store);
         return response.status(result.status).json(result.body);
       },
       "Failed to record loan repayment."

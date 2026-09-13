@@ -62,7 +62,7 @@ module.exports = async function handler(request, response) {
 
     if (loanSegments.length === 0) {
       if (request.method === "GET") {
-        const result = await listLoansForUser(user.id);
+        const result = await listLoansForUser(user.id, user.email);
         return sendResult(response, result);
       }
       if (request.method === "POST") {
@@ -96,7 +96,7 @@ module.exports = async function handler(request, response) {
     if (loanSegments.length === 2 && loanSegments[1] === "repayments") {
       if (request.method === "POST") {
         try {
-          const result = await createStandaloneLoanRepaymentForUser(user.id, loanId, request.body);
+          const result = await createStandaloneLoanRepaymentForUser(user.id, loanId, request.body, user.email);
           return sendResult(response, result);
         } catch (error) {
           return response.status(400).json({ error: error instanceof Error ? error.message : "Failed to record loan repayment." });

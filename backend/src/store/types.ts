@@ -175,6 +175,9 @@ export type WalletLoanRecord = {
   loan_type: "lent" | "borrowed";
   created_at: string;
   repayments: WalletLoanRepaymentRecord[];
+  is_owner?: boolean;
+  creator_name?: string | null;
+  creator_email?: string | null;
 };
 
 export type WalletDetailRecord = {
@@ -285,11 +288,11 @@ export interface ExpenseStore {
   createWalletLoanRepayment(userId: string, walletId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletDetailRecord>;
   updateWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletDetailRecord>;
   deleteWalletLoanRepayment(userId: string, walletId: string, loanId: string, repaymentId: string): Promise<WalletDetailRecord>;
-  listLoans(userId: string): Promise<WalletLoanRecord[]>;
+  listLoans(userId: string, userEmail?: string | null): Promise<WalletLoanRecord[]>;
   createStandaloneLoan(userId: string, input: CreateWalletLoanInput): Promise<WalletLoanRecord>;
   updateStandaloneLoan(userId: string, loanId: string, input: UpdateWalletLoanInput): Promise<WalletLoanRecord>;
   deleteStandaloneLoan(userId: string, loanId: string): Promise<void>;
-  createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput): Promise<WalletLoanRecord>;
+  createStandaloneLoanRepayment(userId: string, loanId: string, input: CreateWalletLoanRepaymentInput, userEmail?: string | null): Promise<WalletLoanRecord>;
   updateStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletLoanRecord>;
   deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord>;
   listBillReminders(userId: string): Promise<BillReminderRecord[]>;

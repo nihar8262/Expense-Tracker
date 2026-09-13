@@ -163,6 +163,9 @@ export type WalletLoan = {
 	notes: string | null;
 	created_at: string;
 	repayments: WalletLoanRepayment[];
+	is_owner?: boolean;
+	creator_name?: string | null;
+	creator_email?: string | null;
 };
 
 export type WalletLoanForm = {

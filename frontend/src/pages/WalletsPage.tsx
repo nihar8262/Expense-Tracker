@@ -4635,8 +4635,20 @@ export function WalletsPage({
                                   )}>
                                     {isBorrowed ? "Lender" : "Borrower"}
                                   </span>
+                                  {loan.is_owner === false && (
+                                    <span
+                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[10px] font-bold tracking-wider"
+                                      title={`Recorded by ${loan.creator_name || loan.creator_email || "creator"}`}
+                                    >
+                                      Shared with you
+                                    </span>
+                                  )}
                                 </div>
-                                {bEmail ? (
+                                {loan.is_owner === false ? (
+                                  <p className="truncate text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                                    Shared by {loan.creator_name || loan.creator_email || "Creator"}
+                                  </p>
+                                ) : bEmail ? (
                                   <p className="truncate text-xs text-secondary">
                                     {bEmail}
                                   </p>
@@ -4791,22 +4803,33 @@ export function WalletsPage({
                               </button>
                             )}
 
-                            {/* Edit Button is ALWAYS accessible even after fully paid / overpaid */}
-                            <button
-                              type="button"
-                              className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
-                              onClick={() => handleOpenEditLoan(loan)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
-                              disabled={deletingLoanIds.includes(loan.id)}
-                              onClick={() => void handleDeleteLoanClick(loan)}
-                            >
-                              {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
-                            </button>
+                            {/* Edit & Delete are restricted to loan owner; non-owners can still record repayments & view timeline/statement */}
+                            {loan.is_owner !== false ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                  onClick={() => handleOpenEditLoan(loan)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                  disabled={deletingLoanIds.includes(loan.id)}
+                                  onClick={() => void handleDeleteLoanClick(loan)}
+                                >
+                                  {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
+                                </button>
+                              </>
+                            ) : (
+                              <span
+                                className="text-[11px] text-secondary italic px-1.5"
+                                title="Only the creator of this loan can edit terms or delete it."
+                              >
+                                Terms managed by creator
+                              </span>
+                            )}
                           </div>
                         </div>
                       </article>
