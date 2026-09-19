@@ -338,7 +338,7 @@ Vercel
 ### Shared Wallets
 
 - **Modal-driven wallet creation**: Create wallets with a name, description, default split rule, default currency, group picture, and initial members via a focused modal dialog rather than taking vertical sidebar space.
-- **Group pictures & client-side compression**: Upload group pictures with an enforced 15MB file cap; automatically compresses raw image files to optimized WebP at 512×512 using Canvas (>95% size savings) with live size savings indicators.
+- **Group pictures & client-side compression**: Upload group pictures with an enforced 15MB file cap; automatically compresses raw image files to optimized WebP at 512×512 using Canvas (achieving image-dependent file size reduction) with live size savings indicators.
 - **Top active wallet banner**: Prominent banner showcasing the currently active wallet, description, currency, and members presented as colorful initials chips with owner crown indicator (`👑`) and hover tooltips for full details.
 - **Workspace sub-tabs**: Fast switching between Overview, Transactions & Forms, Budget, Members & Roles, and All sections, accompanied by quick action buttons ("＋ Add Transaction" and "Record Payback").
 - **Dedicated loading screen & stale data prevention**: Instant state reset and full-screen emerald spinner with animated placeholder skeleton cards during wallet switching, guaranteeing that previous wallet members, balances, and expenses never leak while loading new data.

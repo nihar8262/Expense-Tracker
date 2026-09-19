@@ -553,6 +553,12 @@ export function AppRoutes() {
   const [statusMessage, setStatusMessage] = useState("");
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
+  const walletRequestSeqRef = useRef(0);
+  const selectedWalletIdRef = useRef<string | null>(selectedWalletId);
+
+  useEffect(() => {
+    selectedWalletIdRef.current = selectedWalletId;
+  }, [selectedWalletId]);
 
   const categories = useMemo(() => [...new Set(expenses.map((expense) => expense.category))].sort((left, right) => left.localeCompare(right)), [expenses]);
 
@@ -893,7 +899,7 @@ export function AppRoutes() {
     if (!dashboardWallet || !dashboardWallet.walletAggregation) {
       return {
         expenseCount: 0,
-        average: formatCurrency("0.00"),
+        average: formatCurrency("0.00", dashboardWallet?.wallet.currency),
         topCategory: null,
         latestExpense: null,
         categoryBreakdown: [],
@@ -1214,17 +1220,24 @@ export function AppRoutes() {
   }
 
   async function loadSelectedWallet(user: User, walletId: string) {
+    const seq = ++walletRequestSeqRef.current;
     setIsWalletLoading(true);
     setWalletErrorMessage("");
     setSelectedWallet(null);
 
     try {
       const wallet = await getWalletDetail(walletId, user);
-      setSelectedWallet(wallet);
+      if (seq === walletRequestSeqRef.current && walletId === selectedWalletIdRef.current) {
+        setSelectedWallet(wallet);
+      }
     } catch (error) {
-      setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallet.");
+      if (seq === walletRequestSeqRef.current && walletId === selectedWalletIdRef.current) {
+        setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallet.");
+      }
     } finally {
-      setIsWalletLoading(false);
+      if (seq === walletRequestSeqRef.current && walletId === selectedWalletIdRef.current) {
+        setIsWalletLoading(false);
+      }
     }
   }
 
@@ -1401,7 +1414,9 @@ export function AppRoutes() {
   useEffect(() => {
     setWalletExpenseOffset(0);
     if (!currentUser || !selectedWalletId) {
+      walletRequestSeqRef.current++;
       setSelectedWallet(null);
+      setIsWalletLoading(false);
       return;
     }
 
@@ -2994,7 +3009,7 @@ export function AppRoutes() {
               dashboardWalletId={dashboardWalletId}
               dashboardWallet={dashboardWallet}
               isDashboardLoading={isDashboardLoading}
-              currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
+              currencySymbol={getCurrencySymbol((dashboardViewMode === "wallet" && dashboardWallet?.wallet.currency) ? dashboardWallet.wallet.currency : reminderPreferences?.default_currency)}
               onDashboardViewModeChange={(mode) => {
                 if (mode === dashboardViewMode) return;
                 setIsDashboardLoading(true);

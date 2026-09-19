@@ -37,12 +37,7 @@ module.exports = async function handler(request, response) {
 
     const MAX_IMAGE_BASE64_LEN = 7 * 1024 * 1024; // ~5MB binary decoded
     const validatedImages = [];
-    // Magic byte signatures for verifiable image types
-    const MAGIC_BYTES = {
-      "image/jpeg": [0xFF, 0xD8, 0xFF],
-      "image/png":  [0x89, 0x50, 0x4E, 0x47],
-      "image/webp": [0x52, 0x49, 0x46, 0x46]  // "RIFF" — WebP container
-    };
+    const SUPPORTED_MIMES = ["image/jpeg", "image/png", "image/webp"];
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
       if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
@@ -52,13 +47,24 @@ module.exports = async function handler(request, response) {
         return response.status(413).json({ error: `Image at index ${i} exceeds maximum allowed size (5MB).` });
       }
       const cleanMime = img.mimeType.toLowerCase().trim();
-      const magic = MAGIC_BYTES[cleanMime];
-      if (!magic) {
+      if (!SUPPORTED_MIMES.includes(cleanMime)) {
         return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'. Supported formats: JPEG, PNG, WebP.` });
       }
       // Validate actual file content matches declared MIME type (magic bytes)
       const buf = Buffer.from(img.data, "base64");
-      if (buf.length < magic.length || !magic.every((byte, j) => buf[j] === byte)) {
+      let isValid = false;
+      if (cleanMime === "image/jpeg") {
+        isValid = buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+      } else if (cleanMime === "image/png") {
+        const pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        isValid = buf.length >= 8 && pngSignature.every((byte, j) => buf[j] === byte);
+      } else if (cleanMime === "image/webp") {
+        isValid =
+          buf.length >= 12 &&
+          buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && // "RIFF"
+          buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;   // "WEBP"
+      }
+      if (!isValid) {
         return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
       }
       validatedImages.push({

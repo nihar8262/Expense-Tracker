@@ -1,7 +1,6 @@
 import readline from "node:readline";
 import path from "node:path";
 import dotenv from "dotenv";
-import postgres from "postgres";
 import { createPostgresExpenseStore } from "../store/postgres.js";
 import { getTools } from "../assistant/tools.js";
 import { getTokenStore } from "./tokenStore.js";
@@ -19,7 +18,6 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const sql = postgres(connectionString);
 const store = createPostgresExpenseStore();
 const tokenStore = getTokenStore(store);
 const tools = getTools(store).filter(t => t.name !== "create_expense");
@@ -33,19 +31,10 @@ async function resolveUserId(): Promise<string> {
     if (authenticated) {
       return authenticated;
     }
-    console.error("[expense-tracker-mcp] Warning: EXPENSE_MCP_TOKEN could not be validated. Falling back to default user.");
+    throw new Error("EXPENSE_MCP_TOKEN is invalid or revoked.");
   }
 
-  try {
-    const users = await sql`SELECT user_id FROM expenses ORDER BY date DESC LIMIT 1`;
-    if (users.length > 0 && users[0].user_id) {
-      return users[0].user_id;
-    }
-  } catch (err: any) {
-    console.error("[expense-tracker-mcp] Error resolving user from expenses:", err.message);
-  }
-
-  return "legacy-anonymous";
+  throw new Error("Set EXPENSE_MCP_TOKEN or EXPENSE_USER_ID to identify the user.");
 }
 
 function sendResponse(response: any) {
@@ -192,7 +181,6 @@ rl.on("line", (line) => {
 
 rl.on("close", async () => {
   console.error("[expense-tracker-mcp] Stdin closed, shutting down.");
-  await sql.end();
   process.exit(0);
 });
 

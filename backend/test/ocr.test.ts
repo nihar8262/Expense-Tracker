@@ -78,4 +78,52 @@ describe("Receipts OCR API Router", () => {
     expect(res.body.draft.merchant).toBe("Starbucks");
     expect(res.body.draft.amount).toBe("4.50");
   });
+
+  it("rejects WAV audio masquerading as WebP and accepts valid WebP", async () => {
+    const app = buildApp();
+    // WAV has RIFF at 0-3 and WAVE at 8-11
+    const wavBuf = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
+    const wavRes = await request(app)
+      .post("/api/receipts")
+      .set("Authorization", "Bearer user-webp")
+      .send({
+        images: [{ data: wavBuf.toString("base64"), mimeType: "image/webp" }]
+      });
+    expect(wavRes.status).toBe(400);
+    expect(wavRes.body.error).toContain("does not match declared type");
+
+    // WebP has RIFF at 0-3 and WEBP at 8-11
+    const webpBuf = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x20, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38]);
+    const webpRes = await request(app)
+      .post("/api/receipts")
+      .set("Authorization", "Bearer user-webp")
+      .send({
+        images: [{ data: webpBuf.toString("base64"), mimeType: "image/webp" }]
+      });
+    expect(webpRes.status).toBe(200);
+  });
+
+  it("validates full 8-byte PNG signature", async () => {
+    const app = buildApp();
+    // Incomplete PNG: only first 4 bytes (89 50 4E 47) followed by garbage
+    const partialPng = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x00, 0x00]);
+    const failRes = await request(app)
+      .post("/api/receipts")
+      .set("Authorization", "Bearer user-png")
+      .send({
+        images: [{ data: partialPng.toString("base64"), mimeType: "image/png" }]
+      });
+    expect(failRes.status).toBe(400);
+    expect(failRes.body.error).toContain("does not match declared type");
+
+    // Full 8-byte PNG: 89 50 4E 47 0D 0A 1A 0A
+    const fullPng = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00]);
+    const passRes = await request(app)
+      .post("/api/receipts")
+      .set("Authorization", "Bearer user-png")
+      .send({
+        images: [{ data: fullPng.toString("base64"), mimeType: "image/png" }]
+      });
+    expect(passRes.status).toBe(200);
+  });
 });

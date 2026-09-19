@@ -64,7 +64,7 @@ type DashboardPageProps = {
   isBudgetHistoryOpen: boolean;
   budgetStatusMessage: string;
   budgetErrorMessage: string;
-  formatCurrency: (amount: string) => string;
+  formatCurrency: (amount: string, customCurrency?: string) => string;
   onBudgetFormChange: (updater: (current: BudgetForm) => BudgetForm) => void;
   onBudgetSubmit: (event: React.FormEvent<HTMLFormElement>) => Promise<void>;
   onBudgetEditCancel: () => void;
@@ -159,14 +159,6 @@ export function DashboardPage({
     };
   }, []);
 
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(() => !isDashboardLoading);
-
-  useEffect(() => {
-    if (!isDashboardLoading && !hasLoadedOnce) {
-      setHasLoadedOnce(true);
-    }
-  }, [isDashboardLoading, hasLoadedOnce]);
-
   const isSwitchingSource = Boolean(
     isDashboardLoading ||
     (dashboardViewMode === "wallet" && (
@@ -175,7 +167,8 @@ export function DashboardPage({
       dashboardWallet.wallet.id !== dashboardWalletId
     ))
   );
-  const showFullLoadingScreen = !hasLoadedOnce && isSwitchingSource;
+  const showFullLoadingScreen = isSwitchingSource;
+  const activeCurrency = dashboardViewMode === "wallet" ? dashboardWallet?.wallet.currency : undefined;
   const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const activeTrendPoint = spendTrend.find((point) => point.key === activeTrendDetailKey) ?? null;
   const activeTrendItems = activeTrendPoint ? trendDetailLookup[activeTrendPoint.key] ?? [] : [];
@@ -326,7 +319,7 @@ export function DashboardPage({
       <SurfaceCard className="space-y-4 p-5 sm:p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
-          {isDashboardLoading && hasLoadedOnce && (
+          {isDashboardLoading && !showFullLoadingScreen && (
             <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-full shrink-0 self-start sm:self-auto animate-in fade-in duration-150">
               <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
               Updating data...
@@ -660,7 +653,7 @@ export function DashboardPage({
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
-                  <strong className="block text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount)}</strong>
+                  <strong className="block text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount, activeCurrency)}</strong>
                   <span className="text-xs text-muted">{dashboardStats.latestExpense.date}</span>
                 </div>
               </div>
@@ -707,7 +700,7 @@ export function DashboardPage({
                 <TrendChart
                   points={chartSummary.points}
                   displayType={chartDisplayType}
-                  formatCurrency={formatCurrency}
+                  formatCurrency={(amount) => formatCurrency(amount, activeCurrency)}
                 />
               </div>
 
@@ -755,7 +748,7 @@ export function DashboardPage({
                       }
                       onClick={enableTrendTap ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
                     >
-                      <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2))}</strong>
+                      <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2), activeCurrency)}</strong>
                       <span className="mt-2 block text-sm font-medium text-secondary">{point.label}</span>
                       <small className="mt-1 block text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
                     </button>
@@ -783,7 +776,7 @@ export function DashboardPage({
                           {trendDetailLookup[point.key].map((item) => (
                             <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/90 px-3 py-2 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                               <span className="truncate text-secondary">{item.description}</span>
-                              <span className="shrink-0 font-semibold text-ink">{formatCurrency(item.amount)}</span>
+                              <span className="shrink-0 font-semibold text-ink">{formatCurrency(item.amount, activeCurrency)}</span>
                             </div>
                           ))}
                         </div>
@@ -829,7 +822,7 @@ export function DashboardPage({
               {activeTrendItems.map((item) => (
                 <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/80 px-3 py-2 text-sm">
                   <span className="truncate text-secondary">{item.description}</span>
-                  <span className="font-semibold text-ink">{formatCurrency(item.amount)}</span>
+                  <span className="font-semibold text-ink">{formatCurrency(item.amount, activeCurrency)}</span>
                 </div>
               ))}
             </div>
@@ -862,7 +855,7 @@ export function DashboardPage({
                 <div className="w-[180px] h-[180px] relative flex items-center justify-center shrink-0">
                   <div className="absolute flex flex-col items-center justify-center text-center select-none pointer-events-none">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Total</span>
-                    <span className="text-base font-bold text-ink">{formatCurrency(pieChartData.reduce((sum, item) => sum + item.value, 0).toFixed(2))}</span>
+                    <span className="text-base font-bold text-ink">{formatCurrency(pieChartData.reduce((sum, item) => sum + item.value, 0).toFixed(2), activeCurrency)}</span>
                   </div>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -880,7 +873,7 @@ export function DashboardPage({
                         ))}
                       </Pie>
                       <RechartsTooltip
-                        formatter={(value: any) => [formatCurrency(Number(value).toFixed(2)), "Amount"]}
+                        formatter={(value: any) => [formatCurrency(Number(value).toFixed(2), activeCurrency), "Amount"]}
                         contentStyle={{
                           backgroundColor: "rgba(255, 255, 255, 0.95)",
                           borderRadius: "12px",
@@ -910,7 +903,7 @@ export function DashboardPage({
                             <span className="font-medium text-ink truncate">{item.name}</span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <span className="font-semibold text-ink">{formatCurrency(item.value.toFixed(2))}</span>
+                            <span className="font-semibold text-ink">{formatCurrency(item.value.toFixed(2), activeCurrency)}</span>
                             <span className="text-[10px] text-muted">({percentage.toFixed(0)}%)</span>
                           </div>
                         </div>
