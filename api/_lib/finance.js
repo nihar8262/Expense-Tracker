@@ -375,6 +375,8 @@ function mapWallet(row) {
     name: row.name,
     description: row.description,
     default_split_rule: row.default_split_rule,
+    currency: row.currency || "INR",
+    picture_url: row.picture_url ?? null,
     created_at: asIsoTimestamp(row.created_at)
   };
 }
@@ -601,6 +603,7 @@ async function ensureSchema(sql) {
       await safeSchemaStep("create wallet_expense_splits table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expense_splits (wallet_expense_id UUID NOT NULL REFERENCES wallet_expenses(id) ON DELETE CASCADE, member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0), percentage_basis_points INTEGER, PRIMARY KEY (wallet_expense_id, member_id))`);
       await safeSchemaStep("create wallet_settlements table", () => sql`CREATE TABLE IF NOT EXISTS wallet_settlements (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, from_member_id UUID NOT NULL REFERENCES wallet_members(id), to_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), settlement_date DATE NOT NULL, note VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create wallet_loans table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loans (id UUID PRIMARY KEY, owner_user_id TEXT, wallet_id UUID REFERENCES wallets(id) ON DELETE CASCADE, lender_member_id UUID REFERENCES wallet_members(id), borrower_member_id UUID REFERENCES wallet_members(id), borrower_name VARCHAR(120), borrower_email VARCHAR(320), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), interest_rate_basis_points INTEGER NOT NULL DEFAULT 0, interest_type VARCHAR(16) NOT NULL DEFAULT 'percentage' CHECK (interest_type IN ('percentage', 'fixed', 'none')), interest_rate_period VARCHAR(16) NOT NULL DEFAULT 'monthly' CHECK (interest_rate_period IN ('monthly', 'yearly', 'one-time')), lending_date DATE NOT NULL, due_date DATE, interest_start_date DATE, notes VARCHAR(280), status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'settled', 'cancelled')), created_at TIMESTAMPTZ NOT NULL)`);
+      await safeSchemaStep("wallets currency column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'INR'`);
       await safeSchemaStep("wallets picture_url column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS picture_url TEXT`);
       await safeSchemaStep("wallet_loans owner_user_id column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS owner_user_id TEXT`);
       await safeSchemaStep("wallet_loans creator_name column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS creator_name VARCHAR(120)`);
@@ -831,7 +834,7 @@ function parseWalletHistoryPagination(query = {}) {
 }
 
 async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPagination()) {
-  const walletRows = await sql`SELECT id, name, description, default_split_rule, created_at, picture_url FROM wallets WHERE id = ${walletId}`;
+  const walletRows = await sql`SELECT id, name, description, default_split_rule, currency, picture_url, created_at FROM wallets WHERE id = ${walletId}`;
   if (!walletRows[0]) {
     throw new Error("Wallet not found.");
   }
@@ -1074,7 +1077,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
 async function listWalletsForUser(userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const rows = await sql`SELECT wallets.id, wallets.name, wallets.description, wallets.default_split_rule, wallets.created_at FROM wallets INNER JOIN wallet_members ON wallet_members.wallet_id = wallets.id WHERE wallet_members.user_id = ${userId} ORDER BY wallets.created_at DESC`;
+  const rows = await sql`SELECT wallets.id, wallets.name, wallets.description, wallets.default_split_rule, wallets.currency, wallets.picture_url, wallets.created_at FROM wallets INNER JOIN wallet_members ON wallet_members.wallet_id = wallets.id WHERE wallet_members.user_id = ${userId} ORDER BY wallets.created_at DESC`;
   return { status: 200, body: { wallets: rows.map(mapWallet) } };
 }
 
@@ -1088,7 +1091,7 @@ async function createWalletForUser(user, rawBody) {
   const wallet = await sql.begin(async (tx) => {
     const walletId = randomUUID();
     const createdAt = new Date().toISOString();
-    await tx`INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, picture_url, created_at) VALUES (${walletId}, ${user.id}, ${result.data.name.trim()}, ${result.data.description?.trim() || null}, ${result.data.defaultSplitRule}, ${result.data.pictureUrl || null}, ${createdAt})`;
+    await tx`INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, currency, picture_url, created_at) VALUES (${walletId}, ${user.id}, ${result.data.name.trim()}, ${result.data.description?.trim() || null}, ${result.data.defaultSplitRule}, ${result.data.currency || "INR"}, ${result.data.pictureUrl || null}, ${createdAt})`;
     const ownerName = user.name?.trim() || user.email?.trim() || "You";
     await tx`INSERT INTO wallet_members (id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at) VALUES (${randomUUID()}, ${walletId}, ${user.id}, ${ownerName}, ${user.email?.trim() || null}, ${"owner"}, ${"linked"}, ${createdAt})`;
     for (const member of result.data.members) {
@@ -1121,9 +1124,9 @@ async function updateWalletForUser(userId, walletId, rawBody) {
     }
 
     if (result.data.pictureUrl !== undefined) {
-      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule}, picture_url = ${result.data.pictureUrl || null} WHERE id = ${walletId}`;
+      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule}, currency = ${result.data.currency || "INR"}, picture_url = ${result.data.pictureUrl || null} WHERE id = ${walletId}`;
     } else {
-      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule} WHERE id = ${walletId}`;
+      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule}, currency = ${result.data.currency || "INR"} WHERE id = ${walletId}`;
     }
 
     const currentMembers = await tx`SELECT id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId}`;
