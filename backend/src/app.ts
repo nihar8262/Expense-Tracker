@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 import { authenticateBearerToken, type AuthenticatedUser, AuthenticationConfigurationError, AuthenticationError, deleteAuthenticatedUser } from "./auth.js";
 import {
   handleCreateBillReminder,
@@ -147,6 +148,7 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
           return response.status(400).json({ error: "Max 3 images are allowed per single bill scan." });
         }
 
+        const MAX_IMAGE_BASE64_LEN = 7 * 1024 * 1024; // ~5MB binary decoded
         const validatedImages: { data: string; mimeType: string }[] = [];
         // Magic byte signatures for verifiable image types
         const MAGIC_BYTES: Record<string, number[]> = {
@@ -159,17 +161,18 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
           if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
             return response.status(400).json({ error: `Image at index ${i} is invalid. Required keys: 'data' and 'mimeType'.` });
           }
+          if (img.data.length > MAX_IMAGE_BASE64_LEN) {
+            return response.status(413).json({ error: `Image at index ${i} exceeds maximum allowed size (5MB).` });
+          }
           const cleanMime = img.mimeType.toLowerCase().trim();
-          if (!["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(cleanMime)) {
-            return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'.` });
+          const magic = MAGIC_BYTES[cleanMime];
+          if (!magic) {
+            return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'. Supported formats: JPEG, PNG, WebP.` });
           }
           // Validate actual file content matches declared MIME type (magic bytes)
-          const magic = MAGIC_BYTES[cleanMime];
-          if (magic) {
-            const buf = Buffer.from(img.data, "base64");
-            if (buf.length < magic.length || !magic.every((byte: number, j: number) => buf[j] === byte)) {
-              return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
-            }
+          const buf = Buffer.from(img.data, "base64");
+          if (buf.length < magic.length || !magic.every((byte: number, j: number) => buf[j] === byte)) {
+            return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
           }
           validatedImages.push({
             data: img.data,
@@ -790,8 +793,14 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
   app.post("/api/internal/reminders/run", async (request, response) => {
     const schedulerSecret = process.env.SCHEDULER_SECRET?.trim();
     const providedSecret = request.header("X-Scheduler-Secret")?.trim();
+    const isSecretValid = Boolean(
+      schedulerSecret &&
+      providedSecret &&
+      Buffer.byteLength(providedSecret) === Buffer.byteLength(schedulerSecret) &&
+      crypto.timingSafeEqual(Buffer.from(providedSecret), Buffer.from(schedulerSecret))
+    );
 
-    if (schedulerSecret && providedSecret === schedulerSecret) {
+    if (isSecretValid) {
       const result = await handleRunNotificationChecks(undefined, store);
       return response.status(result.status).json(result.body);
     }

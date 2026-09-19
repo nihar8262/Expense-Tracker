@@ -1417,7 +1417,7 @@ export async function handleListNotificationsForUser(user: { id: string; name?: 
   };
 }
 
-export async function handleRespondToWalletInvite(rawBody: unknown, walletMemberId: string, user: { id: string; name?: string | null; email?: string | null }, store: ExpenseStore): Promise<HandlerResponse> {
+export async function handleRespondToWalletInvite(rawBody: unknown, walletMemberId: string, user: { id: string; name?: string | null; email?: string | null; emailVerified?: boolean }, store: ExpenseStore): Promise<HandlerResponse> {
   const result = walletInviteResponseSchema.safeParse(rawBody);
 
   if (!result.success) {
@@ -1426,6 +1426,15 @@ export async function handleRespondToWalletInvite(rawBody: unknown, walletMember
       body: {
         error: "Invalid wallet invite response payload.",
         details: result.error.flatten()
+      }
+    };
+  }
+
+  if (user.emailVerified === false) {
+    return {
+      status: 403,
+      body: {
+        error: "A verified email address is required to accept wallet invitations."
       }
     };
   }

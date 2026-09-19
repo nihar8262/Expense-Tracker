@@ -12,7 +12,7 @@ function buildApp(store = createMemoryExpenseStore()) {
         if (!userId) {
           throw new Error("Missing test user.");
         }
-        return { id: userId, email: `${userId}@example.com`, name: userId === "alice-user" ? "Alice Borrower" : userId, picture: null };
+        return { id: userId, email: `${userId}@example.com`, name: userId === "alice-user" ? "Alice Borrower" : userId, picture: null, emailVerified: userId !== "unverified-user" };
       },
       async () => {}
     ),
@@ -49,6 +49,14 @@ describe("Wallet Loans & Lending API", () => {
     await request(app)
       .get("/api/wallets")
       .set("Authorization", "Bearer alice-user");
+
+    // Verify unverified user cannot accept invite
+    const unverifiedRes = await request(app)
+      .post(`/api/wallet-invites/${aliceMember.id}/respond`)
+      .set("Authorization", "Bearer unverified-user")
+      .send({ action: "accept" });
+    expect(unverifiedRes.status).toBe(403);
+    expect(unverifiedRes.body.error).toContain("verified email");
 
     await request(app)
       .post(`/api/wallet-invites/${aliceMember.id}/respond`)

@@ -15,10 +15,6 @@ async function authenticateMcpRequest(request) {
     token = authHeader.substring(7).trim();
   }
 
-  if (!token && request.query && request.query.token) {
-    token = request.query.token;
-  }
-
   if (!token) {
     throw new McpAuthenticationError("Unauthorized: Missing access token.");
   }

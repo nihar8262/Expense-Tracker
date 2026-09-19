@@ -35,6 +35,7 @@ module.exports = async function handler(request, response) {
       return response.status(400).json({ error: "Max 3 images are allowed per single bill scan." });
     }
 
+    const MAX_IMAGE_BASE64_LEN = 7 * 1024 * 1024; // ~5MB binary decoded
     const validatedImages = [];
     // Magic byte signatures for verifiable image types
     const MAGIC_BYTES = {
@@ -47,17 +48,18 @@ module.exports = async function handler(request, response) {
       if (!img || typeof img.data !== "string" || typeof img.mimeType !== "string") {
         return response.status(400).json({ error: `Image at index ${i} is invalid. Required keys: 'data' (base64 string) and 'mimeType' (string).` });
       }
+      if (img.data.length > MAX_IMAGE_BASE64_LEN) {
+        return response.status(413).json({ error: `Image at index ${i} exceeds maximum allowed size (5MB).` });
+      }
       const cleanMime = img.mimeType.toLowerCase().trim();
-      if (!["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(cleanMime)) {
-        return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'.` });
+      const magic = MAGIC_BYTES[cleanMime];
+      if (!magic) {
+        return response.status(400).json({ error: `Image at index ${i} has unsupported type: '${img.mimeType}'. Supported formats: JPEG, PNG, WebP.` });
       }
       // Validate actual file content matches declared MIME type (magic bytes)
-      const magic = MAGIC_BYTES[cleanMime];
-      if (magic) {
-        const buf = Buffer.from(img.data, "base64");
-        if (buf.length < magic.length || !magic.every((byte, j) => buf[j] === byte)) {
-          return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
-        }
+      const buf = Buffer.from(img.data, "base64");
+      if (buf.length < magic.length || !magic.every((byte, j) => buf[j] === byte)) {
+        return response.status(400).json({ error: `Image at index ${i} content does not match declared type '${cleanMime}'.` });
       }
       validatedImages.push({
         data: img.data,

@@ -7,6 +7,7 @@ import { createMemoryExpenseStore } from "../src/store/memory.js";
 vi.mock("../src/mcp/geminiOcr.js", () => {
   return {
     extractReceipt: vi.fn().mockResolvedValue({
+      is_receipt: true,
       merchant: "Starbucks",
       amount: "4.50",
       date: "2026-07-09",
@@ -24,7 +25,7 @@ function buildApp() {
       if (!userId) {
         throw new Error("Missing test user.");
       }
-      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null };
+      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null, emailVerified: true };
     },
     async () => {}
   );

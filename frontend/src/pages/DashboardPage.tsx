@@ -21,7 +21,8 @@ import type {
   TimeRangeFilter,
   TrendDetailItem,
   TrendPoint,
-  Wallet
+  Wallet,
+  WalletDetail
 } from "../types";
 
 type DashboardPageProps = {
@@ -29,6 +30,8 @@ type DashboardPageProps = {
   wallets: Wallet[];
   dashboardViewMode: "personal" | "wallet";
   dashboardWalletId: string | null;
+  dashboardWallet?: WalletDetail | null;
+  isDashboardLoading?: boolean;
   onDashboardViewModeChange: (mode: "personal" | "wallet") => void;
   onDashboardWalletIdChange: (walletId: string) => void;
   dashboardInsights: DashboardInsight[];
@@ -91,6 +94,8 @@ export function DashboardPage({
   wallets,
   dashboardViewMode,
   dashboardWalletId,
+  dashboardWallet,
+  isDashboardLoading,
   onDashboardViewModeChange,
   onDashboardWalletIdChange,
   dashboardInsights,
@@ -139,6 +144,38 @@ export function DashboardPage({
   const [activeTrendDetailKey, setActiveTrendDetailKey] = useState<string | null>(null);
   const [isSmallScreen, setIsSmallScreen] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 640 : false));
   const trendSectionRef = useRef<HTMLElement | null>(null);
+
+  const targetWallet = useMemo(() => {
+    return wallets.find((w) => w.id === dashboardWalletId) ?? null;
+  }, [wallets, dashboardWalletId]);
+
+  const trendHoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (trendHoverTimeoutRef.current) {
+        clearTimeout(trendHoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(() => !isDashboardLoading);
+
+  useEffect(() => {
+    if (!isDashboardLoading && !hasLoadedOnce) {
+      setHasLoadedOnce(true);
+    }
+  }, [isDashboardLoading, hasLoadedOnce]);
+
+  const isSwitchingSource = Boolean(
+    isDashboardLoading ||
+    (dashboardViewMode === "wallet" && (
+      !dashboardWalletId ||
+      !dashboardWallet ||
+      dashboardWallet.wallet.id !== dashboardWalletId
+    ))
+  );
+  const showFullLoadingScreen = !hasLoadedOnce && isSwitchingSource;
   const isTrendDetailEnabled = chartGranularity === "daily" || chartGranularity === "weekly" || chartGranularity === "monthly";
   const activeTrendPoint = spendTrend.find((point) => point.key === activeTrendDetailKey) ?? null;
   const activeTrendItems = activeTrendPoint ? trendDetailLookup[activeTrendPoint.key] ?? [] : [];
@@ -273,97 +310,181 @@ export function DashboardPage({
             >
               View report
             </button>
-            <button type="button" className="ui-button-primary w-full justify-center sm:w-auto" onClick={() => void navigate("/expenses")}>
+            {/* Issue #9 – primary CTA is larger & has an icon for extra weight */}
+            <button
+              type="button"
+              className="ui-button-primary w-full justify-center sm:w-auto"
+              onClick={() => void navigate("/expenses")}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
               Add expense
             </button>
           </>
         }
       />
 
-      <SurfaceCard className="space-y-5 p-5 sm:p-6">
-        <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="grid gap-2 text-sm font-medium text-secondary">
-            Source
-            <div className="flex gap-2">
+      <SurfaceCard className="space-y-4 p-5 sm:p-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
+          {isDashboardLoading && hasLoadedOnce && (
+            <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-full shrink-0 self-start sm:self-auto animate-in fade-in duration-150">
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              Updating data...
+            </div>
+          )}
+        </div>
+
+        {/* Scope Row: Source toggle + Active Wallet */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3 pb-3 border-b border-[color:var(--border)]">
+          <div className="grid gap-1.5 text-sm font-medium text-secondary w-full sm:w-auto">
+            <span>Source</span>
+            <div className="source-toggle">
               <button
                 type="button"
-                className={cn(
-                  "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
-                  dashboardViewMode === "personal"
-                    ? "border-primary/25 bg-success-tint text-green-400"
-                    : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
-                )}
+                className="source-toggle-btn"
+                aria-pressed={dashboardViewMode === "personal"}
                 onClick={() => onDashboardViewModeChange("personal")}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="inline-block h-4 w-4 -mt-0.5 mr-1.5"><path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" /></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true"><path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" /></svg>
                 Personal
               </button>
               <button
                 type="button"
-                className={cn(
-                  "flex-1 rounded-[14px] border px-3 py-2 text-sm font-semibold transition-colors",
-                  dashboardViewMode === "wallet"
-                    ? "border-primary/25 bg-success-tint text-green-400"
-                    : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white"
-                )}
+                className="source-toggle-btn"
+                aria-pressed={dashboardViewMode === "wallet"}
                 onClick={() => onDashboardViewModeChange("wallet")}
                 disabled={wallets.length === 0}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="inline-block h-4 w-4 -mt-0.5 mr-1.5"><path fillRule="evenodd" d="M1 4.75C1 3.784 1.784 3 2.75 3h14.5c.966 0 1.75.784 1.75 1.75v10.515a1.75 1.75 0 0 1-1.75 1.75h-1.5c-.078 0-.155-.005-.23-.015H2.75A1.75 1.75 0 0 1 1 15.25V4.75Zm16.5 7.385V11.5a1.252 1.252 0 0 1-.355-.14l-.004-.002A1.25 1.25 0 0 1 16.5 10.5V8.25a1.25 1.25 0 0 1 0-2.5V4.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h14.5a.25.25 0 0 0 .25-.25v-3.115ZM14 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z" clipRule="evenodd" /></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true"><path fillRule="evenodd" d="M1 4.75C1 3.784 1.784 3 2.75 3h14.5c.966 0 1.75.784 1.75 1.75v10.515a1.75 1.75 0 0 1-1.75 1.75h-1.5c-.078 0-.155-.005-.23-.015H2.75A1.75 1.75 0 0 1 1 15.25V4.75Zm16.5 7.385V11.5a1.252 1.252 0 0 1-.355-.14l-.004-.002A1.25 1.25 0 0 1 16.5 10.5V8.25a1.25 1.25 0 0 1 0-2.5V4.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h14.5a.25.25 0 0 0 .25-.25v-3.115ZM14 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z" clipRule="evenodd" /></svg>
                 Wallet
               </button>
             </div>
-            {dashboardViewMode === "wallet" && wallets.length > 0 ? (
-              <select className="mt-1" value={dashboardWalletId ?? ""} onChange={(e) => onDashboardWalletIdChange(e.target.value)}>
+          </div>
+
+          {dashboardViewMode === "wallet" && wallets.length > 0 ? (
+            <label className="grid gap-1.5 text-sm font-medium text-secondary w-full sm:max-w-xs animate-in fade-in duration-200">
+              <span>Active Wallet</span>
+              <select value={dashboardWalletId ?? ""} onChange={(e) => onDashboardWalletIdChange(e.target.value)}>
                 {wallets.map((w) => (
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
               </select>
-            ) : null}
-          </div>
-
-          <div className="grid gap-4">
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Category
-              <select value={selectedCategory} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
-                <option value="">All categories</option>
-                {categories.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
             </label>
+          ) : null}
+        </div>
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Platform / Source
-              <select value={selectedPlatform} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
-                <option value="">All platforms</option>
-                <option value="none">No platform</option>
-                {PLATFORMS.filter(p => p.id !== "others").map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-                <option value="others">Others</option>
-              </select>
-            </label>
+        {/* Stable 3-Column Filter Row: Category, Platform, Range */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Category */}
+          <label className="grid gap-1.5 text-sm font-medium text-secondary">
+            <span>Category</span>
+            <select value={selectedCategory} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Range
-              <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
-                <option value="all">All time</option>
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="year">This year</option>
-              </select>
-            </label>
-          </div>
+          {/* Platform */}
+          <label className="grid gap-1.5 text-sm font-medium text-secondary">
+            <span>Platform</span>
+            <select value={selectedPlatform} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
+              <option value="">All platforms</option>
+              <option value="none">No platform</option>
+              {PLATFORMS.filter(p => p.id !== "others").map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              <option value="others">Others</option>
+            </select>
+          </label>
+
+          {/* Time range */}
+          <label className="grid gap-1.5 text-sm font-medium text-secondary">
+            <span>Range</span>
+            <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
+              <option value="all">All time</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="year">This year</option>
+            </select>
+          </label>
         </div>
       </SurfaceCard>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      {showFullLoadingScreen ? (
+        <div className="space-y-6">
+          <SurfaceCard className="relative overflow-hidden border-primary/20 p-8 sm:p-12 text-center flex flex-col items-center justify-center min-h-[340px] shadow-sm bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.85))] dark:bg-zinc-900/90">
+            <div className="relative flex items-center justify-center mb-4">
+              <div className="h-14 w-14 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+              <span className="absolute text-xl">
+                {dashboardViewMode === "wallet" ? "👛" : "👤"}
+              </span>
+            </div>
+            <h3 className="text-xl font-bold font-display text-ink tracking-tight">
+              {dashboardViewMode === "wallet"
+                ? `Loading ${targetWallet?.name ? `"${targetWallet.name}"` : "shared wallet"} dashboard...`
+                : "Loading personal dashboard..."}
+            </h3>
+            <p className="mt-1.5 text-sm text-secondary max-w-md">
+              {dashboardViewMode === "wallet"
+                ? "Downloading shared expenses, group category distributions, budget caps, and spending movement."
+                : "Preparing your personal transactions, category analytics, budget tracking, and trend charts."}
+            </p>
+            <div className="mt-5 flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 px-3.5 py-1.5 rounded-full">
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              {dashboardViewMode === "wallet" ? "Syncing wallet analytics" : "Syncing personal analytics"}
+            </div>
+          </SurfaceCard>
+
+          {/* Stat Cards Skeleton */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <SurfaceCard key={i} className="p-5 sm:p-6 space-y-3 animate-pulse border-[color:var(--border)]">
+                <div className="h-3.5 w-24 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                <div className="h-8 w-32 bg-zinc-200 dark:bg-zinc-700 rounded-md mt-2" />
+                <div className="h-3 w-36 bg-zinc-100 dark:bg-zinc-800 rounded-md mt-2" />
+              </SurfaceCard>
+            ))}
+          </div>
+
+          {/* Insights Skeleton */}
+          <div className="grid gap-4 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <SurfaceCard key={i} className="p-5 sm:p-6 space-y-3 animate-pulse border-[color:var(--border)]">
+                <div className="h-3.5 w-16 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                <div className="h-5 w-44 bg-zinc-200 dark:bg-zinc-700 rounded-md mt-2" />
+                <div className="h-10 w-full bg-zinc-100 dark:bg-zinc-800 rounded-md mt-2" />
+              </SurfaceCard>
+            ))}
+          </div>
+
+          {/* Spending Breakdown & Distribution Skeleton */}
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+            <SurfaceCard className="p-5 space-y-4 animate-pulse border-[color:var(--border)]">
+              <div className="h-5 w-40 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+              <div className="h-3 w-56 bg-zinc-100 dark:bg-zinc-800 rounded-md" />
+              <div className="space-y-3 pt-2">
+                {[1, 2, 3].map((row) => (
+                  <div key={row} className="flex justify-between items-center py-1">
+                    <div className="h-4 w-28 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                    <div className="h-4 w-20 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                  </div>
+                ))}
+              </div>
+            </SurfaceCard>
+            <SurfaceCard className="p-5 space-y-4 animate-pulse border-[color:var(--border)] flex flex-col items-center justify-center min-h-[220px]">
+              <div className="h-28 w-28 rounded-full border-8 border-zinc-200 dark:border-zinc-700" />
+            </SurfaceCard>
+          </div>
+        </div>
+      ) : (
+        <div className={cn("space-y-6 transition-opacity duration-200", isDashboardLoading ? "opacity-60 pointer-events-none" : "opacity-100")}>
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <SurfaceCard className="bg-[linear-gradient(135deg,var(--primary),var(--gold))] p-6 text-white shadow-[0_24px_70px_rgba(30,122,83,0.24)]">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/80">{statMeta[0].label}</p>
           <strong className="mt-4 block text-4xl font-semibold tracking-[-0.04em]">{total}</strong>
@@ -519,27 +640,29 @@ export function DashboardPage({
           )}
         </SurfaceCard>
 
-        <SurfaceCard className="space-y-5 p-5 sm:p-6">
+          {/* Issue #9: h-full stretches the card to match Spending breakdown height */}
+          <SurfaceCard className="flex h-full flex-col space-y-4 p-5 sm:p-6">
           <SectionHeader title="Latest activity" description="The most recent expense in your current dashboard view." />
           {dashboardStats.latestExpense ? (
-            <div className="space-y-4 rounded-[26px] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-5">
-              <span className="data-pill">{dashboardStats.latestExpense.date}</span>
-              <div className="flex items-center gap-3">
-                {dashboardStats.latestExpense.platform ? (
-                  <PlatformLogo
-                    logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo}
-                    name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? dashboardStats.latestExpense?.platform}
-                    className="w-10 h-10 ring-2 ring-primary/10 shrink-0"
-                  />
-                ) : null}
-                <div>
-                  <strong className="block text-2xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.latestExpense.description}</strong>
-                  <p className="mt-1.5 text-sm leading-6 text-secondary">{dashboardStats.latestExpense.category}</p>
+            <div className="rounded-[22px] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  {dashboardStats.latestExpense.platform ? (
+                    <PlatformLogo
+                      logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo}
+                      name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? dashboardStats.latestExpense?.platform}
+                      className="w-9 h-9 ring-2 ring-primary/10 shrink-0"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <strong className="block truncate text-base font-semibold tracking-tight text-ink">{dashboardStats.latestExpense.description}</strong>
+                    <p className="text-xs text-muted">{dashboardStats.latestExpense.category}</p>
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-[22px] bg-white/85 px-4 py-4 text-right shadow-sm">
-                <span className="section-eyebrow">Amount</span>
-                <strong className="mt-2 block text-3xl text-ink">{formatCurrency(dashboardStats.latestExpense.amount)}</strong>
+                <div className="shrink-0 text-right">
+                  <strong className="block text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount)}</strong>
+                  <span className="text-xs text-muted">{dashboardStats.latestExpense.date}</span>
+                </div>
               </div>
             </div>
           ) : (
@@ -590,96 +713,129 @@ export function DashboardPage({
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {spendTrend.map((point, index) => (
-                  <button
+                  <div
                     key={point.key}
-                    type="button"
-                    className={cn(
-                      "relative cursor-pointer rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 text-left shadow-sm hover:-translate-y-0.5",
-                      activeTrendDetailKey === point.key && "border-primary/25 ring-2 ring-primary/10"
-                    )}
-                    onMouseEnter={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
-                    onMouseLeave={enableTrendHover ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : current)) : undefined}
-                    onFocus={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
-                    onBlur={
+                    className="relative"
+                    onMouseEnter={
                       enableTrendHover
-                        ? (event) => {
-                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                              setActiveTrendDetailKey((current) => (current === point.key ? null : current));
+                        ? () => {
+                            if (trendHoverTimeoutRef.current) {
+                              clearTimeout(trendHoverTimeoutRef.current);
+                              trendHoverTimeoutRef.current = null;
                             }
+                            setActiveTrendDetailKey(point.key);
                           }
                         : undefined
                     }
-                    onClick={enableTrendTap ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
+                    onMouseLeave={
+                      enableTrendHover
+                        ? () => {
+                            trendHoverTimeoutRef.current = setTimeout(() => {
+                              setActiveTrendDetailKey((current) => (current === point.key ? null : current));
+                            }, 150);
+                          }
+                        : undefined
+                    }
                   >
-                    <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2))}</strong>
-                    <span className="mt-2 block text-sm font-medium text-secondary">{point.label}</span>
-                    <small className="mt-1 block text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
+                    <button
+                      type="button"
+                      className={cn(
+                        "w-full cursor-pointer rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 text-left shadow-sm transition duration-200",
+                        activeTrendDetailKey === point.key && "border-primary/25 ring-2 ring-primary/10"
+                      )}
+                      onFocus={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
+                      onBlur={
+                        enableTrendHover
+                          ? (event) => {
+                              if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) {
+                                setActiveTrendDetailKey((current) => (current === point.key ? null : current));
+                              }
+                            }
+                          : undefined
+                      }
+                      onClick={enableTrendTap ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
+                    >
+                      <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2))}</strong>
+                      <span className="mt-2 block text-sm font-medium text-secondary">{point.label}</span>
+                      <small className="mt-1 block text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
+                    </button>
 
                     {enableTrendHover && activeTrendDetailKey === point.key && trendDetailLookup[point.key]?.length ? (
                       <div
                         className={cn(
-                          "pointer-events-none absolute bottom-[calc(100%+14px)] z-20 hidden w-[min(18rem,calc(100vw-2rem))] rounded-[20px] border border-[color:var(--border)] bg-[#faf8f1]/98 p-3 shadow-[0_18px_40px_rgba(40,44,35,0.14)] backdrop-blur-md sm:block",
+                          "pointer-events-auto absolute bottom-[calc(100%+8px)] z-20 hidden w-[min(20rem,calc(100vw-2rem))] max-h-[220px] flex-col rounded-[20px] border border-[color:var(--border)] bg-[#faf8f1]/98 p-3 shadow-[0_18px_40px_rgba(40,44,35,0.14)] backdrop-blur-md sm:flex",
                           getTrendTooltipAlignment(index, spendTrend.length)
                         )}
+                        onMouseEnter={() => {
+                          if (trendHoverTimeoutRef.current) {
+                            clearTimeout(trendHoverTimeoutRef.current);
+                            trendHoverTimeoutRef.current = null;
+                          }
+                        }}
                       >
-                        <div className="mb-3 flex items-center justify-between gap-2">
-                          <strong className="text-sm text-ink">{point.label}</strong>
+                        {/* Invisible bridge to catch cursor movement between card and popup */}
+                        <div className="absolute -bottom-2.5 left-0 right-0 h-3" aria-hidden="true" />
+                        <div className="mb-2 flex shrink-0 items-center justify-between gap-2 border-b border-[color:var(--border)]/70 pb-2">
+                          <strong className="text-sm font-semibold text-ink">{point.label}</strong>
                           <span className="text-xs uppercase tracking-[0.16em] text-muted">{point.count} items</span>
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5 overflow-y-auto pr-1">
                           {trendDetailLookup[point.key].map((item) => (
-                            <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/80 px-3 py-2 text-sm">
+                            <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/90 px-3 py-2 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                               <span className="truncate text-secondary">{item.description}</span>
-                              <span className="font-semibold text-ink">{formatCurrency(item.amount)}</span>
+                              <span className="shrink-0 font-semibold text-ink">{formatCurrency(item.amount)}</span>
                             </div>
                           ))}
                         </div>
                       </div>
                     ) : null}
-                  </button>
+                  </div>
                 ))}
               </div>
-
-              {isTrendDetailEnabled && activeTrendPoint && activeTrendItems.length ? (
-                <div
-                  className="fixed inset-0 z-30 flex items-center justify-center bg-[rgba(28,33,27,0.45)] p-4 sm:hidden"
-                  onClick={() => setActiveTrendDetailKey(null)}
-                  role="presentation"
-                >
-                  <div
-                    className="max-h-[min(75vh,32rem)] w-full max-w-sm overflow-y-auto rounded-[24px] border border-[color:var(--border)] bg-[#faf8f1] p-4 shadow-[0_24px_70px_rgba(40,44,35,0.24)]"
-                    onClick={(event) => event.stopPropagation()}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={`${activeTrendPoint.label} trend details`}
-                  >
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <strong className="block text-base text-ink">{activeTrendPoint.label}</strong>
-                        <span className="mt-1 block text-xs uppercase tracking-[0.16em] text-muted">
-                          {activeTrendPoint.count} items
-                        </span>
-                      </div>
-                      <button type="button" className="ui-button-ghost px-3 py-2 text-xs" onClick={() => setActiveTrendDetailKey(null)}>
-                        Close
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {activeTrendItems.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/80 px-3 py-2 text-sm">
-                          <span className="truncate text-secondary">{item.description}</span>
-                          <span className="font-semibold text-ink">{formatCurrency(item.amount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </>
           )}
         
         </SurfaceCard>
       </section>
+    </div>
+  )}
+
+      {/* Mobile-only Trend Detail Modal (rendered at root level to prevent space-y shift) */}
+      {isSmallScreen && isTrendDetailEnabled && activeTrendPoint && activeTrendItems.length ? (
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-[rgba(28,33,27,0.45)] p-4 sm:hidden"
+          onClick={() => setActiveTrendDetailKey(null)}
+          role="presentation"
+        >
+          <div
+            className="max-h-[min(75vh,32rem)] w-full max-w-sm overflow-y-auto rounded-[24px] border border-[color:var(--border)] bg-[#faf8f1] p-4 shadow-[0_24px_70px_rgba(40,44,35,0.24)]"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${activeTrendPoint.label} trend details`}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <strong className="block text-base text-ink">{activeTrendPoint.label}</strong>
+                <span className="mt-1 block text-xs uppercase tracking-[0.16em] text-muted">
+                  {activeTrendPoint.count} items
+                </span>
+              </div>
+              <button type="button" className="ui-button-ghost px-3 py-2 text-xs" onClick={() => setActiveTrendDetailKey(null)}>
+                Close
+              </button>
+            </div>
+            <div className="space-y-2">
+              {activeTrendItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/80 px-3 py-2 text-sm">
+                  <span className="truncate text-secondary">{item.description}</span>
+                  <span className="font-semibold text-ink">{formatCurrency(item.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedCategoryBreakdown && (
         <ModalFrame onClose={() => setSelectedCategoryBreakdown(null)} className="max-w-[500px] w-full p-5 sm:p-6 rounded-[28px] border border-white/60 bg-white/95 shadow-xl backdrop-blur-xl">

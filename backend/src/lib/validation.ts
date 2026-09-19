@@ -101,6 +101,7 @@ export const createWalletSchema = z.object({
   description: z.string().trim().max(280, "Description is too long.").optional(),
   defaultSplitRule: z.enum(["equal", "fixed", "percentage"]).default("equal"),
   currency: z.string().trim().max(10).default("INR"),
+  pictureUrl: z.string().trim().max(1000000).optional().nullable(),
   members: z
     .array(
       z.object({

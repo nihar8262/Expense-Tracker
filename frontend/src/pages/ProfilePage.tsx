@@ -4,6 +4,7 @@ import type { ReminderPreferences } from "../types";
 import { SurfaceCard, StatusNotice, PageHero } from "../components/ui";
 import { listTokens, createToken, revokeToken, type Token } from "../services/api";
 import { TokenRevealModal } from "../components/TokenRevealModal";
+import { McpIntegrationGuideModal } from "../components/McpIntegrationGuideModal";
 import { ConfirmModal } from "../components/ConfirmModal";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
@@ -205,6 +206,7 @@ export function ProfilePage({
   const [revealModalOpen, setRevealModalOpen] = useState(false);
   const [revealToken, setRevealToken] = useState<string | null>(null);
   const [revealTokenLabel, setRevealTokenLabel] = useState("");
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
 
   const loadTokens = async () => {
     setIsLoadingTokens(true);
@@ -544,11 +546,23 @@ export function ProfilePage({
 
       {/* AI Tools Access (MCP) Section */}
       <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
-        <div>
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">AI Tools Access (MCP)</h2>
-          <p className="text-xs text-secondary mt-0.5">
-            Generate and manage personal access tokens to connect external AI tools (like Claude Desktop, Cursor, or Claude Code) to your Expense-Tracker data.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">AI Tools Access (MCP)</h2>
+            <p className="text-xs text-secondary mt-0.5">
+              Generate and manage personal access tokens to connect external AI tools (like Claude Desktop, Cursor, or Claude Code) to your Expense-Tracker data.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setGuideModalOpen(true)}
+            className="ui-button-secondary text-xs px-3.5 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto border-primary/30 hover:border-primary/60 text-primary bg-primary/5 hover:bg-primary/10 transition-colors font-semibold shadow-sm"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Connect AI Agents (Guide)
+          </button>
         </div>
 
         {tokenError && (
@@ -716,6 +730,13 @@ export function ProfilePage({
           setRevealToken(null);
           setRevealTokenLabel("");
         }}
+      />
+
+      <McpIntegrationGuideModal
+        isOpen={guideModalOpen}
+        onClose={() => setGuideModalOpen(false)}
+        tokens={tokens}
+        latestToken={revealToken}
       />
 
       <ConfirmModal

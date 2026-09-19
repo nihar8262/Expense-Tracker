@@ -9,3 +9,6 @@ frontend/.vite
 
 backend/scripts/test-gemini.ts
 backend/scripts/test-mcp-search.ts
+strix_runs
+security-audit
+*.tsbuildinfo

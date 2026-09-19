@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const { runReminderChecks, runReminderChecksForUser } = require("./_lib/finance");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
@@ -11,7 +12,17 @@ module.exports = async function handler(request, response) {
   const schedulerSecret = process.env.SCHEDULER_SECRET && process.env.SCHEDULER_SECRET.trim();
   const providedSecret = request.headers["x-scheduler-secret"] && String(request.headers["x-scheduler-secret"]).trim();
 
-  if (schedulerSecret && providedSecret === schedulerSecret) {
+  const isSecretValid = Boolean(
+    schedulerSecret &&
+    providedSecret &&
+    Buffer.byteLength(providedSecret) === Buffer.byteLength(schedulerSecret) &&
+    crypto.timingSafeEqual(Buffer.from(providedSecret), Buffer.from(schedulerSecret))
+  );
+
+  if (isSecretValid) {
+    if (request.method !== "POST") {
+      return methodNotAllowed(response, "POST");
+    }
     const result = await runReminderChecks();
     return sendResult(response, result);
   }

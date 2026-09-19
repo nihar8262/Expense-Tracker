@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { BudgetForm, BudgetHistoryGroup, BudgetHistoryRange, BudgetSummary, CategoryOption } from "../types";
 import { ModalFrame, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
+import { History } from "lucide-react";
 
 type BudgetTrackerSectionProps = {
   sectionTitle: string;
@@ -175,7 +176,8 @@ export function BudgetTrackerSection({
   function renderBudgetForm() {
     return (
       <form className="grid gap-4" onSubmit={(event) => void handleValidatedBudgetSubmit(event)} noValidate>
-        <label className="grid gap-2 text-sm font-medium text-secondary">
+        {/* Issue #7: budget-form-field caps max-width so fields feel intentionally narrow */}
+        <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
           Budget type
           <select value={budgetForm.scope} onChange={(event) => onBudgetFormChange((current) => ({ ...current, scope: event.target.value as BudgetForm["scope"] }))}>
             <option value="monthly">Monthly budget</option>
@@ -183,7 +185,7 @@ export function BudgetTrackerSection({
           </select>
         </label>
 
-        <label className="grid gap-2 text-sm font-medium text-secondary">
+        <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
           <span className="required-mark">Amount</span>
           <div className="relative">
             <input type="number" className="pl-8" min="0.01" step="0.01" required value={budgetForm.amount} onChange={(event) => onBudgetFormChange((current) => ({ ...current, amount: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.amount)} />
@@ -194,14 +196,14 @@ export function BudgetTrackerSection({
           {showBudgetValidation && budgetErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.amount}</span> : null}
         </label>
 
-        <label className="grid gap-2 text-sm font-medium text-secondary">
+        <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
           <span className="required-mark">Month</span>
           <input type="month" required value={budgetForm.month} onChange={(event) => onBudgetFormChange((current) => ({ ...current, month: event.target.value }))} aria-invalid={showBudgetValidation && Boolean(budgetErrors.month)} />
           {showBudgetValidation && budgetErrors.month ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.month}</span> : null}
         </label>
 
         {budgetForm.scope === "category" ? (
-          <label className="grid gap-2 text-sm font-medium text-secondary">
+          <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
             <span className="required-mark">Category</span>
             <select value={budgetForm.category} onChange={(event) => onBudgetFormChange((current) => ({ ...current, category: event.target.value }))} required aria-invalid={showBudgetValidation && Boolean(budgetErrors.category)}>
               <option value="">Select category</option>
@@ -237,7 +239,12 @@ export function BudgetTrackerSection({
             title={sectionTitle}
             description={sectionDescription}
             actions={
-              <button type="button" className="ui-button-secondary" onClick={onOpenBudgetHistory}>
+              <button
+                type="button"
+                className="ui-button-secondary shrink-0 whitespace-nowrap text-xs"
+                onClick={onOpenBudgetHistory}
+              >
+                <History className="size-3.5 mr-1" />
                 {historyTriggerLabel}
               </button>
             }
@@ -277,7 +284,7 @@ export function BudgetTrackerSection({
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" className="ui-button-ghost" onClick={() => handleEditStart(budget)}>
+                      <button type="button" className="ui-button-secondary" onClick={() => handleEditStart(budget)}>
                         Edit
                       </button>
                       <button type="button" className="ui-button-danger" disabled={deletingBudgetIds.includes(budget.id)} onClick={() => void onBudgetDelete(budget.id)}>
@@ -380,7 +387,7 @@ export function BudgetTrackerSection({
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              className="ui-button-ghost"
+                              className="ui-button-secondary"
                               onClick={() => {
                                 handleEditStart(budget);
                                 onCloseBudgetHistory();

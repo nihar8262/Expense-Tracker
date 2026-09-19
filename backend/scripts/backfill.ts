@@ -11,9 +11,7 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const sql = postgres(connectionString, {
-  ssl: { rejectUnauthorized: false }
-});
+const sql = postgres(connectionString);
 
 async function main() {
   console.log("Starting embeddings backfill...");

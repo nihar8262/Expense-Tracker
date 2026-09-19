@@ -19,7 +19,7 @@ function buildApp() {
       if (!userId) {
         throw new Error("Missing test user.");
       }
-      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null };
+      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null, emailVerified: true };
     },
     async () => {}
   );

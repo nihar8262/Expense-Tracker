@@ -29,7 +29,6 @@ export class PostgresTokenStore implements TokenStore {
       throw new Error("DATABASE_URL environment variable is not set.");
     }
     this.sql = postgres(connectionString, {
-      ssl: { rejectUnauthorized: false },
       max: 1
     });
   }

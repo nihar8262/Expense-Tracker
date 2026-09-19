@@ -407,6 +407,8 @@ export function AppRoutes() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [loans, setLoans] = useState<WalletLoan[]>([]);
+  const [isLoansLoading, setIsLoansLoading] = useState(false);
+  const [hasLoadedLoans, setHasLoadedLoans] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
@@ -526,6 +528,7 @@ export function AppRoutes() {
   const [dashboardViewMode, setDashboardViewMode] = useState<"personal" | "wallet">("personal");
   const [dashboardWalletId, setDashboardWalletId] = useState<string | null>(null);
   const [dashboardWallet, setDashboardWallet] = useState<WalletDetail | null>(null);
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const [selectedWallet, _setSelectedWallet] = useState<WalletDetail | null>(null);
 
@@ -596,8 +599,11 @@ export function AppRoutes() {
   const isOtherCategorySelected = selectedCategoryOption?.id === "others";
 
   const dashboardExpenses = useMemo<Expense[]>(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal") {
       return expenses;
+    }
+    if (!dashboardWallet) {
+      return [];
     }
 
     return dashboardWallet.expenses.map((walletExpense) => ({
@@ -652,8 +658,11 @@ export function AppRoutes() {
   }, [expenses]);
 
   const spendTrend = useMemo(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal") {
       return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
+    }
+    if (!dashboardWallet) {
+      return [];
     }
 
     if (dashboardWallet.walletAggregation?.monthly_totals) {
@@ -753,8 +762,11 @@ export function AppRoutes() {
   }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, chartGranularity, selectedTimeRange]);
 
   const trendDetailLookup = useMemo(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet) {
+    if (dashboardViewMode === "personal") {
       return buildTrendDetailLookup(dashboardVisibleExpenses, chartGranularity);
+    }
+    if (!dashboardWallet) {
+      return {};
     }
     return buildTrendDetailLookup(dashboardWallet.expenses, chartGranularity);
   }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, chartGranularity]);
@@ -788,8 +800,11 @@ export function AppRoutes() {
   }, [spendTrend]);
 
   const totalVal = useMemo(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
+    if (dashboardViewMode === "personal") {
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+    }
+    if (!dashboardWallet || !dashboardWallet.walletAggregation) {
+      return "0.00";
     }
 
     const today = new Date();
@@ -872,6 +887,17 @@ export function AppRoutes() {
         latestExpense,
         categoryBreakdown,
         topPlatform
+      };
+    }
+
+    if (!dashboardWallet || !dashboardWallet.walletAggregation) {
+      return {
+        expenseCount: 0,
+        average: formatCurrency("0.00"),
+        topCategory: null,
+        latestExpense: null,
+        categoryBreakdown: [],
+        topPlatform: null
       };
     }
 
@@ -1017,8 +1043,11 @@ export function AppRoutes() {
   const currentBudgetMonth = getCurrentMonthValue();
 
   const dashboardBudgetSummaries = useMemo<BudgetSummary[]>(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
+    if (dashboardViewMode === "personal") {
       return budgetSummaries;
+    }
+    if (!dashboardWallet || !dashboardWallet.walletAggregation) {
+      return [];
     }
 
     return dashboardWallet.budgets
@@ -1187,6 +1216,7 @@ export function AppRoutes() {
   async function loadSelectedWallet(user: User, walletId: string) {
     setIsWalletLoading(true);
     setWalletErrorMessage("");
+    setSelectedWallet(null);
 
     try {
       const wallet = await getWalletDetail(walletId, user);
@@ -1198,13 +1228,27 @@ export function AppRoutes() {
     }
   }
 
-  async function loadLoans(user: User) {
+  async function loadLoans(user: User, force = false) {
+    if (!force && hasLoadedLoans) {
+      return;
+    }
+    setIsLoansLoading(true);
     try {
-      setLoans(await listLoans(user));
+      const data = await listLoans(user);
+      setLoans(data);
+      setHasLoadedLoans(true);
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load loans.");
+    } finally {
+      setIsLoansLoading(false);
     }
   }
+
+  const handleLoadLoans = useCallback(async (force = false) => {
+    if (currentUser) {
+      await loadLoans(currentUser, force);
+    }
+  }, [currentUser, hasLoadedLoans]);
 
   async function loadNotifications(user: User) {
     try {
@@ -1326,8 +1370,13 @@ export function AppRoutes() {
       setIsWalletLoading(false);
       setWallets([]);
       setLoans([]);
+      setHasLoadedLoans(false);
+      setIsLoansLoading(false);
       setSelectedWalletId(null);
       setSelectedWallet(null);
+      setDashboardWallet(null);
+      setDashboardWalletId(null);
+      setIsDashboardLoading(false);
       setNotifications([]);
       setBillReminders([]);
       setReminderPreferences(null);
@@ -1335,7 +1384,7 @@ export function AppRoutes() {
     }
 
     void loadWallets(currentUser);
-    void loadLoans(currentUser);
+    // Loans data is deferred and loaded on-demand only when the Peer Loans tab is opened
     void loadBillReminders(currentUser);
     void loadReminderPreferences(currentUser);
     void loadNotifications(currentUser);
@@ -1361,14 +1410,38 @@ export function AppRoutes() {
 
   useEffect(() => {
     if (!currentUser || !dashboardWalletId || dashboardViewMode !== "wallet") {
+      setIsDashboardLoading(false);
       return;
     }
     // Only fetch if we don't have the current wallet loaded
     if (dashboardWallet && dashboardWallet.wallet.id === dashboardWalletId) {
+      setIsDashboardLoading(false);
       return;
     }
-    getWalletDetail(dashboardWalletId, currentUser, 0, 1000).then(setDashboardWallet).catch(() => setDashboardWallet(null));
-  }, [currentUser, dashboardViewMode, dashboardWalletId, dashboardWallet]);
+
+    setIsDashboardLoading(true);
+    let isMounted = true;
+    getWalletDetail(dashboardWalletId, currentUser, 0, 1000)
+      .then((data) => {
+        if (isMounted) {
+          setDashboardWallet(data);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setDashboardWallet(null);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsDashboardLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, dashboardViewMode, dashboardWalletId]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
@@ -1658,7 +1731,7 @@ export function AppRoutes() {
     setWalletSubmittingAction("");
   }
 
-  async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> }) {
+  async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; pictureUrl?: string | null; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to create a shared wallet.");
       return false;
@@ -1681,7 +1754,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleUpdateWallet(walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> }) {
+  async function handleUpdateWallet(walletId: string, input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; pictureUrl?: string | null; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to edit a shared wallet.");
       return false;
@@ -2919,9 +2992,37 @@ export function AppRoutes() {
               wallets={wallets}
               dashboardViewMode={dashboardViewMode}
               dashboardWalletId={dashboardWalletId}
+              dashboardWallet={dashboardWallet}
+              isDashboardLoading={isDashboardLoading}
               currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
-              onDashboardViewModeChange={(mode) => { setDashboardViewMode(mode); setSelectedCategory(""); setSelectedPlatform(""); if (mode === "personal") { setDashboardWalletId(null); } else if (wallets.length > 0 && !dashboardWalletId) { setDashboardWalletId(wallets[0].id); } }}
-              onDashboardWalletIdChange={setDashboardWalletId}
+              onDashboardViewModeChange={(mode) => {
+                if (mode === dashboardViewMode) return;
+                setIsDashboardLoading(true);
+                setSelectedCategory("");
+                setSelectedPlatform("");
+                setDashboardViewMode(mode);
+                if (mode === "personal") {
+                  setDashboardWalletId(null);
+                  setDashboardWallet(null);
+                  setTimeout(() => {
+                    setIsDashboardLoading(false);
+                  }, 280);
+                } else {
+                  const nextWalletId = dashboardWalletId || (wallets.length > 0 ? wallets[0].id : null);
+                  if (nextWalletId) {
+                    setDashboardWallet(null);
+                    setDashboardWalletId(nextWalletId);
+                  } else {
+                    setIsDashboardLoading(false);
+                  }
+                }
+              }}
+              onDashboardWalletIdChange={(walletId) => {
+                if (walletId === dashboardWalletId) return;
+                setIsDashboardLoading(true);
+                setDashboardWallet(null);
+                setDashboardWalletId(walletId);
+              }}
               budgetForm={budgetForm}
               budgetCategoryOptions={dashboardBudgetCategoryOptions}
               currentBudgetMonthLabel={formatBudgetMonth(currentBudgetMonth)}
@@ -3050,6 +3151,8 @@ export function AppRoutes() {
             onUpdateWalletLoanRepayment={handleUpdateWalletLoanRepayment}
             onDeleteWalletLoanRepayment={handleDeleteWalletLoanRepayment}
             loans={loans}
+            isLoansLoading={isLoansLoading}
+            onLoadLoans={handleLoadLoans}
             onCreateStandaloneLoan={handleCreateStandaloneLoan}
             onUpdateStandaloneLoan={handleUpdateStandaloneLoan}
             onDeleteStandaloneLoan={handleDeleteStandaloneLoan}

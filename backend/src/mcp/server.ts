@@ -6,21 +6,31 @@ import { getTokenStore } from "./tokenStore.js";
 import { authenticateMcpRequest, McpAuthenticationError } from "./auth.js";
 import { getRateLimiter } from "./rateLimiter.js";
 
-const sessions = new Map<string, express.Response>();
+const sessions = new Map<string, { userId: string; response: express.Response }>();
 
 export function registerMcpRoutes(app: express.Express, store: ExpenseStore) {
   const tokenStore = getTokenStore(store);
   const readOnlyTools = getTools(store).filter(t => t.name !== "create_expense");
 
-  app.get("/api/mcp", (request, response) => {
+  app.get("/api/mcp", async (request, response) => {
+    let user;
+    try {
+      user = await authenticateMcpRequest(request, tokenStore);
+    } catch (error) {
+      if (error instanceof McpAuthenticationError) {
+        return response.status(401).json({ error: error.message });
+      }
+      return response.status(500).json({ error: "Authentication failed." });
+    }
+
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive"
     });
 
-    const sessionId = (request.query.sessionId as string) || crypto.randomUUID();
-    sessions.set(sessionId, response);
+    const sessionId = crypto.randomUUID();
+    sessions.set(sessionId, { userId: user.id, response });
 
     const messageUrl = `/api/mcp?sessionId=${sessionId}`;
     response.write(`event: endpoint\ndata: ${messageUrl}\n\n`);
@@ -137,8 +147,10 @@ export function registerMcpRoutes(app: express.Express, store: ExpenseStore) {
     }
 
     if (sessionId && sessions.has(sessionId)) {
-      const s = sessions.get(sessionId);
-      s?.write(`event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`);
+      const session = sessions.get(sessionId);
+      if (session && session.userId === user.id) {
+        session.response.write(`event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`);
+      }
     }
 
     return response.status(200).json(jsonRpcResponse);

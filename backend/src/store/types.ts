@@ -49,6 +49,7 @@ export type WalletRecord = {
   description: string | null;
   default_split_rule: SplitRule;
   currency: string;
+  picture_url?: string | null;
   created_at: string;
 };
 

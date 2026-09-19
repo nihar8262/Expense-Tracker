@@ -6,6 +6,7 @@ export type AuthenticatedUser = {
   email: string | null;
   name: string | null;
   picture: string | null;
+  emailVerified: boolean;
 };
 
 export class AuthenticationError extends Error {
@@ -84,7 +85,8 @@ export async function authenticateBearerToken(headerValue: string | undefined): 
       id: decoded.uid,
       email: decoded.email ?? null,
       name: decoded.name ?? null,
-      picture: decoded.picture ?? null
+      picture: decoded.picture ?? null,
+      emailVerified: Boolean(decoded.email_verified)
     };
   } catch (error) {
     if (error instanceof AuthenticationConfigurationError) {

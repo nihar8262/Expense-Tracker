@@ -87,6 +87,7 @@ type WalletRow = {
   description: string | null;
   default_split_rule: "equal" | "fixed" | "percentage";
   currency: string;
+  picture_url?: string | null;
   created_at: string | Date;
 };
 
@@ -290,6 +291,7 @@ function mapWallet(row: WalletRow): WalletRecord {
     description: row.description,
     default_split_rule: row.default_split_rule,
     currency: row.currency,
+    picture_url: row.picture_url ?? null,
     created_at: asIsoTimestamp(row.created_at)
   };
 }
@@ -659,6 +661,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
       `;
 
       await sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'INR'`;
+      await sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS picture_url TEXT`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS wallet_budgets (
@@ -1095,7 +1098,7 @@ async function pruneExpiredBudgetNotifications(db: DbClient, userId?: string, no
 
 async function loadWalletDetail(db: DbClient, walletId: string, pagination = getDefaultWalletHistoryPagination()): Promise<WalletDetailRecord> {
   const walletRows = await db<WalletRow[]>`
-    SELECT id, name, description, default_split_rule, currency, created_at
+    SELECT id, name, description, default_split_rule, currency, picture_url, created_at
     FROM wallets
     WHERE id = ${walletId}
   `;
@@ -1684,8 +1687,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         await tx`
-          INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, currency, created_at)
-          VALUES (${walletId}, ${userId}, ${input.name.trim()}, ${input.description?.trim() || null}, ${input.defaultSplitRule}, ${input.currency || "INR"}, ${createdAt})
+          INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, currency, picture_url, created_at)
+          VALUES (${walletId}, ${userId}, ${input.name.trim()}, ${input.description?.trim() || null}, ${input.defaultSplitRule}, ${input.currency || "INR"}, ${input.pictureUrl || null}, ${createdAt})
         `;
 
         await tx`
@@ -1823,14 +1826,26 @@ export function createPostgresExpenseStore(): ExpenseStore {
           }
         }
 
-        await tx`
-          UPDATE wallets
-          SET name = ${input.name.trim()},
-              description = ${input.description?.trim() || null},
-              default_split_rule = ${input.defaultSplitRule},
-              currency = ${input.currency || "INR"}
-          WHERE id = ${walletId}
-        `;
+        if (input.pictureUrl !== undefined) {
+          await tx`
+            UPDATE wallets
+            SET name = ${input.name.trim()},
+                description = ${input.description?.trim() || null},
+                default_split_rule = ${input.defaultSplitRule},
+                currency = ${input.currency || "INR"},
+                picture_url = ${input.pictureUrl || null}
+            WHERE id = ${walletId}
+          `;
+        } else {
+          await tx`
+            UPDATE wallets
+            SET name = ${input.name.trim()},
+                description = ${input.description?.trim() || null},
+                default_split_rule = ${input.defaultSplitRule},
+                currency = ${input.currency || "INR"}
+            WHERE id = ${walletId}
+          `;
+        }
 
         const currentMembers = await tx<WalletMemberRow[]>`
           SELECT id, display_name, email, member_role
@@ -2188,7 +2203,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await ensureSchema(sql);
 
       const rows = await sql<WalletRow[]>`
-        SELECT wallets.id, wallets.name, wallets.description, wallets.default_split_rule, wallets.currency, wallets.created_at
+        SELECT wallets.id, wallets.name, wallets.description, wallets.default_split_rule, wallets.currency, wallets.picture_url, wallets.created_at
         FROM wallets
         INNER JOIN wallet_members ON wallet_members.wallet_id = wallets.id
         WHERE wallet_members.user_id = ${userId}

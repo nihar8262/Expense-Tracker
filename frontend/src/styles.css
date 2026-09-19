@@ -52,6 +52,26 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ── Unified type scale (10 steps) ─────────────────────── */
+  --text-2xs:  0.6875rem; /* 11px  – micro labels, eyebrows        */
+  --text-xs:   0.75rem;   /* 12px  – captions, data-pills           */
+  --text-sm:   0.875rem;  /* 14px  – body / secondary copy          */
+  --text-base: 1rem;      /* 16px  – primary body                   */
+  --text-lg:   1.0625rem; /* 17px  – slightly large body / sm cards */
+  --text-xl:   1.125rem;  /* 18px  – card headings                  */
+  --text-2xl:  1.25rem;   /* 20px  – sub-section headings           */
+  --text-3xl:  1.5rem;    /* 24px  – section headings               */
+  --text-4xl:  1.875rem;  /* 30px  – stat values                    */
+  --text-hero: clamp(2.6rem, 6vw, 4.4rem); /* page heroes           */
+
+  /* ── Unified corner-radius scale (6 steps) ─────────────── */
+  --r-xs:  6px;   /* checkboxes, tiny chips                         */
+  --r-sm:  10px;  /* inline badges, small pills                     */
+  --r-md:  14px;  /* segmented controls, compact cards              */
+  --r-lg:  20px;  /* inputs, select, standard cards                 */
+  --r-xl:  24px;  /* surface cards, modal panels                    */
+  --r-full: 9999px; /* fully pill-shaped buttons / nav pills        */
 }
 
 @theme {
@@ -71,6 +91,37 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  /* ── Universal thin scrollbar system ─────────────────────── */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(30, 122, 83, 0.28) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(120, 140, 130, 0.32);
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(30, 122, 83, 0.55);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   html {
@@ -161,32 +212,101 @@
     @apply rounded-[24px] border border-[color:var(--border)] bg-white/70 p-5 shadow-[var(--shadow)] backdrop-blur-xl sm:p-6;
   }
 
+  /* Issue #6: actions stay under the heading on every breakpoint for a tight
+     eye-path. Flex-col always; no lg:flex-row. */
   .page-hero-panel {
-    @apply flex flex-col gap-6 rounded-[32px] border border-white/50 bg-[linear-gradient(135deg,rgba(255,255,255,0.8),rgba(255,255,255,0.48))] px-6 py-7 shadow-[var(--shadow)] backdrop-blur-xl sm:px-8 sm:py-9 lg:flex-row lg:items-end lg:justify-between lg:px-10;
+    @apply flex flex-col gap-5 rounded-[32px] border border-white/50
+           bg-[linear-gradient(135deg,rgba(255,255,255,0.8),rgba(255,255,255,0.48))]
+           px-6 py-7 shadow-[var(--shadow)] backdrop-blur-xl
+           sm:px-8 sm:py-9 lg:px-10;
   }
 
+  /* Issue #4 fix: sentence-case for readability; keep compact size + tracking */
   .section-eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-muted;
+    @apply text-[11px] font-semibold tracking-[0.12em] text-muted;
+    text-transform: none;
+  }
+
+  /* ── Button system (issues #3, #8, #9) ─────────────────────
+     Single shared base + thin modifier layers keep the total
+     number of distinct button styles at 4 (primary / secondary /
+     ghost / danger) instead of 10.
+  ───────────────────────────────────────────────────────────── */
+  .ui-button,
+  .ui-button-primary,
+  .ui-button-secondary,
+  .ui-button-ghost,
+  .ui-button-danger {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full
+           px-5 py-2.5 text-sm font-semibold
+           transition duration-200 ease-out active:scale-[0.98];
   }
 
   .ui-button {
-    @apply inline-flex min-h-11 items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold transition duration-200 ease-out active:scale-[0.98];
+    /* bare base – add colour modifier classes yourself */
   }
 
+  /* Issue #9: primary CTA is noticeably larger */
   .ui-button-primary {
-    @apply inline-flex min-h-11 items-center justify-center rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(30,122,83,0.22)] transition duration-200 ease-out hover:bg-primary-hover active:scale-[0.98];
+    @apply min-h-[2.75rem] bg-primary px-6 text-white
+           shadow-[0_12px_30px_rgba(30,122,83,0.22)]
+           hover:bg-primary-hover;
   }
 
   .ui-button-secondary {
-    @apply inline-flex min-h-11 items-center justify-center rounded-full border border-[color:var(--border)] bg-white/80 px-5 py-2.5 text-sm font-semibold text-ink transition duration-200 ease-out hover:bg-white active:scale-[0.98];
+    @apply border border-[color:var(--border)] bg-white/80 text-ink hover:bg-white;
   }
 
+  /* Issue #8: ghost now has a visible border at rest so it reads as a real button */
   .ui-button-ghost {
-    @apply inline-flex min-h-11 items-center justify-center rounded-full border border-transparent bg-transparent px-5 py-2.5 text-sm font-semibold text-secondary transition duration-200 ease-out hover:border-[color:var(--border)] hover:bg-white/50 hover:text-ink active:scale-[0.98];
+    @apply border border-[color:var(--border)] bg-transparent text-secondary
+           hover:bg-white/60 hover:text-ink;
   }
 
   .ui-button-danger {
-    @apply inline-flex items-center justify-center rounded-full bg-danger-tint px-5 py-2.5 text-sm font-semibold text-[color:var(--danger-text)] transition duration-200 ease-out hover:bg-[#f3d4d1] active:scale-[0.98];
+    @apply border border-transparent bg-danger-tint text-[color:var(--danger-text)]
+           hover:bg-[#f3d4d1];
+  }
+
+  .ui-button-sm {
+    @apply !min-h-8 !px-3 !py-1 !text-xs;
+  }
+
+  /* ── Segmented source-toggle (issues #6, #10) ───────────────
+     Replaces the ad-hoc large-block icon buttons with a tight
+     pill-toggle that matches the rest of the control row.
+  ───────────────────────────────────────────────────────────── */
+  .source-toggle {
+    @apply flex w-full sm:w-auto sm:inline-flex rounded-full border border-[color:var(--border)] bg-white/60 p-0.5 gap-0.5;
+  }
+
+  .source-toggle-btn {
+    @apply inline-flex flex-1 sm:flex-initial min-h-9 items-center justify-center gap-1.5 rounded-full
+           px-3.5 py-1.5 text-sm font-semibold
+           transition duration-200 ease-out
+           text-secondary hover:text-ink;
+  }
+
+  .source-toggle-btn[aria-pressed="true"] {
+    @apply bg-white text-ink shadow-sm;
+  }
+
+  .source-toggle-btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  /* Issue #4: compact 3-up grid for the Data view filter row.
+     Source toggle + 3 selects sit in one row on ≥md screens. */
+  .filter-grid {
+    @apply grid gap-3
+           md:grid-cols-[auto_1fr_1fr_1fr]
+           md:items-end;
+  }
+
+  /* Issue #7: constrain budget-form fields so they don't span a
+     full two-column card width. */
+  .budget-form-field {
+    @apply max-w-sm;
   }
 
   .status-notice {
@@ -234,18 +354,26 @@
   }
 
   .modal-overlay {
-    @apply fixed inset-0 z-50 flex items-end justify-center bg-[rgba(18,26,20,0.26)] p-0 backdrop-blur-sm sm:items-center sm:p-6;
-    animation: modalFadeIn 0.2s ease-out forwards;
+    @apply fixed inset-0 z-[100] flex items-end justify-center bg-[rgba(15,23,18,0.65)] p-0 backdrop-blur-md sm:items-center sm:p-6;
+    animation: modalFadeIn 0.22s ease-out forwards;
   }
 
   .modal-panel {
-    @apply max-h-[88vh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-white/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(252,251,247,0.9))] shadow-[0_30px_90px_rgba(40,44,35,0.16)] backdrop-blur-xl sm:max-w-[840px] sm:rounded-[28px];
+    @apply max-h-[88vh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(252,251,247,0.95))] shadow-[0_30px_90px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:max-w-[840px] sm:rounded-[28px];
     animation: modalScaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   @keyframes modalFadeIn {
-    from { opacity: 0; backdrop-filter: blur(0px); }
-    to { opacity: 1; backdrop-filter: blur(4px); }
+    from {
+      opacity: 0;
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
+    }
+    to {
+      opacity: 1;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
   }
 
   @keyframes modalScaleIn {
@@ -478,4 +606,18 @@ input[type="checkbox"]:disabled {
 
 .animate-slide-in {
   animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 140, 130, 0.32) transparent;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

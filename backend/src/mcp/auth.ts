@@ -16,10 +16,6 @@ export async function authenticateMcpRequest(request: Request, tokenStore: Token
     token = authHeader.substring(7).trim();
   }
 
-  if (!token && request.query && typeof request.query.token === "string") {
-    token = request.query.token;
-  }
-
   if (!token) {
     throw new McpAuthenticationError("Unauthorized: Missing access token.");
   }

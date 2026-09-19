@@ -49,6 +49,7 @@ export type Wallet = {
 	description: string | null;
 	default_split_rule: SplitRule;
 	currency: string;
+	picture_url?: string | null;
 	created_at: string;
 };
 
@@ -364,8 +365,8 @@ export type ProfileMenuProps = {
 	profileMenuRef: RefObject<HTMLDivElement | null>;
 	onToggle: () => void;
 	onSignOut: () => Promise<void>;
-	onDeleteAccount: () => void;
-	isDeletingAccount: boolean;
+	onDeleteAccount?: () => void;
+	isDeletingAccount?: boolean;
 	photoUrl?: string | null;
 	displayName?: string | null;
 };

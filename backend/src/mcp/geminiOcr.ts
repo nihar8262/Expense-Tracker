@@ -28,11 +28,13 @@ export interface ScannedImageInput {
 }
 
 export interface ExtractedReceiptDraft {
+  is_receipt: boolean;
   merchant: string;
   amount: string;
   date: string;
   category: string;
   description: string;
+  error_message?: string;
 }
 
 export async function extractReceipt(images: ScannedImageInput[]): Promise<ExtractedReceiptDraft> {
@@ -43,7 +45,7 @@ export async function extractReceipt(images: ScannedImageInput[]): Promise<Extra
 
   const parts: any[] = [
     {
-      text: "Extract transaction details from the provided receipt image(s). If multiple images are provided, they belong to the same single receipt; sum and analyze them together as one transaction. Redact any sensitive credit card numbers or account numbers (replace with '[REDACTED]'). Suggest a category matching one of: Food, Travel, Utilities, Entertainment, Shopping, Healthcare, Others."
+      text: "Analyze the provided image(s). First, determine whether the image is actually a genuine financial receipt, store bill, restaurant check, invoice, or payment slip. If the image is a personal photo (such as a selfie, person, animal, nature, scenery, or unrelated non-bill object) or contains no financial transaction, set 'is_receipt' to false, provide a short 'error_message' (e.g. 'This image appears to be a personal photo, not a receipt or bill.'), and set amount to '0.00'. If it IS a receipt, set 'is_receipt' to true, extract transaction details, redact any credit card numbers with '[REDACTED]', and categorize into: Food, Travel, Utilities, Entertainment, Shopping, Healthcare, Others."
     }
   ];
 
@@ -69,13 +71,15 @@ export async function extractReceipt(images: ScannedImageInput[]): Promise<Extra
         responseSchema: {
           type: "OBJECT",
           properties: {
+            is_receipt: { type: "BOOLEAN", description: "Set to true if image is a receipt/bill; false if it is a personal photo, selfie, object, or unrelated image." },
+            error_message: { type: "STRING", description: "Reason why image is not a receipt if is_receipt is false." },
             merchant: { type: "STRING", description: "Name of the merchant/store." },
             amount: { type: "STRING", description: "Total amount spent as a decimal string, e.g., '12.50'." },
             date: { type: "STRING", description: "Date of transaction in YYYY-MM-DD format." },
-            category: { type: "STRING", description: "Suggested category (e.g. Food, Travel, Utilities, Shopping, Entertainment, Healthcare, Others)." },
+            category: { type: "STRING", description: "Suggested category (Food, Travel, Utilities, Shopping, Entertainment, Healthcare, Others)." },
             description: { type: "STRING", description: "Concise summary of key items purchased." }
           },
-          required: ["merchant", "amount", "date", "category", "description"]
+          required: ["is_receipt"]
         }
       }
     })
@@ -87,6 +91,16 @@ export async function extractReceipt(images: ScannedImageInput[]): Promise<Extra
   }
 
   const extractedData = JSON.parse(textResponse.trim());
+
+  if (!extractedData.is_receipt) {
+    const reason = extractedData.error_message?.trim() || "The uploaded image does not appear to be a receipt or bill.";
+    throw new Error(`No receipt detected: ${reason} Please take or upload a clear photo of your receipt.`);
+  }
+
+  const parsedAmount = parseFloat(extractedData.amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    throw new Error("No receipt detected: Could not find a valid transaction amount on this image. Please take or upload a clear photo of your receipt.");
+  }
 
   const redactCardNumbers = (val: any) => {
     if (typeof val === "string") {
@@ -106,10 +120,11 @@ export async function extractReceipt(images: ScannedImageInput[]): Promise<Extra
   };
 
   return {
-    merchant: sanitizeField(extractedData.merchant, 100),
+    is_receipt: true,
+    merchant: sanitizeField(extractedData.merchant || "Store", 100),
     amount: sanitizeField(extractedData.amount, 20),
-    date: sanitizeField(extractedData.date, 10),
-    category: sanitizeField(extractedData.category, 64),
-    description: sanitizeField(extractedData.description, 280)
+    date: sanitizeField(extractedData.date || new Date().toISOString().slice(0, 10), 10),
+    category: sanitizeField(extractedData.category || "Others", 64),
+    description: sanitizeField(extractedData.description || "Receipt purchase", 280)
   };
 }

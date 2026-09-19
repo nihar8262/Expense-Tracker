@@ -188,7 +188,7 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
       {/* Floating Action Button (FAB) - Desktop only (hidden on mobile) */}
       <button
         onClick={onToggle}
-        className="hidden lg:flex fixed bottom-6 right-6 z-40 h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer overflow-hidden border border-white/20"
+        className="hidden lg:flex fixed bottom-8 right-8 z-40 h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer overflow-hidden border border-white/20"
         aria-label="Ask assistant"
       >
         {isOpen ? (
@@ -200,7 +200,7 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
 
       {/* Chat Panel */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 md:inset-auto md:bottom-24 md:right-6 md:w-96 md:h-[580px] md:max-h-[calc(100vh-120px)] lg:bottom-24 lg:right-6 flex flex-col overflow-hidden rounded-none md:rounded-[28px] border-0 md:border border-white/60 bg-white md:bg-white/90 shadow-2xl md:shadow-[0_30px_80px_rgba(40,44,35,0.18)] md:backdrop-blur-2xl transition-all duration-300">
+        <div className="fixed inset-0 z-50 md:inset-auto md:bottom-[6.5rem] md:right-8 md:w-96 md:h-[580px] md:max-h-[calc(100vh-120px)] lg:bottom-[6.5rem] lg:right-8 flex flex-col overflow-hidden rounded-none md:rounded-[28px] border-0 md:border border-white/60 bg-white md:bg-white/90 shadow-2xl md:shadow-[0_30px_80px_rgba(40,44,35,0.18)] md:backdrop-blur-2xl transition-all duration-300">
           
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 bg-white/50 px-5 py-4">

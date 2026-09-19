@@ -193,7 +193,7 @@ export async function deleteAccountData(user: User): Promise<void> {
 }
 
 export async function createWallet(
-  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> },
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; pictureUrl?: string | null; members: Array<{ displayName: string; email?: string }> },
   user: User
 ): Promise<WalletDetail> {
   const body = await apiRequest<{ wallet: WalletDetail }>(user, {
@@ -206,7 +206,7 @@ export async function createWallet(
 
 export async function updateWallet(
   walletId: string,
-  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; members: Array<{ displayName: string; email?: string }> },
+  payload: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; pictureUrl?: string | null; members: Array<{ displayName: string; email?: string }> },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}`;

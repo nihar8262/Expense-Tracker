@@ -15,6 +15,7 @@ import {
 } from "../components/ui";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { BorrowerMiniStatementModal } from "../components/BorrowerMiniStatementModal";
+import { compressGroupImage } from "../utils/imageCompressor";
 import type {
   BudgetForm,
   BudgetHistoryRange,
@@ -29,6 +30,88 @@ import type {
   WalletLoanRepayment,
   WalletLoanRepaymentForm,
 } from "../types";
+
+function WalletPicturePicker({
+  pictureUrl,
+  pictureStats,
+  isCompressing,
+  error,
+  onPictureChange,
+  onRemovePicture,
+}: {
+  pictureUrl: string | null;
+  pictureStats: string | null;
+  isCompressing: boolean;
+  error: string | null;
+  onPictureChange: (file: File) => void;
+  onRemovePicture: () => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <span className="text-sm font-medium text-secondary">Group Picture (Max 15MB, auto WebP)</span>
+      <div className="flex items-center gap-4 rounded-2xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-900/60 p-3.5">
+        {pictureUrl ? (
+          <div className="relative group shrink-0">
+            <img
+              src={pictureUrl}
+              alt="Group preview"
+              className="h-16 w-16 rounded-2xl object-cover ring-2 ring-primary/30 shadow-md"
+            />
+            <button
+              type="button"
+              onClick={onRemovePicture}
+              className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-white text-xs font-bold shadow-md hover:bg-rose-600 transition-colors cursor-pointer"
+              title="Remove picture"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 border-2 border-dashed border-[color:var(--border)] text-muted shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-7 w-7 text-muted">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+            </svg>
+          </div>
+        )}
+
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <label className="inline-flex items-center gap-2 cursor-pointer rounded-xl bg-white dark:bg-zinc-800 border border-[color:var(--border)] px-3 py-1.5 text-xs font-semibold text-ink shadow-xs hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:border-primary/40 transition-colors">
+            <span>{isCompressing ? "Optimizing..." : pictureUrl ? "Change Photo" : "Upload Group Photo"}</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={isCompressing}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  onPictureChange(file);
+                }
+                e.target.value = "";
+              }}
+            />
+          </label>
+
+          {pictureStats ? (
+            <p className="text-2xs font-medium text-emerald-700 dark:text-emerald-400">
+              ✨ {pictureStats}
+            </p>
+          ) : (
+            <p className="text-2xs text-muted">
+              Auto-compressed to crisp WebP. Max file size: 15MB.
+            </p>
+          )}
+
+          {error && (
+            <p className="text-xs text-[color:var(--danger-text)] font-medium">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type WalletsPageProps = {
   wallets: Wallet[];
@@ -49,6 +132,7 @@ type WalletsPageProps = {
     description: string;
     defaultSplitRule: SplitRule;
     currency?: string;
+    pictureUrl?: string | null;
     members: Array<{ displayName: string; email?: string }>;
   }) => Promise<boolean>;
   onUpdateWallet: (
@@ -58,6 +142,7 @@ type WalletsPageProps = {
       description: string;
       defaultSplitRule: SplitRule;
       currency?: string;
+      pictureUrl?: string | null;
       members: Array<{ displayName: string; email?: string }>;
     },
   ) => Promise<boolean>;
@@ -170,6 +255,8 @@ type WalletsPageProps = {
     repaymentId: string,
   ) => Promise<boolean>;
   loans?: WalletLoan[];
+  isLoansLoading?: boolean;
+  onLoadLoans?: (force?: boolean) => Promise<void> | void;
   onCreateStandaloneLoan?: (input: WalletLoanForm) => Promise<boolean>;
   onUpdateStandaloneLoan?: (loanId: string, input: Partial<WalletLoanForm>) => Promise<boolean>;
   onDeleteStandaloneLoan?: (loanId: string) => Promise<boolean>;
@@ -267,6 +354,33 @@ function getMemberAvatarUrl(displayName: string, email?: string | null) {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=${color.bg}&color=${color.text}&bold=true&size=128`;
 }
 
+function getMemberInitials(displayName: string): string {
+  if (!displayName) return "U";
+  const parts = displayName.trim().split(/\s+/);
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return displayName.trim().slice(0, 2).toUpperCase();
+}
+
+function getMemberGradient(name: string): string {
+  const gradients = [
+    "linear-gradient(135deg, #10b981, #059669)", // emerald
+    "linear-gradient(135deg, #0284c7, #0369a1)", // sky
+    "linear-gradient(135deg, #8b5cf6, #6d28d9)", // purple
+    "linear-gradient(135deg, #f59e0b, #d97706)", // amber
+    "linear-gradient(135deg, #ec4899, #be185d)", // pink
+    "linear-gradient(135deg, #0d9488, #0f766e)", // teal
+    "linear-gradient(135deg, #6366f1, #4338ca)", // indigo
+    "linear-gradient(135deg, #f97316, #c2410c)", // orange
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length]!;
+}
+
 function parseMemberEntries(
   rawValue: string,
 ): Array<{ displayName: string; email?: string }> {
@@ -326,6 +440,8 @@ export function WalletsPage({
   onUpdateWalletLoanRepayment,
   onDeleteWalletLoanRepayment,
   loans = [],
+  isLoansLoading = false,
+  onLoadLoans,
   onCreateStandaloneLoan,
   onUpdateStandaloneLoan,
   onDeleteStandaloneLoan,
@@ -340,15 +456,26 @@ export function WalletsPage({
   const [walletMembersText, setWalletMembersText] = useState("");
   const [walletSplitRule, setWalletSplitRule] = useState<SplitRule>("equal");
   const [walletCurrency, setWalletCurrency] = useState("INR");
+  const [isCreateWalletModalOpen, setIsCreateWalletModalOpen] = useState(false);
+  const [walletPictureUrl, setWalletPictureUrl] = useState<string | null>(null);
+  const [walletPictureStats, setWalletPictureStats] = useState<string | null>(null);
+  const [isCompressingPicture, setIsCompressingPicture] = useState(false);
+  const [pictureError, setPictureError] = useState<string | null>(null);
+
   const [isWalletEditModalOpen, setIsWalletEditModalOpen] = useState(false);
   const [editWalletName, setEditWalletName] = useState("");
   const [editWalletDescription, setEditWalletDescription] = useState("");
   const [editWalletMembersText, setEditWalletMembersText] = useState("");
   const [editWalletSplitRule, setEditWalletSplitRule] = useState<SplitRule>("equal");
   const [editWalletCurrency, setEditWalletCurrency] = useState("INR");
+  const [editWalletPictureUrl, setEditWalletPictureUrl] = useState<string | null>(null);
+  const [editWalletPictureStats, setEditWalletPictureStats] = useState<string | null>(null);
+  const [isCompressingEditPicture, setIsCompressingEditPicture] = useState(false);
+  const [editPictureError, setEditPictureError] = useState<string | null>(null);
   const [showEditWalletValidation, setShowEditWalletValidation] = useState(false);
   const [inviteDisplayName, setInviteDisplayName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [walletSubTab, setWalletSubTab] = useState<"overview" | "transactions" | "budget" | "members" | "all">("overview");
 
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("");
@@ -431,6 +558,12 @@ export function WalletsPage({
 
   // View Mode: Shared Wallets vs Peer Loans
   const [viewMode, setViewMode] = useState<"wallets" | "loans">("wallets");
+
+  useEffect(() => {
+    if (viewMode === "loans" && onLoadLoans) {
+      void onLoadLoans();
+    }
+  }, [viewMode, onLoadLoans]);
 
   // Loan & Lending Hub State
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
@@ -930,6 +1063,23 @@ export function WalletsPage({
   );
   const isWalletOwner = currentWalletMember?.role === "owner";
 
+  const targetWalletSummary = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+
+  const isSwitchingWallet = Boolean(
+    isLoading ||
+    (selectedWalletId && (!selectedWallet || selectedWallet.wallet.id !== selectedWalletId))
+  );
+
+  const displayWallet = useMemo(() => {
+    if (selectedWallet && selectedWallet.wallet.id === selectedWalletId) {
+      return selectedWallet.wallet;
+    }
+    return targetWalletSummary;
+  }, [selectedWallet, selectedWalletId, targetWalletSummary]);
+
   const walletBudgetSummaries = useMemo<BudgetSummary[]>(() => {
     if (!selectedWallet) {
       return [];
@@ -1231,6 +1381,34 @@ export function WalletsPage({
     );
   }
 
+  async function handlePictureChange(file: File) {
+    setPictureError(null);
+    setIsCompressingPicture(true);
+    try {
+      const res = await compressGroupImage(file);
+      setWalletPictureUrl(res.dataUrl);
+      setWalletPictureStats(`${res.originalSizeFormatted} → ${res.compressedSizeFormatted} WebP (${res.reductionPercent}% saved)`);
+    } catch (err) {
+      setPictureError(err instanceof Error ? err.message : "Failed to compress image.");
+    } finally {
+      setIsCompressingPicture(false);
+    }
+  }
+
+  async function handleEditPictureChange(file: File) {
+    setEditPictureError(null);
+    setIsCompressingEditPicture(true);
+    try {
+      const res = await compressGroupImage(file);
+      setEditWalletPictureUrl(res.dataUrl);
+      setEditWalletPictureStats(`${res.originalSizeFormatted} → ${res.compressedSizeFormatted} WebP (${res.reductionPercent}% saved)`);
+    } catch (err) {
+      setEditPictureError(err instanceof Error ? err.message : "Failed to compress image.");
+    } finally {
+      setIsCompressingEditPicture(false);
+    }
+  }
+
   async function handleCreateWalletSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setShowCreateWalletValidation(true);
@@ -1251,6 +1429,7 @@ export function WalletsPage({
       description: walletDescription,
       defaultSplitRule: walletSplitRule,
       currency: walletCurrency,
+      pictureUrl: walletPictureUrl,
       members,
     });
 
@@ -1260,7 +1439,11 @@ export function WalletsPage({
       setWalletMembersText("");
       setWalletSplitRule("equal");
       setWalletCurrency("INR");
+      setWalletPictureUrl(null);
+      setWalletPictureStats(null);
+      setPictureError(null);
       setShowCreateWalletValidation(false);
+      setIsCreateWalletModalOpen(false);
     }
   }
 
@@ -1270,6 +1453,9 @@ export function WalletsPage({
     setEditWalletDescription(selectedWallet.wallet.description ?? "");
     setEditWalletSplitRule(selectedWallet.wallet.default_split_rule);
     setEditWalletCurrency(selectedWallet.wallet.currency || "INR");
+    setEditWalletPictureUrl(selectedWallet.wallet.picture_url ?? null);
+    setEditWalletPictureStats(null);
+    setEditPictureError(null);
 
     const otherMembers = selectedWallet.members.filter((m) => m.role !== "owner");
     const membersText = otherMembers
@@ -1289,6 +1475,9 @@ export function WalletsPage({
   function handleCancelWalletEdit() {
     setIsWalletEditModalOpen(false);
     setShowEditWalletValidation(false);
+    setEditWalletPictureUrl(null);
+    setEditWalletPictureStats(null);
+    setEditPictureError(null);
   }
 
   async function handleUpdateWalletSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1313,12 +1502,16 @@ export function WalletsPage({
       description: editWalletDescription,
       defaultSplitRule: editWalletSplitRule,
       currency: editWalletCurrency,
+      pictureUrl: editWalletPictureUrl,
       members,
     });
 
     if (updated) {
       setIsWalletEditModalOpen(false);
       setShowEditWalletValidation(false);
+      setEditWalletPictureUrl(null);
+      setEditWalletPictureStats(null);
+      setEditPictureError(null);
     }
   }
 
@@ -2026,9 +2219,21 @@ export function WalletsPage({
         noValidate
       >
         {!editingWalletExpenseId && (
-          <ReceiptScanPanel
-            onScanComplete={handleScanComplete}
-          />
+          <details className="group rounded-2xl border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-3">
+            <summary className="flex items-center justify-between cursor-pointer text-xs font-semibold text-primary select-none">
+              <span className="flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Auto-fill from receipt (optional)
+              </span>
+              <span className="text-xs text-secondary group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <div className="mt-3">
+              <ReceiptScanPanel onScanComplete={handleScanComplete} />
+            </div>
+          </details>
         )}
         <label className="grid gap-2 text-sm font-medium text-secondary">
           Paid by
@@ -2166,7 +2371,7 @@ export function WalletsPage({
           </select>
         </label>
 
-        <div className="space-y-3 rounded-[24px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
+        <div className="space-y-3 rounded-3xl border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
           <p className="section-eyebrow">Split members</p>
           <div className="grid gap-3">
             {selectedWallet!.members.map((member) => {
@@ -2182,7 +2387,7 @@ export function WalletsPage({
                 <div
                   key={member.id}
                   className={cn(
-                    "rounded-[18px] border p-3 transition-colors",
+                    "rounded-xl border p-3 transition-colors",
                     isSettled
                       ? "border-primary/20 bg-success-tint"
                       : "border-[color:var(--border)] bg-white/85",
@@ -2286,33 +2491,35 @@ export function WalletsPage({
         onSubmit={handleCreateSettlementSubmit}
         noValidate
       >
-        <label className="grid gap-2 text-sm font-medium text-secondary">
-          From member
-          <select
-            value={settlementFromMemberId}
-            onChange={(event) => setSettlementFromMemberId(event.target.value)}
-          >
-            {selectedWallet!.members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            From member
+            <select
+              value={settlementFromMemberId}
+              onChange={(event) => setSettlementFromMemberId(event.target.value)}
+            >
+              {selectedWallet!.members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="grid gap-2 text-sm font-medium text-secondary">
-          To member
-          <select
-            value={settlementToMemberId}
-            onChange={(event) => setSettlementToMemberId(event.target.value)}
-          >
-            {selectedWallet!.members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="grid gap-2 text-sm font-medium text-secondary">
+            To member
+            <select
+              value={settlementToMemberId}
+              onChange={(event) => setSettlementToMemberId(event.target.value)}
+            >
+              {selectedWallet!.members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-medium text-secondary">
@@ -2429,7 +2636,10 @@ export function WalletsPage({
           </button>
           <button
             type="button"
-            onClick={() => setViewMode("loans")}
+            onClick={() => {
+              setViewMode("loans");
+              void onLoadLoans?.();
+            }}
             className={cn(
               "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
               viewMode === "loans"
@@ -2482,7 +2692,7 @@ export function WalletsPage({
         <StatusNotice tone="error">{errorMessage}</StatusNotice>
       ) : null}
 
-      {myOverdueLoans.length > 0 && !isDismissedOverdueAlert && (
+      {viewMode === "loans" && !isLoansLoading && myOverdueLoans.length > 0 && !isDismissedOverdueAlert && (
         <div className="mb-6 rounded-2xl border-2 border-rose-300 dark:border-rose-800 bg-rose-50/90 dark:bg-rose-950/40 p-4 sm:p-5 shadow-sm transition-all">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="space-y-2">
@@ -2553,181 +2763,120 @@ export function WalletsPage({
       )}
 
       {viewMode === "wallets" && (
-        <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.36fr)_minmax(0,0.64fr)]">
-          <SurfaceCard className="space-y-6 p-5 sm:p-6 xl:sticky xl:top-32 xl:self-start">
-            <SectionHeader
-              eyebrow="Your wallets"
-              title="Groups and shared ledgers"
-              description="Switch between wallets and create a new shared group from the same persistent rail."
-            />
-
-          {wallets.length === 0 ? (
-            <EmptyState
-              title="No wallets yet"
-              description="Create your first shared wallet to start tracking group spending, shared budgets, and settlements."
-            />
-          ) : (
-            <div className="grid gap-3">
-              {wallets.map((wallet) => (
-                <button
-                  key={wallet.id}
-                  type="button"
-                  className={cn(
-                    "rounded-[22px] border px-4 py-4 text-left shadow-sm",
-                    wallet.id === selectedWalletId
-                      ? "border-primary/25 bg-success-tint text-ink"
-                      : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white",
+        <div className="space-y-6">
+          {/* Top Active Shared Wallet Banner */}
+          {displayWallet && (
+            <SurfaceCard className="relative overflow-hidden border-primary/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.9))] p-5 sm:p-6 shadow-[0_16px_40px_rgba(30,122,83,0.08)] backdrop-blur-xl">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                {/* Left side: Avatar + Details */}
+                <div className="flex flex-col sm:flex-row items-start gap-4 min-w-0 flex-1">
+                  {displayWallet.picture_url ? (
+                    <img
+                      src={displayWallet.picture_url}
+                      alt={displayWallet.name}
+                      className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover ring-2 ring-primary/20 shadow-md shrink-0"
+                    />
+                  ) : (
+                    <div className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-2xl sm:text-3xl font-bold font-display text-white shadow-md">
+                      {displayWallet.name.slice(0, 2).toUpperCase()}
+                    </div>
                   )}
-                  onClick={() => onSelectWallet(wallet.id)}
-                >
-                  <strong className="block text-base text-ink">
-                    {wallet.name}
-                  </strong>
-                  <span className="mt-1 block text-sm leading-6 text-secondary">
-                    {wallet.description || "No description yet."}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
 
-          <div className="rounded-[26px] bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(248,243,232,0.8))] p-4 sm:p-5">
-            <SectionHeader
-              eyebrow="Create wallet"
-              title="New shared group"
-              description="Invite housemates, travel partners, or family members with a split rule that fits the group."
-            />
-            <form
-              className="mt-5 grid gap-4"
-              onSubmit={handleCreateWalletSubmit}
-              noValidate
-            >
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                <span className="required-mark">Wallet name</span>
-                <input
-                  value={walletName}
-                  onChange={(event) => setWalletName(event.target.value)}
-                  placeholder="Apartment essentials"
-                  required
-                  aria-invalid={
-                    showCreateWalletValidation &&
-                    Boolean(createWalletErrors.name)
-                  }
-                />
-                {showCreateWalletValidation && createWalletErrors.name ? (
-                  <span className="text-sm text-[color:var(--danger-text)]">
-                    {createWalletErrors.name}
-                  </span>
-                ) : null}
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Description
-                <textarea
-                  value={walletDescription}
-                  onChange={(event) => setWalletDescription(event.target.value)}
-                  rows={3}
-                  placeholder="What this wallet is for"
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Default split rule
-                <select
-                  value={walletSplitRule}
-                  onChange={(event) =>
-                    setWalletSplitRule(event.target.value as SplitRule)
-                  }
-                >
-                  <option value="equal">Equal</option>
-                  <option value="fixed">Fixed amounts</option>
-                  <option value="percentage">Percentages</option>
-                </select>
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Currency
-                <select
-                  value={walletCurrency}
-                  onChange={(event) => setWalletCurrency(event.target.value)}
-                >
-                  <option value="INR">INR (₹)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
-                  <option value="JPY">JPY (¥)</option>
-                  <option value="CAD">CAD (C$)</option>
-                  <option value="AUD">AUD (A$)</option>
-                  <option value="CHF">CHF (Fr)</option>
-                  <option value="CNY">CNY (元)</option>
-                  <option value="SGD">SGD (S$)</option>
-                  <option value="NZD">NZD (NZ$)</option>
-                </select>
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                Members
-                <textarea
-                  value={walletMembersText}
-                  onChange={(event) => setWalletMembersText(event.target.value)}
-                  rows={4}
-                  placeholder="One name per line or comma separated"
-                />
-              </label>
-
-              <button
-                type="submit"
-                className="ui-button-primary justify-center"
-                disabled={isSubmitting}
-              >
-                {submittingAction === "create-wallet"
-                  ? "Saving..."
-                  : "Create wallet"}
-              </button>
-            </form>
-          </div>
-        </SurfaceCard>
-
-        <section className="grid gap-5">
-          {isLoading ? (
-            <StatusNotice tone="neutral">Loading wallet data...</StatusNotice>
-          ) : null}
-
-          {!isLoading && !selectedWallet ? (
-            <EmptyState
-              title="Select a wallet"
-              description="Choose a wallet to view members, balances, shared expenses, settlements, and wallet-specific budgets."
-            />
-          ) : null}
-
-          {selectedWallet ? (
-            <>
-              <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                <SectionHeader
-                  eyebrow="Selected wallet"
-                  title={selectedWallet.wallet.name}
-                  description={
-                    selectedWallet.wallet.description ||
-                    "No description provided for this wallet yet."
-                  }
-                  actions={
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="data-pill">
-                        {selectedWallet.wallet.default_split_rule} split by
-                        default
+                      {isSwitchingWallet ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                          Loading wallet...
+                        </span>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                            Active Shared Wallet
+                          </span>
+                          <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-xs font-medium text-secondary">
+                            {isWalletOwner ? "👑 Group Owner" : "Member"}
+                          </span>
+                        </>
+                      )}
+                      <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-ink">
+                        {displayWallet.currency || "INR"}
                       </span>
+                      <span className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-ink capitalize">
+                        {displayWallet.default_split_rule} split by default
+                      </span>
+                    </div>
+
+                    <h2 className="text-2xl sm:text-3xl font-bold font-display text-ink tracking-tight mt-1.5 truncate">
+                      {displayWallet.name}
+                    </h2>
+
+                    <p className="text-sm text-secondary line-clamp-2 mt-1">
+                      {displayWallet.description || "No description provided for this group yet."}
+                    </p>
+
+                    {/* Member Initials Chips Row */}
+                    {isSwitchingWallet ? (
+                      <div className="mt-3.5 flex items-center gap-2 text-xs font-medium text-secondary">
+                        <span className="h-2 w-2 rounded-full bg-primary animate-ping" />
+                        <span className="text-muted">Downloading members &amp; balances...</span>
+                      </div>
+                    ) : selectedWallet ? (
+                      <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-secondary pr-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-primary shrink-0">
+                            <path d="M7 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM14.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM1.615 16.428a1.224 1.224 0 0 1-.569-1.175 6.002 6.002 0 0 1 11.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 0 1 7 18a9.953 9.953 0 0 1-5.385-1.572ZM14.5 16h-.106c.07-.297.088-.611.048-.933a7.47 7.47 0 0 0-1.588-3.755 4.502 4.502 0 0 1 5.874 2.636.818.818 0 0 1-.36.98A7.465 7.465 0 0 1 14.5 16Z" />
+                          </svg>
+                          <span>Members:</span>
+                        </div>
+
+                        {/* Chips only: initials badge & owner crown icon with full details in hover tooltip */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {selectedWallet.members.map((member) => {
+                            const initials = getMemberInitials(member.display_name);
+                            const gradient = getMemberGradient(member.display_name);
+                            const isOwner = member.role === "owner";
+                            return (
+                              <span
+                                key={member.id}
+                                title={`${member.display_name} • ${isOwner ? "👑 Group Owner" : "Member"}${member.email ? ` (${member.email})` : ""}`}
+                                className="relative inline-flex items-center gap-1 rounded-full border border-primary/25 bg-white/95 dark:bg-zinc-800/90 py-0.5 px-2 text-xs font-bold text-ink shadow-xs backdrop-blur-xs transition-transform hover:scale-110 cursor-help"
+                              >
+                                <span
+                                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs font-bold text-white shadow-2xs"
+                                  style={{ background: gradient }}
+                                >
+                                  {initials}
+                                </span>
+                                {isOwner && (
+                                  <span className="text-amber-500 text-2xs -ml-0.5" title="Group Owner">👑</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Right side: Actions */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0 self-start">
+                  {!isSwitchingWallet && selectedWallet && (
+                    <>
                       {isWalletOwner ? (
                         <>
                           <button
                             type="button"
-                            className="ui-button-secondary"
+                            className="ui-button-secondary text-xs sm:text-sm"
                             onClick={handleStartWalletEdit}
                           >
                             Edit group
                           </button>
                           <button
                             type="button"
-                            className="ui-button-danger"
+                            className="ui-button-danger text-xs sm:text-sm"
                             onClick={() => void handleDeleteWalletClick()}
                             disabled={isSubmitting || isDeletingWallet}
                           >
@@ -2737,13 +2886,846 @@ export function WalletsPage({
                       ) : currentWalletMember ? (
                         <button
                           type="button"
-                          className="ui-button-danger"
+                          className="ui-button-danger text-xs sm:text-sm"
                           onClick={() => void handleLeaveWalletClick()}
                           disabled={isSubmitting || isLeavingWallet}
                         >
                           {isLeavingWallet ? "Leaving..." : "Exit group"}
                         </button>
                       ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Wallet quick switcher if multiple wallets exist */}
+              {wallets.length > 1 && (
+                <div className="mt-4 pt-3.5 border-t border-[color:var(--border)] flex items-center gap-2 overflow-x-auto pb-1">
+                  <span className="text-xs font-semibold text-muted shrink-0">Switch:</span>
+                  {wallets.map((w) => (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => onSelectWallet(w.id)}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium shrink-0 transition-all cursor-pointer",
+                        w.id === selectedWalletId
+                          ? "bg-primary text-white shadow-xs font-semibold"
+                          : "bg-white/80 dark:bg-zinc-800 text-secondary border border-[color:var(--border)] hover:bg-white hover:text-ink"
+                      )}
+                    >
+                      {w.picture_url ? (
+                        <img src={w.picture_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                      ) : (
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/20 text-2xs font-bold text-primary">
+                          {w.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span>{w.name}</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateWalletModalOpen(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-primary hover:bg-primary/10 transition-colors shrink-0 cursor-pointer"
+                  >
+                    + New
+                  </button>
+                </div>
+              )}
+            </SurfaceCard>
+          )}
+
+          <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.34fr)_minmax(0,0.66fr)]">
+            <SurfaceCard className="space-y-4 p-5 sm:p-6 xl:sticky xl:top-32 xl:self-start">
+              <SectionHeader
+                eyebrow="Your wallets"
+                title="Groups & Ledgers"
+                description="Switch between wallets or create a new group."
+                actions={
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateWalletModalOpen(true)}
+                    className="ui-button-primary !min-h-9 !px-3.5 !py-1.5 text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <span className="text-sm font-bold leading-none">+</span>
+                    <span>New Wallet</span>
+                  </button>
+                }
+              />
+
+              {wallets.length === 0 ? (
+                <EmptyState
+                  title="No wallets yet"
+                  description="Create your first shared wallet to start tracking group spending, shared budgets, and settlements."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateWalletModalOpen(true)}
+                      className="ui-button-primary mt-2 cursor-pointer"
+                    >
+                      Create Shared Wallet
+                    </button>
+                  }
+                />
+              ) : (
+                <div className="grid gap-2.5">
+                  {wallets.map((wallet) => (
+                    <button
+                      key={wallet.id}
+                      type="button"
+                      className={cn(
+                        "flex items-start gap-3 rounded-2xl border p-3.5 text-left shadow-sm transition-all duration-200 cursor-pointer",
+                        wallet.id === selectedWalletId
+                          ? "border-primary/35 bg-success-tint/70 text-ink ring-1 ring-primary/20 shadow-xs"
+                          : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white hover:border-primary/25",
+                      )}
+                      onClick={() => onSelectWallet(wallet.id)}
+                    >
+                      {wallet.picture_url ? (
+                        <img
+                          src={wallet.picture_url}
+                          alt={wallet.name}
+                          className="h-11 w-11 rounded-2xl object-cover ring-1 ring-black/10 shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-sm font-bold text-white shadow-xs mt-0.5">
+                          {wallet.name.slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <strong className="truncate block text-sm font-bold text-ink">
+                            {wallet.name}
+                          </strong>
+                          <span className="text-2xs font-semibold text-primary shrink-0">
+                            {wallet.currency || "INR"}
+                          </span>
+                        </div>
+                        <span className="mt-0.5 block text-xs line-clamp-1 text-secondary">
+                          {wallet.description || "No description"}
+                        </span>
+                        <div className="mt-2 flex items-center gap-1.5 text-2xs font-semibold text-muted">
+                          <span className="capitalize">{wallet.default_split_rule} split</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </SurfaceCard>
+
+            <section className="grid gap-5">
+              {isSwitchingWallet ? (
+                <div className="space-y-5">
+                  <SurfaceCard className="relative overflow-hidden border-primary/20 p-8 sm:p-12 text-center flex flex-col items-center justify-center min-h-[340px] shadow-sm bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.85))] dark:bg-zinc-900/90">
+                    <div className="relative flex items-center justify-center mb-4">
+                      <div className="h-14 w-14 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                      <span className="absolute text-xl">👛</span>
+                    </div>
+                    <h3 className="text-xl font-bold font-display text-ink tracking-tight">
+                      Loading {displayWallet?.name ? `"${displayWallet.name}"` : "shared wallet"}...
+                    </h3>
+                    <p className="mt-1.5 text-sm text-secondary max-w-md">
+                      Downloading members roster, shared expenses, balances, budgets, and settlement history.
+                    </p>
+                    <div className="mt-5 flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 px-3.5 py-1.5 rounded-full">
+                      <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                      Syncing shared ledger
+                    </div>
+                  </SurfaceCard>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <SurfaceCard className="p-5 space-y-3 animate-pulse border-[color:var(--border)]">
+                      <div className="h-4 w-28 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                      <div className="h-8 w-44 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                      <div className="h-3 w-36 bg-zinc-100 dark:bg-zinc-800 rounded-md" />
+                    </SurfaceCard>
+                    <SurfaceCard className="p-5 space-y-3 animate-pulse border-[color:var(--border)]">
+                      <div className="h-4 w-32 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                      <div className="h-8 w-40 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                      <div className="h-3 w-48 bg-zinc-100 dark:bg-zinc-800 rounded-md" />
+                    </SurfaceCard>
+                  </div>
+                </div>
+              ) : !selectedWallet ? (
+                <EmptyState
+                  title="Select a wallet"
+                  description="Choose a wallet to view members, balances, shared expenses, settlements, and wallet-specific budgets."
+                />
+              ) : (
+                <>
+                  {/* Sub-tab Navigation & Quick Action Controls (Issues #6, #7) */}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-[color:var(--border)] bg-white/80 p-3 shadow-sm">
+                    <div role="tablist" aria-label="Wallet sections" className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-overview"
+                        aria-selected={walletSubTab === "overview"}
+                        aria-controls="panel-overview"
+                        className={cn(
+                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          walletSubTab === "overview"
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-secondary hover:bg-zinc-100 hover:text-ink",
+                        )}
+                        onClick={() => setWalletSubTab("overview")}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-transactions"
+                        aria-selected={walletSubTab === "transactions"}
+                        aria-controls="panel-transactions"
+                        className={cn(
+                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          walletSubTab === "transactions"
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-secondary hover:bg-zinc-100 hover:text-ink",
+                        )}
+                        onClick={() => setWalletSubTab("transactions")}
+                      >
+                        Transactions & Forms
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-budget"
+                        aria-selected={walletSubTab === "budget"}
+                        aria-controls="panel-budget"
+                        className={cn(
+                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          walletSubTab === "budget"
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-secondary hover:bg-zinc-100 hover:text-ink",
+                        )}
+                        onClick={() => setWalletSubTab("budget")}
+                      >
+                        Budget
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-members"
+                        aria-selected={walletSubTab === "members"}
+                        aria-controls="panel-members"
+                        className={cn(
+                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          walletSubTab === "members"
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-secondary hover:bg-zinc-100 hover:text-ink",
+                        )}
+                        onClick={() => setWalletSubTab("members")}
+                      >
+                        Members & Roles
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-all"
+                        aria-selected={walletSubTab === "all"}
+                        aria-controls="panel-all"
+                        className={cn(
+                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          walletSubTab === "all"
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-secondary hover:bg-zinc-100 hover:text-ink",
+                        )}
+                        onClick={() => setWalletSubTab("all")}
+                      >
+                        All
+                      </button>
+                    </div>
+
+                    {/* Quick action buttons (Issue #7: Quick shortcut to transaction forms) */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="ui-button-primary ui-button-sm text-xs cursor-pointer"
+                        onClick={() => {
+                          setWalletSubTab("transactions");
+                          setTimeout(() => {
+                            document.getElementById("wallet-transaction-forms")?.scrollIntoView({ behavior: "smooth" });
+                          }, 50);
+                        }}
+                      >
+                        ＋ Add Transaction
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
+                        onClick={() => {
+                          setWalletSubTab("transactions");
+                          setTimeout(() => {
+                            document.getElementById("wallet-payback-form")?.scrollIntoView({ behavior: "smooth" });
+                          }, 50);
+                        }}
+                      >
+                        Record Payback
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Section 1: Balances */}
+                  {(walletSubTab === "overview" || walletSubTab === "all") && (
+                    <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                      <SectionHeader
+                        eyebrow="Balances"
+                        title="Who should receive and who owes"
+                        description="Live net balances keep the group aware of who is owed and who still needs to settle."
+                      />
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {selectedWallet.balances.map((balance) => {
+                          const numericBalance = Number(balance.net_amount);
+
+                          return (
+                            <article
+                              key={balance.member_id}
+                              className={cn(
+                                "rounded-2xl border p-5 shadow-sm",
+                                numericBalance > 0
+                                  ? "border-primary/12 bg-success-tint"
+                                  : numericBalance < 0
+                                    ? "border-[color:rgba(154,63,56,0.14)] bg-danger-tint"
+                                    : "border-[color:var(--border)] bg-white/80",
+                              )}
+                            >
+                              <strong className="block text-lg text-ink">
+                                {balance.member_name}
+                              </strong>
+                              <span className="mt-2 block text-sm text-secondary">
+                                {numericBalance > 0
+                                  ? "Should receive"
+                                  : numericBalance < 0
+                                    ? "Needs to settle"
+                                    : "Square"}
+                              </span>
+                              <h3 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink">
+                                {formatCurrency(Math.abs(numericBalance).toFixed(2), selectedWallet.wallet.currency)}
+                              </h3>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </SurfaceCard>
+                  )}
+
+                  {/* Section 2: Shared expense & Settlement forms (vertically stacked) */}
+                  {(walletSubTab === "overview" || walletSubTab === "transactions" || walletSubTab === "all") && (
+                    <section id="wallet-transaction-forms" className="space-y-5">
+                      <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                        <SectionHeader
+                          eyebrow="Shared expense"
+                          title={
+                            editingWalletExpenseId
+                              ? "Edit group transaction"
+                              : "Add a group transaction"
+                          }
+                          description="Capture a shared purchase, choose the payer, and define how the split should be distributed across members."
+                        />
+                        {renderWalletExpenseForm()}
+                      </SurfaceCard>
+
+                      <SurfaceCard id="wallet-payback-form" className="space-y-5 p-5 sm:p-6">
+                        <SectionHeader
+                          eyebrow="Settlement"
+                          title={
+                            editingSettlementId ? "Edit payback" : "Record a payback"
+                          }
+                          description="Log repayments to keep group balances current and the shared ledger easy to reconcile."
+                          actions={
+                            <button
+                              type="button"
+                              className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
+                              onClick={() => setIsSettlementModalOpen(true)}
+                            >
+                              Payback history
+                            </button>
+                          }
+                        />
+                        {renderSettlementForm()}
+                      </SurfaceCard>
+                    </section>
+                  )}
+
+                  {/* Section 3: Recent group activity */}
+                  {(walletSubTab === "overview" || walletSubTab === "transactions" || walletSubTab === "all") && (
+                    <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                <SectionHeader
+                  eyebrow="Shared expenses"
+                  title="Recent group activity"
+                  description="The latest shared purchases inside this wallet."
+                  actions={
+                    <button
+                      type="button"
+                      className="ui-button-secondary"
+                      onClick={() => setIsExpenseModalOpen(true)}
+                    >
+                      Filter expenses
+                    </button>
+                  }
+                />
+                {activeExpenseFilters.length > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3">
+                    <p className="text-sm text-secondary">
+                      Showing: {activeExpenseFilters.join(" • ")}
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-primary hover:underline"
+                      onClick={() => {
+                        setExpenseFilterMonth("all");
+                        setExpenseFilterCategory("all");
+                        setExpenseFilterAmount("all");
+                        setExpenseFilterPlatform("all");
+                      }}
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : null}
+                {selectedWallet.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
+                  <div className="rounded-2xl border border-amber-100 bg-amber-50/50 px-4 py-3 text-xs text-amber-800 font-medium">
+                    Showing only the latest {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please load more to see older data.
+                  </div>
+                ) : null}
+                {selectedWallet.expenses.length === 0 ? (
+                  <EmptyState
+                    title="No shared expenses yet"
+                    description="Add the first group transaction to start tracking how this wallet is being used."
+                  />
+                ) : filteredExpenses.length === 0 ? (
+                  selectedWallet.expensePagination?.hasMore ? (
+                    <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-12">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                        </svg>
+                      </div>
+                      <h3 className="mt-4 text-base font-semibold text-ink">No matches in loaded data</h3>
+                      <p className="mt-2 max-w-sm text-sm text-secondary">
+                        None of the currently loaded {selectedWallet.expenses.length} expenses match these filters. You can load older data to search further back.
+                      </p>
+                      <button
+                        type="button"
+                        className="ui-button-secondary mt-6 flex items-center gap-2"
+                        onClick={onLoadMoreExpenses}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? "Loading older history..." : "Load older history"}
+                      </button>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="No expenses match the current filters"
+                      description="Adjust the platform, category, or date filters to find what you're looking for."
+                    />
+                  )
+                ) : (
+                  <>
+                    {filteredExpenses.length > 0 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all filtered group expenses"
+                            checked={filteredExpenses.length > 0 && filteredExpenses.every((e) => selectedExpenseIds.includes(e.id))}
+                            onChange={() => {
+                              const allSelected = filteredExpenses.every((e) => selectedExpenseIds.includes(e.id));
+                              if (allSelected) {
+                                setSelectedExpenseIds((current) =>
+                                  current.filter((id) => !filteredExpenses.some((e) => e.id === id)),
+                                );
+                              } else {
+                                setSelectedExpenseIds((current) => [
+                                  ...new Set([...current, ...filteredExpenses.map((e) => e.id)]),
+                                ]);
+                              }
+                            }}
+                          />
+                          <span className="text-sm font-semibold text-ink">Select All</span>
+                          <span className="text-sm text-secondary">
+                            {selectedExpenseIds.length > 0 ? `(${selectedExpenseIds.length} selected)` : ""}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {selectedExpenseIds.length > 0 ? (
+                            <button
+                              type="button"
+                              className="ui-button-danger ui-button-sm"
+                              disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
+                              onClick={handleDeleteSelectedExpensesClick}
+                            >
+                              {selectedExpenseIds.some((id) => deletingExpenseIds.includes(id)) ? "Deleting..." : "Delete selected"}
+                            </button>
+                          ) : null}
+
+                          {(() => {
+                            const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
+                            const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
+
+                            if (!showPagination) return null;
+
+                            return (
+                              <div className="flex items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
+                                  disabled={currentWalletExpensesPage === 1 || isLoading}
+                                  onClick={() =>
+                                    setCurrentWalletExpensesPage(
+                                      currentWalletExpensesPage - 1,
+                                    )
+                                  }
+                                  title="Previous Page"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
+                                    <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                                  </svg>
+                                  <span className="hidden sm:inline">Prev</span>
+                                </button>
+                                <span className="text-xs font-semibold text-secondary px-1 text-center min-w-[40px] sm:min-w-[50px]">
+                                  {currentWalletExpensesPage}/{totalWalletExpensePages}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
+                                  disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                                  onClick={async () => {
+                                    if (isLoadMoreMode) {
+                                      if (onLoadMoreExpenses) {
+                                        try {
+                                          await onLoadMoreExpenses();
+                                          setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                        } catch (err) {}
+                                      }
+                                    } else {
+                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                    }
+                                  }}
+                                  title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
+                                >
+                                  {isLoadMoreMode ? (
+                                    isLoading ? (
+                                      <>
+                                        <span className="hidden sm:inline">Loading...</span>
+                                        <span className="inline sm:hidden">...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="hidden sm:inline">Load More</span>
+                                        <span className="inline sm:hidden">Load</span>
+                                      </>
+                                    )
+                                  ) : (
+                                    <>
+                                      <span className="hidden sm:inline">Next</span>
+                                    </>
+                                  )}
+                                  {!isLoading && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
+                                      {isLoadMoreMode ? (
+                                        <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                                      ) : (
+                                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                                      )}
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ) : null}
+                    {/* Desktop View */}
+                    <div className="hidden lg:grid lg:gap-3">
+                      {paginatedWalletExpenses.map((expense) => (
+                        <article
+                          key={expense.id}
+                          className={cn(
+                            "group rounded-2xl border p-4 shadow-sm transition-all duration-200 hover:shadow-md",
+                            selectedExpenseIds.includes(expense.id)
+                              ? "border-primary/25 bg-success-tint"
+                              : "border-[color:var(--border)] bg-white/80",
+                            deletingExpenseIds.includes(expense.id) && "animate-delete",
+                          )}
+                        >
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${expense.description}`}
+                                checked={selectedExpenseIds.includes(expense.id)}
+                                disabled={deletingExpenseIds.includes(expense.id)}
+                                onChange={() => handleToggleExpenseSelection(expense.id)}
+                                className="mr-1"
+                              />
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
+                                <CategoryIcon
+                                  iconId={
+                                    budgetCategoryOptions.find(
+                                      (option) => option.label === expense.category,
+                                    )?.icon ?? "other"
+                                  }
+                                />
+                              </span>
+                              {expense.platform ? (
+                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                              ) : null}
+                              <div className="min-w-0 space-y-1">
+                                <strong className="block text-base font-semibold text-ink truncate">
+                                  {expense.description}
+                                </strong>
+                                <p className="text-xs text-secondary leading-none">
+                                  {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-left lg:text-right shrink-0">
+                              <strong className="block text-xl font-bold tracking-tight text-ink">
+                                {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
+                              </strong>
+                              <span className="text-xs font-medium text-secondary">
+                                {expense.split_rule} split
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100 transition-opacity duration-150">
+                            <button
+                              type="button"
+                              className="ui-button-ghost ui-button-sm font-semibold"
+                              onClick={() =>
+                                handleStartExpenseEdit(expense.id)
+                              }
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger ui-button-sm font-semibold"
+                              disabled={deletingExpenseIds.includes(
+                                expense.id,
+                              )}
+                              onClick={() =>
+                                void handleDeleteExpenseClick(expense.id)
+                              }
+                            >
+                              {deletingExpenseIds.includes(expense.id)
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    {/* Mobile View */}
+                    <div className="grid gap-3 lg:hidden">
+                      {paginatedWalletExpenses.map((expense) => (
+                        <article
+                          key={expense.id}
+                          className={cn(
+                            "table-card-mobile space-y-4 transition-all duration-200",
+                            selectedExpenseIds.includes(expense.id)
+                              ? "border-primary/25 bg-success-tint"
+                              : "border-[color:var(--border)] bg-white/80",
+                            deletingExpenseIds.includes(expense.id) && "animate-delete",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${expense.description}`}
+                                checked={selectedExpenseIds.includes(expense.id)}
+                                disabled={deletingExpenseIds.includes(expense.id)}
+                                onChange={() => handleToggleExpenseSelection(expense.id)}
+                              />
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                                <CategoryIcon
+                                  iconId={
+                                    budgetCategoryOptions.find(
+                                      (option) => option.label === expense.category,
+                                    )?.icon ?? "other"
+                                  }
+                                />
+                              </span>
+                              {expense.platform ? (
+                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
+                              ) : null}
+                            </div>
+                            <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
+                          </div>
+
+                          <div className="space-y-2">
+                            <strong className="block text-lg text-ink">{expense.description}</strong>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
+                              <span>•</span>
+                              <span>{expense.date}</span>
+                              <span>•</span>
+                              <span className="text-xs font-medium text-secondary">
+                                {expense.split_rule} split
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="ui-button-secondary"
+                              onClick={() => handleStartExpenseEdit(expense.id)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-danger"
+                              disabled={deletingExpenseIds.includes(expense.id)}
+                              onClick={() => void handleDeleteExpenseClick(expense.id)}
+                            >
+                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    {(() => {
+                      const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
+                      const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
+
+                      if (!showPagination) return null;
+
+                      return (
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-white/75 px-4 py-4">
+                          <p className="text-sm text-secondary">
+                            Page {currentWalletExpensesPage} of {totalWalletExpensePages}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
+                              disabled={currentWalletExpensesPage === 1 || isLoading}
+                              onClick={() =>
+                                setCurrentWalletExpensesPage(
+                                  currentWalletExpensesPage - 1,
+                                )
+                              }
+                              title="Previous Page"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
+                                <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                              </svg>
+                              <span className="hidden sm:inline">Previous</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
+                              disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                              onClick={async () => {
+                                if (isLoadMoreMode) {
+                                  if (onLoadMoreExpenses) {
+                                    try {
+                                      await onLoadMoreExpenses();
+                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                    } catch (err) {
+                                      // Do not navigate to next page if request failed
+                                    }
+                                  }
+                                } else {
+                                  setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
+                                }
+                              }}
+                              title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
+                            >
+                              {isLoadMoreMode ? (
+                                isLoading ? (
+                                  <>
+                                    <span className="hidden sm:inline">Loading...</span>
+                                    <span className="inline sm:hidden">...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="hidden sm:inline">Load More</span>
+                                    <span className="inline sm:hidden">Load</span>
+                                  </>
+                                )
+                              ) : (
+                                <>
+                                  <span className="hidden sm:inline">Next</span>
+                                </>
+                              )}
+                              {!isLoading && (
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
+                                  {isLoadMoreMode ? (
+                                    <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                                  ) : (
+                                    <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                                  )}
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) }
+              </SurfaceCard>
+            )}
+
+            {(walletSubTab === "budget" || walletSubTab === "all") && (
+              <BudgetTrackerSection
+                sectionTitle="Group budget tracking"
+                sectionDescription={`Monitor how much room is left in ${currentWalletBudgetMonthLabel} across this wallet's overall and category caps.`}
+                currentBudgetMonthLabel={currentWalletBudgetMonthLabel}
+                currentMonthBudgetSummaries={currentMonthWalletBudgetSummaries}
+                currentMonthBudgetOverview={currentMonthWalletBudgetOverview}
+                budgetForm={walletBudgetForm}
+                budgetCategoryOptions={walletBudgetCategoryChoices}
+                editingBudgetId={editingWalletBudgetId}
+                deletingBudgetIds={deletingWalletBudgetIds}
+                isBudgetLoading={isLoading}
+                isBudgetSubmitting={submittingAction === "budget"}
+                budgetStatusMessage={walletBudgetStatusMessage}
+                budgetErrorMessage={walletBudgetErrorMessage}
+                budgetHistoryGroups={walletBudgetHistoryGroups}
+                budgetHistoryRange={walletBudgetHistoryRange}
+                isBudgetHistoryOpen={isWalletBudgetHistoryOpen}
+                currencySymbol={currencySymbol}
+                emptyStateMessage={`No group budgets set for ${currentWalletBudgetMonthLabel} yet. Add one to start tracking shared spend.`}
+                formDescription="Create monthly caps or category-specific targets for this wallet and update them as the plan changes."
+                historyDialogTitle="Group budget history"
+                historyDialogDescription="Review previous wallet budgets, filter the range, and jump back into edit mode from here."
+                historyEmptyMessage="No group budgets fall inside the selected range."
+                historyTriggerLabel="View group budget history"
+                onBudgetFormChange={handleWalletBudgetFormChange}
+                onBudgetSubmit={handleWalletBudgetSubmit}
+                onBudgetEditCancel={handleWalletBudgetEditCancel}
+                onBudgetEditStart={handleWalletBudgetEditStart}
+                onBudgetDelete={handleWalletBudgetDelete}
+                onBudgetHistoryRangeChange={setWalletBudgetHistoryRange}
+                onOpenBudgetHistory={() => setIsWalletBudgetHistoryOpen(true)}
+                onCloseBudgetHistory={() => setIsWalletBudgetHistoryOpen(false)}
+              />
+            )}
+
+            {(walletSubTab === "members" || walletSubTab === "all") && (
+              <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                <SectionHeader
+                  eyebrow="Group roster"
+                  title="Members & Roles"
+                  description="View all members in this shared wallet and manage invitations."
+                  actions={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="data-pill">
+                        {selectedWallet.members.length} {selectedWallet.members.length === 1 ? "member" : "members"}
+                      </span>
                     </div>
                   }
                 />
@@ -2752,7 +3734,7 @@ export function WalletsPage({
                   {selectedWallet.members.map((member) => (
                     <article
                       key={member.id}
-                      className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                      className="rounded-2xl border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-3">
@@ -2897,542 +3879,7 @@ export function WalletsPage({
                   </div>
                 </form>
               </SurfaceCard>
-
-              <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                <SectionHeader
-                  eyebrow="Balances"
-                  title="Who should receive and who owes"
-                  description="Live net balances keep the group aware of who is owed and who still needs to settle."
-                />
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {selectedWallet.balances.map((balance) => {
-                    const numericBalance = Number(balance.net_amount);
-
-                    return (
-                      <article
-                        key={balance.member_id}
-                        className={cn(
-                          "rounded-[24px] border p-5 shadow-sm",
-                          numericBalance > 0
-                            ? "border-primary/12 bg-success-tint"
-                            : numericBalance < 0
-                              ? "border-[color:rgba(154,63,56,0.14)] bg-danger-tint"
-                              : "border-[color:var(--border)] bg-white/80",
-                        )}
-                      >
-                        <strong className="block text-lg text-ink">
-                          {balance.member_name}
-                        </strong>
-                        <span className="mt-2 block text-sm text-secondary">
-                          {numericBalance > 0
-                            ? "Should receive"
-                            : numericBalance < 0
-                              ? "Needs to settle"
-                              : "Square"}
-                        </span>
-                        <h4 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink">
-                          {formatCurrency(Math.abs(numericBalance).toFixed(2), selectedWallet.wallet.currency)}
-                        </h4>
-                      </article>
-                    );
-                  })}
-                </div>
-              </SurfaceCard>
-
-
-              <BudgetTrackerSection
-                sectionTitle="Group budget tracking"
-                sectionDescription={`Monitor how much room is left in ${currentWalletBudgetMonthLabel} across this wallet's overall and category caps.`}
-                currentBudgetMonthLabel={currentWalletBudgetMonthLabel}
-                currentMonthBudgetSummaries={currentMonthWalletBudgetSummaries}
-                currentMonthBudgetOverview={currentMonthWalletBudgetOverview}
-                budgetForm={walletBudgetForm}
-                budgetCategoryOptions={walletBudgetCategoryChoices}
-                editingBudgetId={editingWalletBudgetId}
-                deletingBudgetIds={deletingWalletBudgetIds}
-                isBudgetLoading={isLoading}
-                isBudgetSubmitting={submittingAction === "budget"}
-                budgetStatusMessage={walletBudgetStatusMessage}
-                budgetErrorMessage={walletBudgetErrorMessage}
-                budgetHistoryGroups={walletBudgetHistoryGroups}
-                budgetHistoryRange={walletBudgetHistoryRange}
-                isBudgetHistoryOpen={isWalletBudgetHistoryOpen}
-                currencySymbol={currencySymbol}
-                emptyStateMessage={`No group budgets set for ${currentWalletBudgetMonthLabel} yet. Add one to start tracking shared spend.`}
-                formDescription="Create monthly caps or category-specific targets for this wallet and update them as the plan changes."
-                historyDialogTitle="Group budget history"
-                historyDialogDescription="Review previous wallet budgets, filter the range, and jump back into edit mode from here."
-                historyEmptyMessage="No group budgets fall inside the selected range."
-                historyTriggerLabel="View group budget history"
-                onBudgetFormChange={handleWalletBudgetFormChange}
-                onBudgetSubmit={handleWalletBudgetSubmit}
-                onBudgetEditCancel={handleWalletBudgetEditCancel}
-                onBudgetEditStart={handleWalletBudgetEditStart}
-                onBudgetDelete={handleWalletBudgetDelete}
-                onBudgetHistoryRangeChange={setWalletBudgetHistoryRange}
-                onOpenBudgetHistory={() => setIsWalletBudgetHistoryOpen(true)}
-                onCloseBudgetHistory={() => setIsWalletBudgetHistoryOpen(false)}
-              />
-
-              <section className="grid gap-5 2xl:grid-cols-2">
-                <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                  <SectionHeader
-                    eyebrow="Shared expense"
-                    title={
-                      editingWalletExpenseId
-                        ? "Edit group transaction"
-                        : "Add a group transaction"
-                    }
-                    description="Capture a shared purchase, choose the payer, and define how the split should be distributed across members."
-                  />
-                  {renderWalletExpenseForm()}
-                </SurfaceCard>
-
-                <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                  <SectionHeader
-                    eyebrow="Settlement"
-                    title={
-                      editingSettlementId ? "Edit payback" : "Record a payback"
-                    }
-                    description="Log repayments to keep group balances current and the shared ledger easy to reconcile."
-                    actions={
-                      <button
-                        type="button"
-                        className="ui-button-secondary"
-                        onClick={() => setIsSettlementModalOpen(true)}
-                      >
-                        Payback history
-                      </button>
-                    }
-                  />
-                  {renderSettlementForm()}
-                </SurfaceCard>
-              </section>
-
-              <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                <SectionHeader
-                  eyebrow="Shared expenses"
-                  title="Recent group activity"
-                  description="The latest shared purchases inside this wallet."
-                  actions={
-                    <button
-                      type="button"
-                      className="ui-button-secondary"
-                      onClick={() => setIsExpenseModalOpen(true)}
-                    >
-                      Filter expenses
-                    </button>
-                  }
-                />
-                {activeExpenseFilters.length > 0 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3">
-                    <p className="text-sm text-secondary">
-                      Showing: {activeExpenseFilters.join(" • ")}
-                    </p>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-primary hover:underline"
-                      onClick={() => {
-                        setExpenseFilterMonth("all");
-                        setExpenseFilterCategory("all");
-                        setExpenseFilterAmount("all");
-                        setExpenseFilterPlatform("all");
-                      }}
-                    >
-                      Clear filters
-                    </button>
-                  </div>
-                ) : null}
-                {selectedWallet.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
-                  <div className="rounded-[22px] border border-amber-100 bg-amber-50/50 px-4 py-3 text-xs text-amber-800 font-medium">
-                    Showing only the latest {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please load more to see older data.
-                  </div>
-                ) : null}
-                {selectedWallet.expenses.length === 0 ? (
-                  <EmptyState
-                    title="No shared expenses yet"
-                    description="Add the first group transaction to start tracking how this wallet is being used."
-                  />
-                ) : filteredExpenses.length === 0 ? (
-                  selectedWallet.expensePagination?.hasMore ? (
-                    <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-12">
-                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
-                        </svg>
-                      </div>
-                      <h3 className="mt-4 text-base font-semibold text-ink">No matches in loaded data</h3>
-                      <p className="mt-2 max-w-sm text-sm text-secondary">
-                        None of the currently loaded {selectedWallet.expenses.length} expenses match these filters. You can load older data to search further back.
-                      </p>
-                      <button
-                        type="button"
-                        className="ui-button-secondary mt-6 flex items-center gap-2"
-                        onClick={onLoadMoreExpenses}
-                        disabled={isLoading}
-                      >
-                        {isLoading ? "Loading older history..." : "Load older history"}
-                      </button>
-                    </div>
-                  ) : (
-                    <EmptyState
-                      title="No expenses match the current filters"
-                      description="Adjust the platform, category, or date filters to find what you're looking for."
-                    />
-                  )
-                ) : (
-                  <>
-                    {filteredExpenses.length > 0 ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3 mb-3">
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            aria-label="Select all filtered group expenses"
-                            checked={filteredExpenses.length > 0 && filteredExpenses.every((e) => selectedExpenseIds.includes(e.id))}
-                            onChange={() => {
-                              const allSelected = filteredExpenses.every((e) => selectedExpenseIds.includes(e.id));
-                              if (allSelected) {
-                                setSelectedExpenseIds((current) =>
-                                  current.filter((id) => !filteredExpenses.some((e) => e.id === id)),
-                                );
-                              } else {
-                                setSelectedExpenseIds((current) => [
-                                  ...new Set([...current, ...filteredExpenses.map((e) => e.id)]),
-                                ]);
-                              }
-                            }}
-                          />
-                          <span className="text-sm font-semibold text-ink">Select All</span>
-                          <span className="text-sm text-secondary">
-                            {selectedExpenseIds.length > 0 ? `(${selectedExpenseIds.length} selected)` : ""}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {selectedExpenseIds.length > 0 ? (
-                            <button
-                              type="button"
-                              className="ui-button-danger !py-1.5 !px-3 text-xs"
-                              disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
-                              onClick={handleDeleteSelectedExpensesClick}
-                            >
-                              {selectedExpenseIds.some((id) => deletingExpenseIds.includes(id)) ? "Deleting..." : "Delete selected"}
-                            </button>
-                          ) : null}
-
-                          {(() => {
-                            const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
-                            const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
-
-                            if (!showPagination) return null;
-
-                            return (
-                              <div className="flex items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
-                                <button
-                                  type="button"
-                                  className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
-                                  disabled={currentWalletExpensesPage === 1 || isLoading}
-                                  onClick={() =>
-                                    setCurrentWalletExpensesPage(
-                                      currentWalletExpensesPage - 1,
-                                    )
-                                  }
-                                  title="Previous Page"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
-                                    <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
-                                  </svg>
-                                  <span className="hidden sm:inline">Prev</span>
-                                </button>
-                                <span className="text-xs font-semibold text-secondary px-1 text-center min-w-[40px] sm:min-w-[50px]">
-                                  {currentWalletExpensesPage}/{totalWalletExpensePages}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
-                                  disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
-                                  onClick={async () => {
-                                    if (isLoadMoreMode) {
-                                      if (onLoadMoreExpenses) {
-                                        try {
-                                          await onLoadMoreExpenses();
-                                          setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
-                                        } catch (err) {}
-                                      }
-                                    } else {
-                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
-                                    }
-                                  }}
-                                  title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
-                                >
-                                  {isLoadMoreMode ? (
-                                    isLoading ? (
-                                      <>
-                                        <span className="hidden sm:inline">Loading...</span>
-                                        <span className="inline sm:hidden">...</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="hidden sm:inline">Load More</span>
-                                        <span className="inline sm:hidden">Load</span>
-                                      </>
-                                    )
-                                  ) : (
-                                    <>
-                                      <span className="hidden sm:inline">Next</span>
-                                    </>
-                                  )}
-                                  {!isLoading && (
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
-                                      {isLoadMoreMode ? (
-                                        <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
-                                      ) : (
-                                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                                      )}
-                                    </svg>
-                                  )}
-                                </button>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    ) : null}
-                    {/* Desktop View */}
-                    <div className="hidden lg:grid lg:gap-3">
-                      {paginatedWalletExpenses.map((expense) => (
-                        <article
-                          key={expense.id}
-                          className={cn(
-                            "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
-                            selectedExpenseIds.includes(expense.id)
-                              ? "border-primary/25 bg-success-tint"
-                              : "border-[color:var(--border)] bg-white/80",
-                            deletingExpenseIds.includes(expense.id) && "animate-delete",
-                          )}
-                        >
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <input
-                                type="checkbox"
-                                aria-label={`Select ${expense.description}`}
-                                checked={selectedExpenseIds.includes(expense.id)}
-                                disabled={deletingExpenseIds.includes(expense.id)}
-                                onChange={() => handleToggleExpenseSelection(expense.id)}
-                                className="mr-1"
-                              />
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
-                                <CategoryIcon
-                                  iconId={
-                                    budgetCategoryOptions.find(
-                                      (option) => option.label === expense.category,
-                                    )?.icon ?? "other"
-                                  }
-                                />
-                              </span>
-                              {expense.platform ? (
-                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
-                              ) : null}
-                              <div className="min-w-0 space-y-1">
-                                <strong className="block text-base font-semibold text-ink truncate">
-                                  {expense.description}
-                                </strong>
-                                <p className="text-xs text-secondary leading-none">
-                                  {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-left lg:text-right shrink-0">
-                              <strong className="block text-xl font-bold tracking-tight text-ink">
-                                {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
-                              </strong>
-                              <span className="text-xs font-medium text-secondary">
-                                {expense.split_rule} split
-                              </span>
-                            </div>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
-                            <button
-                              type="button"
-                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
-                              onClick={() =>
-                                handleStartExpenseEdit(expense.id)
-                              }
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
-                              disabled={deletingExpenseIds.includes(
-                                expense.id,
-                              )}
-                              onClick={() =>
-                                void handleDeleteExpenseClick(expense.id)
-                              }
-                            >
-                              {deletingExpenseIds.includes(expense.id)
-                                ? "Deleting..."
-                                : "Delete"}
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-
-                    {/* Mobile View */}
-                    <div className="grid gap-3 lg:hidden">
-                      {paginatedWalletExpenses.map((expense) => (
-                        <article
-                          key={expense.id}
-                          className={cn(
-                            "table-card-mobile space-y-4 transition-all duration-200",
-                            selectedExpenseIds.includes(expense.id)
-                              ? "border-primary/25 bg-success-tint"
-                              : "border-[color:var(--border)] bg-white/80",
-                            deletingExpenseIds.includes(expense.id) && "animate-delete",
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3">
-                              <input
-                                type="checkbox"
-                                aria-label={`Select ${expense.description}`}
-                                checked={selectedExpenseIds.includes(expense.id)}
-                                disabled={deletingExpenseIds.includes(expense.id)}
-                                onChange={() => handleToggleExpenseSelection(expense.id)}
-                              />
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
-                                <CategoryIcon
-                                  iconId={
-                                    budgetCategoryOptions.find(
-                                      (option) => option.label === expense.category,
-                                    )?.icon ?? "other"
-                                  }
-                                />
-                              </span>
-                              {expense.platform ? (
-                                <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
-                              ) : null}
-                            </div>
-                            <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
-                          </div>
-
-                          <div className="space-y-2">
-                            <strong className="block text-lg text-ink">{expense.description}</strong>
-                            <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
-                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
-                              <span>•</span>
-                              <span>{expense.date}</span>
-                              <span>•</span>
-                              <span className="text-xs font-medium text-secondary">
-                                {expense.split_rule} split
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="ui-button-secondary"
-                              onClick={() => handleStartExpenseEdit(expense.id)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-danger"
-                              disabled={deletingExpenseIds.includes(expense.id)}
-                              onClick={() => void handleDeleteExpenseClick(expense.id)}
-                            >
-                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                    {(() => {
-                      const isLoadMoreMode = Boolean(selectedWallet.expensePagination?.hasMore && currentWalletExpensesPage === totalWalletExpensePages);
-                      const showPagination = totalWalletExpensePages > 1 || Boolean(selectedWallet.expensePagination?.hasMore);
-
-                      if (!showPagination) return null;
-
-                      return (
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4">
-                          <p className="text-sm text-secondary">
-                            Page {currentWalletExpensesPage} of {totalWalletExpensePages}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[70px]"
-                              disabled={currentWalletExpensesPage === 1 || isLoading}
-                              onClick={() =>
-                                setCurrentWalletExpensesPage(
-                                  currentWalletExpensesPage - 1,
-                                )
-                              }
-                              title="Previous Page"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:mr-1">
-                                <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
-                              </svg>
-                              <span className="hidden sm:inline">Previous</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-secondary !py-1.5 !px-2.5 text-xs flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
-                              disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
-                              onClick={async () => {
-                                if (isLoadMoreMode) {
-                                  if (onLoadMoreExpenses) {
-                                    try {
-                                      await onLoadMoreExpenses();
-                                      setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
-                                    } catch (err) {
-                                      // Do not navigate to next page if request failed
-                                    }
-                                  }
-                                } else {
-                                  setCurrentWalletExpensesPage(currentWalletExpensesPage + 1);
-                                }
-                              }}
-                              title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
-                            >
-                              {isLoadMoreMode ? (
-                                isLoading ? (
-                                  <>
-                                    <span className="hidden sm:inline">Loading...</span>
-                                    <span className="inline sm:hidden">...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="hidden sm:inline">Load More</span>
-                                    <span className="inline sm:hidden">Load</span>
-                                  </>
-                                )
-                              ) : (
-                                <>
-                                  <span className="hidden sm:inline">Next</span>
-                                </>
-                              )}
-                              {!isLoading && (
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
-                                  {isLoadMoreMode ? (
-                                    <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
-                                  ) : (
-                                    <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                                  )}
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </>
-                ) }
-              </SurfaceCard>
+            )}
 
               {isExpenseModalOpen ? (
                 <ModalFrame
@@ -3442,7 +3889,7 @@ export function WalletsPage({
                   <div className="border-b border-[color:var(--border)] px-5 py-5 sm:px-7">
                     <div className="flex gap-4 flex-row items-start justify-between">
                       <div className="space-y-2">
-                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-[2rem]">
+                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-3xl">
                           All shared expenses
                         </h2>
                         <p className="text-sm leading-7 text-secondary">
@@ -3458,7 +3905,7 @@ export function WalletsPage({
                         {selectedWallet?.expensePagination?.hasMore ? (
                           <button
                             type="button"
-                            className="ui-button-secondary !py-1.5 !px-3 text-xs flex items-center gap-1.5"
+                            className="ui-button-secondary ui-button-sm flex items-center gap-1.5"
                             onClick={onLoadMoreExpenses}
                             disabled={isLoading}
                             title="Load 50 more older expenses"
@@ -3480,7 +3927,7 @@ export function WalletsPage({
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Month
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3497,7 +3944,7 @@ export function WalletsPage({
                           ))}
                         </select>
                       </label>
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Category
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3514,7 +3961,7 @@ export function WalletsPage({
                           ))}
                         </select>
                       </label>
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Amount
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3529,7 +3976,7 @@ export function WalletsPage({
                           <option value="gt500">Over 500</option>
                         </select>
                       </label>
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Platform / Source
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3587,7 +4034,7 @@ export function WalletsPage({
                             <article
                               key={expense.id}
                               className={cn(
-                                "rounded-[22px] border p-4 shadow-sm transition-all duration-200",
+                                "rounded-2xl border p-4 shadow-sm transition-all duration-200",
                                 selectedExpenseIds.includes(expense.id)
                                   ? "border-primary/25 bg-success-tint"
                                   : "border-[color:var(--border)] bg-white/80",
@@ -3637,7 +4084,7 @@ export function WalletsPage({
                               <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
                                 <button
                                   type="button"
-                                  className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold"
+                                  className="ui-button-ghost ui-button-sm"
                                   onClick={() => {
                                     handleStartExpenseEdit(expense.id);
                                     setIsExpenseModalOpen(false);
@@ -3647,7 +4094,7 @@ export function WalletsPage({
                                 </button>
                                 <button
                                   type="button"
-                                  className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold"
+                                  className="ui-button-danger ui-button-sm"
                                   disabled={deletingExpenseIds.includes(
                                     expense.id,
                                   )}
@@ -3705,7 +4152,7 @@ export function WalletsPage({
                               <div className="space-y-2">
                                 <strong className="block text-lg text-ink">{expense.description}</strong>
                                 <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
                                   <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                                   <span>•</span>
                                   <span>{expense.date}</span>
@@ -3753,7 +4200,7 @@ export function WalletsPage({
                   <div className="border-b border-[color:var(--border)] px-5 py-5 sm:px-7">
                     <div className="flex gap-4 flex-row items-start justify-between">
                       <div className="space-y-2">
-                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-[2rem]">
+                        <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink sm:text-3xl">
                           All settlements
                         </h2>
                         <p className="text-sm leading-7 text-secondary">
@@ -3770,7 +4217,7 @@ export function WalletsPage({
                       </button>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2">
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Month
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3787,7 +4234,7 @@ export function WalletsPage({
                           ))}
                         </select>
                       </label>
-                      <label className="grid gap-1 text-[10px] uppercase tracking-wider font-semibold text-secondary">
+                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
                         Amount
                         <select
                           className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
@@ -3814,7 +4261,7 @@ export function WalletsPage({
                         {filteredSettlements.map((settlement) => (
                           <article
                             key={settlement.id}
-                            className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
+                            className="rounded-2xl border border-[color:var(--border)] bg-white/80 p-4 shadow-sm"
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0 space-y-1.5">
@@ -3869,14 +4316,34 @@ export function WalletsPage({
                 </ModalFrame>
               ) : null}
             </>
-          ) : null}
+          )}
         </section>
       </section>
+        </div>
       )}
 
       {viewMode === "loans" && (
         <section className="space-y-6">
-          {/* Top Mode Navigation: Lent vs Borrowed vs Unified Mini-Statement */}
+          {isLoansLoading ? (
+            <SurfaceCard className="relative overflow-hidden border-emerald-500/20 p-12 text-center flex flex-col items-center justify-center min-h-[380px] shadow-sm bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,249,246,0.85))] dark:bg-zinc-900/90">
+              <div className="relative flex items-center justify-center mb-4">
+                <div className="h-16 w-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-600 animate-spin" />
+                <span className="absolute text-2xl">💸</span>
+              </div>
+              <h3 className="text-xl font-bold font-display text-ink tracking-tight">
+                Loading Peer Loans &amp; Lending...
+              </h3>
+              <p className="mt-2 text-sm text-secondary max-w-md">
+                Downloading your lent and borrowed ledgers, active interest schedules, and repayment records.
+              </p>
+              <div className="mt-6 flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-3.5 py-1.5 rounded-full border border-emerald-500/20">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                Syncing loan data
+              </div>
+            </SurfaceCard>
+          ) : (
+            <>
+              {/* Top Mode Navigation: Lent vs Borrowed vs Unified Mini-Statement */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[color:var(--border)] pb-4">
             <div className="flex items-center gap-1.5 p-1.5 bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl border border-[color:var(--border)] shrink-0">
               <button
@@ -3890,7 +4357,7 @@ export function WalletsPage({
                 )}
               >
                 <span>💸 Money Lent</span>
-                <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold">
+                <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 text-2xs text-emerald-800 dark:text-emerald-300 font-semibold">
                   {lentLoansList.length}
                 </span>
               </button>
@@ -3906,7 +4373,7 @@ export function WalletsPage({
                 )}
               >
                 <span>📥 Money Borrowed</span>
-                <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 text-[10px] text-amber-800 dark:text-amber-300 font-semibold">
+                <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 text-2xs text-amber-800 dark:text-amber-300 font-semibold">
                   {borrowedLoansList.length}
                 </span>
               </button>
@@ -3922,7 +4389,7 @@ export function WalletsPage({
                 )}
               >
                 <span>📑 Mini-Statement</span>
-                <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-[10px] text-indigo-800 dark:text-indigo-300 font-semibold">
+                <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-2xs text-indigo-800 dark:text-indigo-300 font-semibold">
                   {unifiedStatementItems.length}
                 </span>
               </button>
@@ -3959,14 +4426,14 @@ export function WalletsPage({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="ui-button-secondary !py-2 !px-3 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
                     onClick={() => handleOpenCreateLoan("lent")}
                   >
                     <span> Lend</span>
                   </button>
                   <button
                     type="button"
-                    className="ui-button-secondary !py-2 !px-3 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
                     onClick={() => handleOpenCreateLoan("borrowed")}
                   >
                     <span> Borrow</span>
@@ -4217,7 +4684,7 @@ export function WalletsPage({
                       <article
                         key={loan.id}
                         className={cn(
-                          "rounded-[26px] border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
+                          "rounded-3xl border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
                           isOverpaid
                             ? "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
                             : isFullyPaid
@@ -4242,14 +4709,14 @@ export function WalletsPage({
                                     {bName}
                                   </strong>
                                   <span className={cn(
-                                    "rounded-md px-1.5 py-0.2 text-[10px] font-bold uppercase tracking-wider shrink-0",
+                                    "rounded-md px-1.5 py-0.2 text-2xs font-bold uppercase tracking-wider shrink-0",
                                     isBorrowed ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
                                   )}>
                                     {isBorrowed ? "Lender" : "Borrower"}
                                   </span>
                                   {loan.is_owner === false && (
                                     <span
-                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-[10px] font-bold tracking-wider shrink-0"
+                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-2xs font-bold tracking-wider shrink-0"
                                       title={`Recorded by ${bName}`}
                                     >
                                       Shared with you
@@ -4384,14 +4851,14 @@ export function WalletsPage({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              className="ui-button-ghost ui-button-sm cursor-pointer"
                               onClick={() => setSelectedLoanForDetails(loan)}
                             >
                               Timeline ({loan.repayments?.length || 0})
                             </button>
                             <button
                               type="button"
-                              className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                              className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
                               onClick={() => {
                                 const bKey = loan.borrower_member_id
                                   ? `member:${loan.borrower_member_id}`
@@ -4408,7 +4875,7 @@ export function WalletsPage({
                             {!isFullyPaid && (
                               <button
                                 type="button"
-                                className="ui-button-primary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                className="ui-button-primary ui-button-sm cursor-pointer"
                                 onClick={() => handleOpenRepaymentModal(loan)}
                               >
                                 {isBorrowed ? "+ Pay Back" : "+ Record Repayment"}
@@ -4420,14 +4887,14 @@ export function WalletsPage({
                               <>
                                 <button
                                   type="button"
-                                  className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                  className="ui-button-secondary ui-button-sm cursor-pointer"
                                   onClick={() => handleOpenEditLoan(loan)}
                                 >
                                   Edit
                                 </button>
                                 <button
                                   type="button"
-                                  className="ui-button-danger !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                                  className="ui-button-danger ui-button-sm cursor-pointer"
                                   disabled={deletingLoanIds.includes(loan.id)}
                                   onClick={() => void handleDeleteLoanClick(loan)}
                                 >
@@ -4436,7 +4903,7 @@ export function WalletsPage({
                               </>
                             ) : (
                               <span
-                                className="text-[11px] text-secondary italic px-1.5"
+                                className="text-2xs text-secondary italic px-1.5"
                                 title="Only the creator of this loan can edit terms or delete it."
                               >
                                 Terms managed by creator
@@ -4475,7 +4942,7 @@ export function WalletsPage({
                             Net Balance
                           </p>
                           <span className={cn(
-                            "rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                            "rounded-full px-1.5 py-0.5 text-2xs font-bold uppercase",
                             isNetReceivable
                               ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
                               : isBalanced
@@ -4518,7 +4985,7 @@ export function WalletsPage({
                               ? "All loans and debts are evenly matched"
                               : `Deficit: you owe lenders ${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
                         </span>
-                        <span className="text-[11px] opacity-80">
+                        <span className="text-2xs opacity-80">
                           {formatCurrency(lentLoansAggregate.totalRemaining.toFixed(2))} to collect · {formatCurrency(borrowedLoansAggregate.totalRemaining.toFixed(2))} to pay back
                         </span>
                       </div>
@@ -4716,7 +5183,7 @@ export function WalletsPage({
                                   {entry.counterparty}
                                 </strong>
                                 <span className={cn(
-                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                                  "rounded-full px-2 py-0.5 text-2xs font-bold uppercase tracking-wider",
                                   isLent && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300",
                                   isBorrowed && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
                                   isRepReceived && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
@@ -4743,7 +5210,7 @@ export function WalletsPage({
                                   {isCredit ? "+" : "-"}{formatCurrency(entry.amount.toFixed(2))}
                                 </p>
                                 <span className={cn(
-                                  "text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
+                                  "text-2xs font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
                                   isCredit
                                     ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
                                     : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
@@ -4751,14 +5218,14 @@ export function WalletsPage({
                                   {isCredit ? "Credited" : "Debited"}
                                 </span>
                               </div>
-                              <span className="text-[11px] text-secondary">
+                              <span className="text-2xs text-secondary">
                                 {entry.date}
                               </span>
                             </div>
 
                             <button
                               type="button"
-                              className="ui-button-ghost !py-1 !px-2.5 text-xs font-semibold cursor-pointer"
+                              className="ui-button-ghost ui-button-sm cursor-pointer"
                               onClick={() => setSelectedLoanForDetails(entry.loan)}
                             >
                               Timeline
@@ -4771,6 +5238,8 @@ export function WalletsPage({
                 </SurfaceCard>
               )}
             </div>
+          )}
+            </>
           )}
         </section>
       )}
@@ -4837,6 +5306,138 @@ export function WalletsPage({
         </ModalFrame>
       ) : null}
 
+      {isCreateWalletModalOpen ? (
+        <ModalFrame
+          onClose={() => {
+            if (!isSubmitting) {
+              setIsCreateWalletModalOpen(false);
+              setShowCreateWalletValidation(false);
+            }
+          }}
+          className="max-w-[540px] overflow-y-auto p-5 sm:p-6"
+        >
+          <SectionHeader
+            eyebrow="Create wallet"
+            title="New shared group"
+            description="Invite housemates, travel partners, or family members with custom split rules and a group photo."
+          />
+          <form
+            className="mt-5 grid gap-4"
+            onSubmit={handleCreateWalletSubmit}
+            noValidate
+          >
+            <WalletPicturePicker
+              pictureUrl={walletPictureUrl}
+              pictureStats={walletPictureStats}
+              isCompressing={isCompressingPicture}
+              error={pictureError}
+              onPictureChange={handlePictureChange}
+              onRemovePicture={() => {
+                setWalletPictureUrl(null);
+                setWalletPictureStats(null);
+                setPictureError(null);
+              }}
+            />
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              <span className="required-mark">Wallet name</span>
+              <input
+                value={walletName}
+                onChange={(event) => setWalletName(event.target.value)}
+                placeholder="Apartment essentials"
+                required
+                aria-invalid={
+                  showCreateWalletValidation &&
+                  Boolean(createWalletErrors.name)
+                }
+              />
+              {showCreateWalletValidation && createWalletErrors.name ? (
+                <span className="text-sm text-[color:var(--danger-text)]">
+                  {createWalletErrors.name}
+                </span>
+              ) : null}
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Description
+              <textarea
+                value={walletDescription}
+                onChange={(event) => setWalletDescription(event.target.value)}
+                rows={3}
+                placeholder="What this wallet is for"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Default split rule
+              <select
+                value={walletSplitRule}
+                onChange={(event) =>
+                  setWalletSplitRule(event.target.value as SplitRule)
+                }
+              >
+                <option value="equal">Equal</option>
+                <option value="fixed">Fixed amounts</option>
+                <option value="percentage">Percentages</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Currency
+              <select
+                value={walletCurrency}
+                onChange={(event) => setWalletCurrency(event.target.value)}
+              >
+                <option value="INR">INR (₹)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="JPY">JPY (¥)</option>
+                <option value="CAD">CAD (C$)</option>
+                <option value="AUD">AUD (A$)</option>
+                <option value="CHF">CHF (Fr)</option>
+                <option value="CNY">CNY (元)</option>
+                <option value="SGD">SGD (S$)</option>
+                <option value="NZD">NZD (NZ$)</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-secondary">
+              Members
+              <textarea
+                value={walletMembersText}
+                onChange={(event) => setWalletMembersText(event.target.value)}
+                rows={4}
+                placeholder="One name per line or comma separated"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                className="ui-button-secondary"
+                onClick={() => {
+                  setIsCreateWalletModalOpen(false);
+                  setShowCreateWalletValidation(false);
+                }}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ui-button-primary"
+                disabled={isSubmitting || isCompressingPicture}
+              >
+                {submittingAction === "create-wallet"
+                  ? "Saving..."
+                  : "Create wallet"}
+              </button>
+            </div>
+          </form>
+        </ModalFrame>
+      ) : null}
+
       {isWalletEditModalOpen ? (
         <ModalFrame
           onClose={() => handleCancelWalletEdit()}
@@ -4852,6 +5453,19 @@ export function WalletsPage({
             onSubmit={handleUpdateWalletSubmit}
             noValidate
           >
+            <WalletPicturePicker
+              pictureUrl={editWalletPictureUrl}
+              pictureStats={editWalletPictureStats}
+              isCompressing={isCompressingEditPicture}
+              error={editPictureError}
+              onPictureChange={handleEditPictureChange}
+              onRemovePicture={() => {
+                setEditWalletPictureUrl(null);
+                setEditWalletPictureStats(null);
+                setEditPictureError(null);
+              }}
+            />
+
             <label className="grid gap-2 text-sm font-medium text-secondary">
               <span className="required-mark">Wallet name</span>
               <input
@@ -5034,7 +5648,7 @@ export function WalletsPage({
                   )}
                 >
                   <span className="flex items-center gap-1.5 font-bold">💸 Money Lent</span>
-                  <span className="text-[10px] font-normal opacity-80">You gave money (Receivable)</span>
+                  <span className="text-2xs font-normal opacity-80">You gave money (Receivable)</span>
                 </button>
                 <button
                   type="button"
@@ -5047,7 +5661,7 @@ export function WalletsPage({
                   )}
                 >
                   <span className="flex items-center gap-1.5 font-bold">📥 Money Borrowed</span>
-                  <span className="text-[10px] font-normal opacity-80">You took money (Payable)</span>
+                  <span className="text-2xs font-normal opacity-80">You took money (Payable)</span>
                 </button>
               </div>
             )}
@@ -5159,7 +5773,7 @@ export function WalletsPage({
             </div>
 
             {/* Interest Rate & Period */}
-            <div className="rounded-[20px] border border-[color:var(--border)] bg-zinc-50/70 p-4 dark:bg-zinc-800/30 space-y-3">
+            <div className="rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 p-4 dark:bg-zinc-800/30 space-y-3">
               <p className="section-eyebrow">Interest Rate & Policy</p>
 
               <div className="grid gap-3 sm:grid-cols-3">
@@ -5209,7 +5823,7 @@ export function WalletsPage({
                   value={loanInterestStartDate}
                   onChange={(e) => setLoanInterestStartDate(e.target.value)}
                 />
-                <span className="text-[11px] text-muted">
+                <span className="text-2xs text-muted">
                   Choose when interest begins accruing (e.g. grace period before interest applies).
                 </span>
               </label>
@@ -5413,7 +6027,7 @@ export function WalletsPage({
                       {liveLoan.loan_type === "borrowed" ? "Borrowed Loan Timeline" : "Lent Loan Timeline"}
                     </span>
                     {isOverpaid && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-[10px] font-bold shadow-sm animate-pulse">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-2xs font-bold shadow-sm animate-pulse">
                         ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2), loanCurrency)}
                       </span>
                     )}
@@ -5429,7 +6043,7 @@ export function WalletsPage({
                   {canManageLoan && (
                     <button
                       type="button"
-                      className="ui-button-secondary !py-1 !px-2.5 text-xs font-semibold"
+                      className="ui-button-secondary ui-button-sm"
                       onClick={() => {
                         setSelectedLoanForDetails(null);
                         handleOpenEditLoan(liveLoan);
@@ -5440,7 +6054,7 @@ export function WalletsPage({
                   )}
                   <button
                     type="button"
-                    className="ui-button-secondary !py-1 !px-3 text-xs"
+                    className="ui-button-secondary ui-button-sm"
                     onClick={() => setSelectedLoanForDetails(null)}
                   >
                     Close
@@ -5452,24 +6066,24 @@ export function WalletsPage({
             <div className="overflow-y-auto p-6 space-y-6">
               {/* Financial Cards Grid */}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-[18px] bg-zinc-50 p-3 dark:bg-zinc-800/40">
-                  <span className="text-[11px] text-secondary">Principal</span>
+                <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/40">
+                  <span className="text-2xs text-secondary">Principal</span>
                   <p className="text-base font-bold text-ink">{formatCurrency(principal.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className="rounded-[18px] bg-amber-50/50 p-3 dark:bg-amber-950/20">
-                  <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                <div className="rounded-xl bg-amber-50/50 p-3 dark:bg-amber-950/20">
+                  <span className="text-2xs text-amber-700 dark:text-amber-300">
                     {liveLoan.loan_type === "borrowed" ? "Interest to Pay" : "Interest"}
                   </span>
                   <p className="text-base font-bold text-ink">{formatCurrency(accruedInterest.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className="rounded-[18px] bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
-                  <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                <div className="rounded-xl bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
+                  <span className="text-2xs text-emerald-700 dark:text-emerald-300">
                     {liveLoan.loan_type === "borrowed" ? "Paid Back" : "Repaid"}
                   </span>
                   <p className="text-base font-bold text-ink">{formatCurrency(totalRepaid.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className={cn("rounded-[18px] p-3", isOverpaid ? "bg-rose-50/80 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800" : "bg-purple-50/50 dark:bg-purple-950/20")}>
-                  <span className={cn("text-[11px]", isOverpaid ? "text-rose-700 dark:text-rose-300 font-bold" : "text-purple-700 dark:text-purple-300")}>
+                <div className={cn("rounded-xl p-3", isOverpaid ? "bg-rose-50/80 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800" : "bg-purple-50/50 dark:bg-purple-950/20")}>
+                  <span className={cn("text-2xs", isOverpaid ? "text-rose-700 dark:text-rose-300 font-bold" : "text-purple-700 dark:text-purple-300")}>
                     {isOverpaid ? "Overpaid By" : liveLoan.loan_type === "borrowed" ? "Remaining Debt" : "Balance"}
                   </span>
                   <p className={cn("text-base font-bold", isOverpaid ? "text-rose-600 dark:text-rose-400 font-extrabold" : "text-ink")}>
@@ -5479,7 +6093,7 @@ export function WalletsPage({
               </div>
 
               {/* Terms Overview */}
-              <div className="rounded-[20px] border border-[color:var(--border)] p-4 space-y-2 text-xs">
+              <div className="rounded-2xl border border-[color:var(--border)] p-4 space-y-2 text-xs">
                 <div className="flex justify-between">
                   <span className="text-secondary">{liveLoan.loan_type === "borrowed" ? "Borrowed Date:" : "Lending Date:"}</span>
                   <span className="font-semibold text-ink">{liveLoan.lending_date}</span>
@@ -5546,13 +6160,13 @@ export function WalletsPage({
                     {liveLoan.repayments.map((repayment) => (
                       <div
                         key={repayment.id}
-                        className="flex items-center justify-between rounded-[16px] border border-[color:var(--border)] p-3 bg-white/70 dark:bg-zinc-800/40"
+                        className="flex items-center justify-between rounded-xl border border-[color:var(--border)] p-3 bg-white/70 dark:bg-zinc-800/40"
                       >
                         <div>
                           <p className="font-bold text-sm text-ink">
                             {formatCurrency(repayment.amount, loanCurrency)}
                           </p>
-                          <p className="text-[11px] text-secondary">
+                          <p className="text-2xs text-secondary">
                             {liveLoan.loan_type === "borrowed" ? "Paid on " : "Received on "}
                             {repayment.repayment_date} {repayment.notes && `• ${repayment.notes}`}
                           </p>
@@ -5561,14 +6175,14 @@ export function WalletsPage({
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              className="ui-button-secondary !py-1 !px-2 text-xs font-semibold"
+                              className="ui-button-secondary ui-button-sm"
                               onClick={() => handleOpenEditRepayment(liveLoan, repayment)}
                             >
                               Edit
                             </button>
                             <button
                               type="button"
-                              className="ui-button-danger !py-1 !px-2 text-xs"
+                              className="ui-button-danger ui-button-sm"
                               disabled={deletingLoanRepaymentIds.includes(repayment.id)}
                               onClick={() => void handleDeleteRepaymentClick(liveLoan, repayment.id)}
                             >

@@ -2,7 +2,7 @@ const { randomUUID } = require("node:crypto");
 const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
 const { cert, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
-const postgres = require("postgres");
+const { getSqlClient } = require("./db");
 const { z } = require("zod");
 
 class AuthenticationError extends Error {
@@ -131,6 +131,8 @@ const createWalletSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(280).optional(),
   defaultSplitRule: z.enum(["equal", "fixed", "percentage"]).default("equal"),
+  currency: z.string().trim().max(10).optional(),
+  pictureUrl: z.string().trim().max(1000000).optional().nullable(),
   members: z.array(z.object({ displayName: z.string().trim().min(1).max(120), email: z.string().trim().max(160).optional() })).max(15).default([])
 });
 
@@ -548,7 +550,8 @@ async function authenticateRequest(request) {
     return {
       id: decoded.uid,
       email: decoded.email ?? null,
-      name: decoded.name ?? null
+      name: decoded.name ?? null,
+      emailVerified: Boolean(decoded.email_verified)
     };
   } catch (error) {
     if (error instanceof AuthenticationConfigurationError) {
@@ -559,25 +562,6 @@ async function authenticateRequest(request) {
   }
 }
 
-function getSqlClient() {
-  if (sqlClient) {
-    return sqlClient;
-  }
-
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required.");
-  }
-
-  sqlClient = postgres(connectionString, {
-    prepare: false,
-    max: 1,
-    idle_timeout: 20,
-    connect_timeout: 10
-  });
-
-  return sqlClient;
-}
 
 async function safeSchemaStep(stepName, action) {
   try {
@@ -617,6 +601,7 @@ async function ensureSchema(sql) {
       await safeSchemaStep("create wallet_expense_splits table", () => sql`CREATE TABLE IF NOT EXISTS wallet_expense_splits (wallet_expense_id UUID NOT NULL REFERENCES wallet_expenses(id) ON DELETE CASCADE, member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0), percentage_basis_points INTEGER, PRIMARY KEY (wallet_expense_id, member_id))`);
       await safeSchemaStep("create wallet_settlements table", () => sql`CREATE TABLE IF NOT EXISTS wallet_settlements (id UUID PRIMARY KEY, wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE, from_member_id UUID NOT NULL REFERENCES wallet_members(id), to_member_id UUID NOT NULL REFERENCES wallet_members(id), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), settlement_date DATE NOT NULL, note VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create wallet_loans table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loans (id UUID PRIMARY KEY, owner_user_id TEXT, wallet_id UUID REFERENCES wallets(id) ON DELETE CASCADE, lender_member_id UUID REFERENCES wallet_members(id), borrower_member_id UUID REFERENCES wallet_members(id), borrower_name VARCHAR(120), borrower_email VARCHAR(320), amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), interest_rate_basis_points INTEGER NOT NULL DEFAULT 0, interest_type VARCHAR(16) NOT NULL DEFAULT 'percentage' CHECK (interest_type IN ('percentage', 'fixed', 'none')), interest_rate_period VARCHAR(16) NOT NULL DEFAULT 'monthly' CHECK (interest_rate_period IN ('monthly', 'yearly', 'one-time')), lending_date DATE NOT NULL, due_date DATE, interest_start_date DATE, notes VARCHAR(280), status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'settled', 'cancelled')), created_at TIMESTAMPTZ NOT NULL)`);
+      await safeSchemaStep("wallets picture_url column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS picture_url TEXT`);
       await safeSchemaStep("wallet_loans owner_user_id column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS owner_user_id TEXT`);
       await safeSchemaStep("wallet_loans creator_name column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS creator_name VARCHAR(120)`);
       await safeSchemaStep("wallet_loans creator_email column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS creator_email VARCHAR(320)`);
@@ -846,7 +831,7 @@ function parseWalletHistoryPagination(query = {}) {
 }
 
 async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPagination()) {
-  const walletRows = await sql`SELECT id, name, description, default_split_rule, created_at FROM wallets WHERE id = ${walletId}`;
+  const walletRows = await sql`SELECT id, name, description, default_split_rule, created_at, picture_url FROM wallets WHERE id = ${walletId}`;
   if (!walletRows[0]) {
     throw new Error("Wallet not found.");
   }
@@ -1103,7 +1088,7 @@ async function createWalletForUser(user, rawBody) {
   const wallet = await sql.begin(async (tx) => {
     const walletId = randomUUID();
     const createdAt = new Date().toISOString();
-    await tx`INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, created_at) VALUES (${walletId}, ${user.id}, ${result.data.name.trim()}, ${result.data.description?.trim() || null}, ${result.data.defaultSplitRule}, ${createdAt})`;
+    await tx`INSERT INTO wallets (id, owner_user_id, name, description, default_split_rule, picture_url, created_at) VALUES (${walletId}, ${user.id}, ${result.data.name.trim()}, ${result.data.description?.trim() || null}, ${result.data.defaultSplitRule}, ${result.data.pictureUrl || null}, ${createdAt})`;
     const ownerName = user.name?.trim() || user.email?.trim() || "You";
     await tx`INSERT INTO wallet_members (id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at) VALUES (${randomUUID()}, ${walletId}, ${user.id}, ${ownerName}, ${user.email?.trim() || null}, ${"owner"}, ${"linked"}, ${createdAt})`;
     for (const member of result.data.members) {
@@ -1135,7 +1120,11 @@ async function updateWalletForUser(userId, walletId, rawBody) {
       throw new Error("Only the wallet owner can edit this group.");
     }
 
-    await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule} WHERE id = ${walletId}`;
+    if (result.data.pictureUrl !== undefined) {
+      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule}, picture_url = ${result.data.pictureUrl || null} WHERE id = ${walletId}`;
+    } else {
+      await tx`UPDATE wallets SET name = ${result.data.name.trim()}, description = ${result.data.description?.trim() || null}, default_split_rule = ${result.data.defaultSplitRule} WHERE id = ${walletId}`;
+    }
 
     const currentMembers = await tx`SELECT id, display_name, email, member_role FROM wallet_members WHERE wallet_id = ${walletId}`;
     const ownerMember = currentMembers.find((m) => m.member_role === "owner");
@@ -1433,6 +1422,10 @@ async function respondToWalletInvite(user, walletMemberId, rawBody) {
   const normalizedEmail = user.email?.trim().toLowerCase();
   if (!normalizedEmail) {
     return { status: 404, body: { error: "Wallet invite not found." } };
+  }
+
+  if (!user.emailVerified) {
+    return { status: 403, body: { error: "A verified email address is required to accept wallet invitations." } };
   }
 
   const sql = getSqlClient();
@@ -2105,10 +2098,10 @@ async function loadLoanRecord(sql, loanId, viewingUserId) {
   return mapWalletLoan(loan, repaymentRows.map(mapWalletLoanRepayment), viewingUserId);
 }
 
-async function listLoansForUser(userId, userEmail) {
+async function listLoansForUser(userId, userEmail, emailVerified = true) {
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const normalizedEmail = userEmail ? userEmail.trim().toLowerCase() : null;
+  const normalizedEmail = userEmail && emailVerified ? userEmail.trim().toLowerCase() : null;
 
   let loanRows;
   try {
@@ -2524,14 +2517,14 @@ async function deleteStandaloneLoanForUser(userId, loanId) {
   return { status: 200, body: { ok: true } };
 }
 
-async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody, userEmail) {
+async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody, userEmail, emailVerified = true) {
   const result = createWalletLoanRepaymentSchema.safeParse(rawBody);
   if (!result.success) {
     return { status: 400, body: { error: "Invalid loan repayment payload.", details: result.error.flatten() } };
   }
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const normalizedEmail = userEmail ? userEmail.trim().toLowerCase() : null;
+  const normalizedEmail = userEmail && emailVerified ? userEmail.trim().toLowerCase() : null;
 
   const loan = await sql.begin(async (tx) => {
     const loanRows = await tx`

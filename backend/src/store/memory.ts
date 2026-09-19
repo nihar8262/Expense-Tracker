@@ -84,6 +84,7 @@ type StoredWallet = {
   description: string | null;
   defaultSplitRule: "equal" | "fixed" | "percentage";
   currency: string;
+  pictureUrl?: string | null;
   createdAt: string;
 };
 
@@ -265,6 +266,7 @@ function mapWallet(wallet: StoredWallet): WalletRecord {
     description: wallet.description,
     default_split_rule: wallet.defaultSplitRule,
     currency: wallet.currency,
+    picture_url: wallet.pictureUrl ?? null,
     created_at: wallet.createdAt
   };
 }
@@ -1119,6 +1121,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       description: input.description?.trim() || null,
       defaultSplitRule: input.defaultSplitRule,
       currency: input.currency || "INR",
+      pictureUrl: input.pictureUrl || null,
       createdAt
     };
 
@@ -1249,6 +1252,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     wallet.description = input.description?.trim() || null;
     wallet.defaultSplitRule = input.defaultSplitRule;
     wallet.currency = input.currency || "INR";
+    if (input.pictureUrl !== undefined) {
+      wallet.pictureUrl = input.pictureUrl || null;
+    }
 
     const currentMembers = [...walletMembers.values()].filter((m) => m.walletId === walletId);
     const ownerMember = currentMembers.find((m) => m.role === "owner");

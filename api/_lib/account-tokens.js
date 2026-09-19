@@ -1,19 +1,5 @@
-const postgres = require("postgres");
 const crypto = require("crypto");
-
-let sqlClient;
-function getSql() {
-  if (sqlClient) return sqlClient;
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required.");
-  }
-  sqlClient = postgres(connectionString, {
-    ssl: { rejectUnauthorized: false },
-    max: 1
-  });
-  return sqlClient;
-}
+const { getSql } = require("./db");
 
 let schemaReady = false;
 async function ensureSchema(sql) {

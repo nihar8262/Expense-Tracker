@@ -1,4 +1,5 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import { useEffect, type HTMLAttributes, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type ClassValue = string | false | null | undefined;
 
@@ -50,7 +51,11 @@ export function PageHero({ eyebrow, title, description, actions, className }: Pa
         </h1>
         <p className="max-w-2xl text-base leading-7 text-muted sm:text-lg">{description}</p>
       </div>
-      {actions ? <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">{actions}</div> : null}
+      {actions ? (
+        <div className="flex flex-wrap gap-3 sm:flex-row sm:items-center">
+          {actions}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -73,7 +78,7 @@ export function SectionHeader({ eyebrow, title, description, actions, className 
           {description ? <p className="max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">{description}</p> : null}
         </div>
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div> : null}
     </div>
   );
 }
@@ -144,11 +149,24 @@ type ModalFrameProps = {
 };
 
 export function ModalFrame({ children, onClose, className }: ModalFrameProps) {
-  return (
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div className={cn("modal-panel", className)} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

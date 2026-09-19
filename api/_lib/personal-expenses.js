@@ -1,7 +1,7 @@
 const { createHash, randomUUID } = require("node:crypto");
-const postgres = require("postgres");
 const { z } = require("zod");
 const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
+const { getSqlClient } = require("./db");
 
 function parseAmountToMinorUnits(value) {
   const raw = typeof value === "number" ? value.toString() : String(value ?? "");
@@ -101,29 +101,7 @@ function mapExpense(row) {
   };
 }
 
-let sqlClient;
 let schemaReady;
-
-function getSqlClient() {
-  if (sqlClient) {
-    return sqlClient;
-  }
-
-  const connectionString = process.env.DATABASE_URL;
-
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required.");
-  }
-
-  sqlClient = postgres(connectionString, {
-    prepare: false,
-    max: 1,
-    idle_timeout: 20,
-    connect_timeout: 10
-  });
-
-  return sqlClient;
-}
 
 async function ensureSchema(sql) {
   if (!schemaReady) {

@@ -37,11 +37,11 @@ A full-stack personal finance application for tracking daily spending, managing 
 
 - **Personal expenses** — Create, edit, delete, filter by category, and sort by date. Idempotent submission prevents duplicates on retry.
 - **Budgets** — Set monthly or category-specific spending caps. Track remaining budget with overspend warnings.
-- **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements. Each wallet supports its own independent default currency preference with transaction-safe backend conversions.
-- **Peer Loans & Wallet Lending** — Lend money directly to peers or shared wallet members with flexible interest schedules (monthly, yearly, one-time, fixed amount), customizable start dates, and maturity due dates. Track principal, accrued interest, partial repayments, and outstanding balances.
+- **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements. Features modal-based wallet creation, group picture uploads with automatic client-side WebP compression (up to 15MB cap), top active wallet banner with member initials chips, sub-tab workspace navigation (Overview, Transactions, Budget, Members), and zero-stale-data loading transitions.
+- **Peer Loans & Wallet Lending** — Lend money directly to peers or shared wallet members with flexible interest schedules (monthly, yearly, one-time, fixed amount), customizable start dates, and maturity due dates. Track principal, accrued interest, partial repayments, and outstanding balances. Deferred on-demand loading optimizes initial app startup speed.
 - **Borrower Mini Statement & Monthly Breakdown** — Consolidated, printable mini statement for any borrower. Features month-by-month financial summaries (borrowed amount, repaid amount, net delta, transaction frequency, overdue flags), lifetime lending aggregates, and a complete chronological ledger with high-contrast print/PDF styling.
 - **Member Notifications & Overdue Loan Alerts** — Real-time in-app notifications sent to a member's email when a loan is issued. Automated background checks detect overdue loans and notify borrowers with exact overdue balance figures, paired with a persistent in-app Payment Overdue Alert Banner.
-- **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources. Automatically maps and visualizes converted currency amounts seamlessly.
+- **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources with seamless, dedicated loading screens and skeletons that eliminate stale data flicker. Automatically maps and visualizes converted currency amounts seamlessly.
 - **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, wallet invite notifications, loan issuance notices, and overdue loan alerts. Timezone-aware scheduler ensures notifications deliver relative to the user's chosen local time.
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
@@ -337,9 +337,13 @@ Vercel
 
 ### Shared Wallets
 
-- **Create wallets** with a name, description, default split rule, default currency, and initial members.
+- **Modal-driven wallet creation**: Create wallets with a name, description, default split rule, default currency, group picture, and initial members via a focused modal dialog rather than taking vertical sidebar space.
+- **Group pictures & client-side compression**: Upload group pictures with an enforced 15MB file cap; automatically compresses raw image files to optimized WebP at 512×512 using Canvas (>95% size savings) with live size savings indicators.
+- **Top active wallet banner**: Prominent banner showcasing the currently active wallet, description, currency, and members presented as colorful initials chips with owner crown indicator (`👑`) and hover tooltips for full details.
+- **Workspace sub-tabs**: Fast switching between Overview, Transactions & Forms, Budget, Members & Roles, and All sections, accompanied by quick action buttons ("＋ Add Transaction" and "Record Payback").
+- **Dedicated loading screen & stale data prevention**: Instant state reset and full-screen emerald spinner with animated placeholder skeleton cards during wallet switching, guaranteeing that previous wallet members, balances, and expenses never leak while loading new data.
 - **Member management**: Add/remove members, invite by email, accept/decline invitations.
-- **Shared expenses**: Record group purchases with payer selection and three split modes (equal, fixed, percentage). Toggle individual split members. Mark members as "already settled" to auto-create settlement records.
+- **Shared expenses & receipt scanning**: Record group purchases with payer selection and three split modes (equal, fixed, percentage). Includes collapsible "Auto-fill from receipt (optional)" panel with direct camera photo capture and file upload OCR.
 - **Balances**: Real-time net balance per member (who owes, who receives, who is square).
 - **Settlements**: Record, edit, and delete payback transactions.
 - **Wallet budgets**: Same monthly/category budget system, scoped to the wallet's shared expenses.
@@ -388,6 +392,7 @@ Vercel
 ### Dashboard
 
 - **Data view toggle**: Switch between Personal and Wallet data sources with icons. Wallet mode shows a wallet selector dropdown.
+- **Smooth transitions & loading states**: Dedicated loading screen with dual-ring emerald spinner, pulsing sync indicator, and full-grid skeleton placeholders when switching between Personal and Wallet modes, or between different shared wallets. Stale data from previous selections is cleared immediately.
 - **Quick stats**: Expense count, average spend, top category, latest expense.
 - **Spending breakdown tab**: Redesigned, compact layout presenting categories as borderless list rows with thin progress bars, inline percentage shares, and overlapping platform logo chips.
 - **Platform split Donut Chart**: Click any category in the breakdown list to open an interactive modal popup displaying a Recharts-powered Donut Chart. Shows absolute spend and percentage split across platforms (e.g. Swiggy, Zomato, Zepto) using official brand-consistent colors. Features a category spend total indicator in the center of the chart.

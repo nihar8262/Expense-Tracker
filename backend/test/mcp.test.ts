@@ -11,7 +11,7 @@ function buildApp() {
       if (!userId) {
         throw new Error("Missing test user.");
       }
-      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null };
+      return { id: userId, email: `${userId}@example.com`, name: userId, picture: null, emailVerified: true };
     },
     async () => {}
   );
@@ -54,6 +54,19 @@ describe("MCP and Token Management APIs", () => {
     expect(listRes2.body.tokens[0].token_hash).toBeUndefined(); // Verify hash is never exposed!
 
     // 4. MCP Server: unauthorized requests are blocked
+    const mcpGetUnauth = await request(app).get("/api/mcp");
+    expect(mcpGetUnauth.status).toBe(401);
+
+    const mcpQueryTokenRejected = await request(app)
+      .post(`/api/mcp?token=${rawToken}`)
+      .send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {}
+      });
+    expect(mcpQueryTokenRejected.status).toBe(401);
+
     const mcpUnauth = await request(app)
       .post("/api/mcp")
       .send({
