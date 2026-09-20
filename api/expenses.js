@@ -1,4 +1,4 @@
-const { createExpense, deleteExpense, listExpenses, updateExpense } = require("./_lib/personal-expenses");
+const { createExpense, deleteExpense, getPersonalAggregation, listExpenses, updateExpense } = require("./_lib/personal-expenses");
 const { runReminderChecksForUser } = require("./_lib/finance");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
@@ -109,6 +109,14 @@ module.exports = async function handler(request, response) {
   }
 
   const expenseId = segments[0];
+
+  if (expenseId === "summary") {
+    if (request.method === "GET") {
+      const result = await getPersonalAggregation(user.id);
+      return sendResult(response, result);
+    }
+    return methodNotAllowed(response, "GET");
+  }
 
   if (request.method === "PUT") {
     const result = await updateExpense(request.body, expenseId, user.id);

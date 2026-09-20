@@ -64,7 +64,14 @@ const createExpenseSchema = z.object({
 
 const expensesQuerySchema = z.object({
   category: z.string().trim().min(1).optional(),
-  sort: z.enum(["date_desc"]).optional()
+  platform: z.string().trim().optional(),
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Month must be YYYY-MM").optional(),
+  from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from_date must be YYYY-MM-DD").optional(),
+  to_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to_date must be YYYY-MM-DD").optional(),
+  search: z.string().trim().optional(),
+  sort: z.enum(["date_desc", "date_asc", "none"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0)
 });
 
 function createExpenseRequestHash(input) {
@@ -189,24 +196,142 @@ async function listExpenses(rawQuery, userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
 
-  const whereClause = result.data.category
-    ? sql`WHERE user_id = ${userId} AND category = ${result.data.category}`
-    : sql`WHERE user_id = ${userId}`;
-  const orderClause = result.data.sort === "date_desc"
-    ? sql`ORDER BY expense_date DESC, created_at DESC`
-    : sql`ORDER BY created_at DESC`;
+  const { limit, offset, category, platform, search, sort } = result.data;
+  let fromDate = result.data.from_date;
+  let toDate = result.data.to_date;
+  if (result.data.month) {
+    fromDate = `${result.data.month}-01`;
+    const [y, m] = result.data.month.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    toDate = `${result.data.month}-${String(lastDay).padStart(2, "0")}`;
+  }
+
+  const searchPattern = search?.trim() ? `%${search.trim()}%` : null;
 
   const rows = await sql`
     SELECT id, amount_minor, category, description, expense_date, created_at, platform
     FROM expenses
-    ${whereClause}
-    ${orderClause}
+    WHERE user_id = ${userId}
+      ${category ? sql`AND category = ${category}` : sql``}
+      ${platform === "none" ? sql`AND (platform IS NULL OR platform = '')` : platform ? sql`AND platform = ${platform}` : sql``}
+      ${fromDate ? sql`AND expense_date >= ${fromDate}` : sql``}
+      ${toDate ? sql`AND expense_date <= ${toDate}` : sql``}
+      ${searchPattern ? sql`AND (description ILIKE ${searchPattern} OR category ILIKE ${searchPattern})` : sql``}
+    ${sort === "date_asc" ? sql`ORDER BY expense_date ASC, created_at ASC` : sql`ORDER BY expense_date DESC, created_at DESC`}
+    LIMIT ${limit}
+    OFFSET ${offset}
   `;
+
+  const countResult = await sql`
+    SELECT COUNT(*)::int AS count
+    FROM expenses
+    WHERE user_id = ${userId}
+      ${category ? sql`AND category = ${category}` : sql``}
+      ${platform === "none" ? sql`AND (platform IS NULL OR platform = '')` : platform ? sql`AND platform = ${platform}` : sql``}
+      ${fromDate ? sql`AND expense_date >= ${fromDate}` : sql``}
+      ${toDate ? sql`AND expense_date <= ${toDate}` : sql``}
+      ${searchPattern ? sql`AND (description ILIKE ${searchPattern} OR category ILIKE ${searchPattern})` : sql``}
+  `;
+
+  const totalCount = Number(countResult[0]?.count ?? 0);
+  const expenses = rows.map(mapExpense);
 
   return {
     status: 200,
     body: {
-      expenses: rows.map(mapExpense)
+      expenses,
+      total_count: totalCount,
+      limit,
+      offset,
+      has_more: offset + expenses.length < totalCount
+    }
+  };
+}
+
+async function getPersonalAggregation(userId) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+
+  const totalRows = await sql`
+    SELECT
+      COALESCE(SUM(amount_minor), 0) AS total_amount_minor,
+      COUNT(*)::int AS expense_count
+    FROM expenses
+    WHERE user_id = ${userId}
+  `;
+
+  const monthlyRows = await sql`
+    SELECT
+      TO_CHAR(expense_date, 'YYYY-MM') AS month,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count
+    FROM expenses
+    WHERE user_id = ${userId}
+    GROUP BY TO_CHAR(expense_date, 'YYYY-MM')
+    ORDER BY month ASC
+  `;
+
+  const categoryRows = await sql`
+    SELECT
+      category,
+      COALESCE(SUM(amount_minor), 0) AS total_minor,
+      COUNT(*)::int AS expense_count,
+      ARRAY_TO_STRING(ARRAY_AGG(DISTINCT COALESCE(NULLIF(platform, ''), 'others')), ',') AS platforms_str
+    FROM expenses
+    WHERE user_id = ${userId}
+    GROUP BY category
+    ORDER BY total_minor DESC
+  `;
+
+  const platformRows = await sql`
+    SELECT
+      COALESCE(NULLIF(platform, ''), 'others') AS platform,
+      COALESCE(SUM(amount_minor), 0) AS total_minor
+    FROM expenses
+    WHERE user_id = ${userId} AND platform IS NOT NULL AND platform != ''
+    GROUP BY platform
+    ORDER BY total_minor DESC
+    LIMIT 1
+  `;
+
+  const latestRows = await sql`
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform
+    FROM expenses
+    WHERE user_id = ${userId}
+    ORDER BY expense_date DESC, created_at DESC
+    LIMIT 1
+  `;
+
+  const totalAmount = formatMinorUnits(Number(totalRows[0]?.total_amount_minor ?? 0));
+  const totalCount = Number(totalRows[0]?.expense_count ?? 0);
+
+  const topPlatform = platformRows[0] ? {
+    platform: platformRows[0].platform,
+    amount: Number(formatMinorUnits(Number(platformRows[0].total_minor))),
+    formattedAmount: formatMinorUnits(Number(platformRows[0].total_minor))
+  } : null;
+
+  const latestExpense = latestRows[0] ? mapExpense(latestRows[0]) : null;
+
+  return {
+    status: 200,
+    body: {
+      total_amount: totalAmount,
+      expense_count: totalCount,
+      monthly_totals: monthlyRows.map((r) => ({
+        month: r.month,
+        total: formatMinorUnits(Number(r.total_minor)),
+        count: Number(r.expense_count)
+      })),
+      category_totals: categoryRows.map((r) => ({
+        category: r.category,
+        total: formatMinorUnits(Number(r.total_minor)),
+        count: Number(r.expense_count),
+        platforms: r.platforms_str ? r.platforms_str.split(",") : []
+      })),
+      budget_totals: [],
+      top_platform: topPlatform,
+      latest_expense: latestExpense
     }
   };
 }
@@ -380,6 +505,7 @@ async function deleteExpense(expenseId, userId) {
 module.exports = {
   createExpense,
   deleteExpense,
+  getPersonalAggregation,
   listExpenses,
   updateExpense
 };

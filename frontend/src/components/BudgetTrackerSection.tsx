@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import type { BudgetForm, BudgetHistoryGroup, BudgetHistoryRange, BudgetSummary, CategoryOption } from "../types";
 import { ModalFrame, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
+import { FilterDropdown } from "./FilterDropdown";
+import { CategoryIcon } from "./CategoryIcon";
 import { History } from "lucide-react";
 
 type BudgetTrackerSectionProps = {
@@ -177,13 +179,18 @@ export function BudgetTrackerSection({
     return (
       <form className="grid gap-4" onSubmit={(event) => void handleValidatedBudgetSubmit(event)} noValidate>
         {/* Issue #7: budget-form-field caps max-width so fields feel intentionally narrow */}
-        <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
-          Budget type
-          <select value={budgetForm.scope} onChange={(event) => onBudgetFormChange((current) => ({ ...current, scope: event.target.value as BudgetForm["scope"] }))}>
-            <option value="monthly">Monthly budget</option>
-            <option value="category">Category budget</option>
-          </select>
-        </label>
+        <div className="budget-form-field">
+          <FilterDropdown
+            label="Budget type"
+            variant="form"
+            value={budgetForm.scope}
+            onChange={(val) => onBudgetFormChange((current) => ({ ...current, scope: val as BudgetForm["scope"] }))}
+            options={[
+              { value: "monthly", label: "Monthly budget" },
+              { value: "category", label: "Category budget" },
+            ]}
+          />
+        </div>
 
         <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
           <span className="required-mark">Amount</span>
@@ -203,18 +210,23 @@ export function BudgetTrackerSection({
         </label>
 
         {budgetForm.scope === "category" ? (
-          <label className="grid gap-2 text-sm font-medium text-secondary budget-form-field">
-            <span className="required-mark">Category</span>
-            <select value={budgetForm.category} onChange={(event) => onBudgetFormChange((current) => ({ ...current, category: event.target.value }))} required aria-invalid={showBudgetValidation && Boolean(budgetErrors.category)}>
-              <option value="">Select category</option>
-              {budgetCategoryOptions.map((option) => (
-                <option key={option.id} value={option.label}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {showBudgetValidation && budgetErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{budgetErrors.category}</span> : null}
-          </label>
+          <div className="budget-form-field">
+            <FilterDropdown
+              label="Category"
+              variant="form"
+              required
+              searchable
+              value={budgetForm.category}
+              placeholder="Select category"
+              error={showBudgetValidation && budgetErrors.category ? budgetErrors.category : undefined}
+              onChange={(val) => onBudgetFormChange((current) => ({ ...current, category: val }))}
+              options={budgetCategoryOptions.map((option) => ({
+                value: option.label,
+                label: option.label,
+                icon: <CategoryIcon iconId={option.icon} />,
+              }))}
+            />
+          </div>
         ) : null}
 
         <div className="flex flex-wrap justify-end gap-2 pt-2">
@@ -340,15 +352,19 @@ export function BudgetTrackerSection({
               </div>
 
               <div className="flex flex-col gap-3 sm:items-end">
-                <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Range
-                  <select value={budgetHistoryRange} onChange={(event) => onBudgetHistoryRangeChange(event.target.value as BudgetHistoryRange)}>
-                    <option value="quarter">Last 3 months</option>
-                    <option value="half-year">Last 6 months</option>
-                    <option value="year">Last 12 months</option>
-                    <option value="all">All time</option>
-                  </select>
-                </label>
+                <div className="w-full sm:w-44">
+                  <FilterDropdown
+                    label="Range"
+                    value={budgetHistoryRange}
+                    onChange={(val) => onBudgetHistoryRangeChange(val as BudgetHistoryRange)}
+                    options={[
+                      { value: "quarter", label: "Last 3 months" },
+                      { value: "half-year", label: "Last 6 months" },
+                      { value: "year", label: "Last 12 months" },
+                      { value: "all", label: "All time" },
+                    ]}
+                  />
+                </div>
                 <button type="button" className="ui-button-secondary" onClick={onCloseBudgetHistory}>
                   Close
                 </button>

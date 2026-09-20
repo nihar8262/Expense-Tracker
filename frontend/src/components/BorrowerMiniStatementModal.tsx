@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { ModalFrame, cn } from "./ui";
+import { FilterDropdown } from "./FilterDropdown";
 import type { WalletLoan } from "../types";
 
 export interface BorrowerMiniStatementModalProps {
@@ -527,21 +528,18 @@ export function BorrowerMiniStatementModal({
                 />
               )}
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-secondary font-medium">
-                    {isLenderMode ? "Select Lender:" : isMixedMode ? "Select Contact:" : "Select Borrower:"}
-                  </span>
-                  <select
+                <div className="min-w-[200px] sm:min-w-[240px]">
+                  <FilterDropdown
+                    label={isLenderMode ? "Select Lender" : isMixedMode ? "Select Contact" : "Select Borrower"}
                     value={selectedKey}
-                    onChange={(e) => setSelectedKey(e.target.value)}
-                    className="text-sm font-bold text-ink bg-zinc-100 dark:bg-zinc-700/60 rounded-xl px-2.5 py-1 border border-[color:var(--border)] focus:ring-2 focus:ring-primary/40 outline-hidden cursor-pointer"
-                  >
-                    {borrowerOptions.map((b) => (
-                      <option key={b.key} value={b.key}>
-                        {b.name} ({b.loans.length} loan{b.loans.length !== 1 ? "s" : ""}) {b.role === "lender" ? "• Lender" : b.role === "borrower" ? "• Borrower" : ""} {b.hasOverdue ? "⚠️ Overdue" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setSelectedKey(val)}
+                    searchable={borrowerOptions.length > 5}
+                    options={borrowerOptions.map((b) => ({
+                      value: b.key,
+                      label: `${b.name} (${b.loans.length} loan${b.loans.length !== 1 ? "s" : ""})`,
+                      badge: b.hasOverdue ? "⚠️ Overdue" : b.role === "lender" ? "Lender" : b.role === "borrower" ? "Borrower" : undefined,
+                    }))}
+                  />
                 </div>
                 {currentBorrower?.email && (
                   <p className="text-xs text-secondary truncate mt-0.5 ml-1">

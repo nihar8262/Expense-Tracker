@@ -32,14 +32,13 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
         }
       },
       handler: async (args: any, userId: string) => {
-        const expenses = await store.listExpenses(userId, { category: args.category });
-        let filtered = expenses || [];
-        if (args.startDate) {
-          filtered = filtered.filter(e => e.date >= args.startDate);
-        }
-        if (args.endDate) {
-          filtered = filtered.filter(e => e.date <= args.endDate);
-        }
+        const res = await store.listExpenses(userId, {
+          category: args.category,
+          from_date: args.startDate,
+          to_date: args.endDate,
+          limit: 100
+        });
+        const filtered = res?.expenses || [];
         return { expenses: filtered };
       }
     },
@@ -64,14 +63,13 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
         }
       },
       handler: async (args: any, userId: string) => {
-        const expenses = await store.listExpenses(userId, { category: args.category });
-        let filtered = expenses || [];
-        if (args.startDate) {
-          filtered = filtered.filter(e => e.date >= args.startDate);
-        }
-        if (args.endDate) {
-          filtered = filtered.filter(e => e.date <= args.endDate);
-        }
+        const res = await store.listExpenses(userId, {
+          category: args.category,
+          from_date: args.startDate,
+          to_date: args.endDate,
+          limit: 100
+        });
+        const filtered = res?.expenses || [];
 
         let totalCents = 0;
         const categoryBreakdown: Record<string, string> = {};

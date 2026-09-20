@@ -57,7 +57,14 @@ export const createExpenseSchema = z.object({
 
 export const expensesQuerySchema = z.object({
   category: z.string().trim().min(1).optional(),
-  sort: z.enum(["date_desc"]).optional()
+  platform: z.string().trim().max(50).optional(),
+  month: z.string().trim().refine(isValidIsoMonth, "Month must be a valid YYYY-MM value.").optional(),
+  from_date: z.string().trim().refine(isValidIsoDate, "From date must be a valid YYYY-MM-DD value.").optional(),
+  to_date: z.string().trim().refine(isValidIsoDate, "To date must be a valid YYYY-MM-DD value.").optional(),
+  search: z.string().trim().max(100).optional(),
+  sort: z.enum(["date_desc", "date_asc", "none"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional()
 });
 
 export const createBudgetSchema = z

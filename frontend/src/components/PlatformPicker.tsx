@@ -227,7 +227,7 @@ export function PlatformPicker({
       {isOpen && typeof document !== "undefined" && createPortal(
         <div
           ref={portalRef}
-          className="sm:hidden fixed inset-0 z-50 flex items-end justify-center"
+          className="sm:hidden fixed inset-0 z-[200] flex items-end justify-center"
         >
           {/* Backdrop */}
           <div
@@ -235,7 +235,10 @@ export function PlatformPicker({
               "fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ease-out",
               animate ? "opacity-100" : "opacity-0"
             )}
-            onClick={() => setIsOpen(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen(false);
+            }}
           />
 
           {/* Bottom Sheet Panel */}
@@ -244,9 +247,10 @@ export function PlatformPicker({
             aria-modal="true"
             aria-label="Select source platform"
             className={cn(
-              "fixed bottom-0 left-0 right-0 w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out z-50",
+              "fixed bottom-0 left-0 right-0 w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out z-[200]",
               animate ? "translate-y-0" : "translate-y-full"
             )}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Drag Bar */}
             <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-zinc-200 dark:bg-zinc-700" />

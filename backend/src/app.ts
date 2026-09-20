@@ -40,6 +40,7 @@ import {
   handleListBillReminders,
   handleListBudgets,
   handleListExpenses,
+  handleGetPersonalAggregation,
   handleListNotificationsForUser,
   handleListWalletsForUser,
   handleLeaveWallet,
@@ -109,6 +110,18 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       return response.status(result.status).json(result.body);
       },
       "Failed to load expenses."
+    );
+  });
+
+  app.get("/api/expenses/summary", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleGetPersonalAggregation(user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to load expense summary."
     );
   });
 

@@ -76,7 +76,7 @@
     },
     {
       "source": "/api/wallet-invites/:route*",
-      "destination": "/api/wallet-invites?route=:route*"
+      "destination": "/api/wallets?invitesRoute=:route*"
     },
     {
       "source": "/api/internal/:route*",

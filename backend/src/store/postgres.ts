@@ -32,6 +32,8 @@ import {
   type ReminderPreferencesRecord,
   type CreateExpenseResult,
   type ExpenseRecord,
+  type PaginatedExpensesResult,
+  type PersonalAggregationRecord,
   type ExpenseStore,
   WalletBudgetNotFoundError,
   WalletExpenseNotFoundError,
@@ -1552,20 +1554,157 @@ export function createPostgresExpenseStore(): ExpenseStore {
       return res;
     },
 
-    async listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]> {
+    async listExpenses(userId: string, query: ExpensesQueryInput): Promise<PaginatedExpensesResult> {
       await ensureSchema(sql);
 
-      const whereClause = query.category ? sql`WHERE user_id = ${userId} AND category = ${query.category}` : sql`WHERE user_id = ${userId}`;
-      const orderClause = query.sort === "date_desc" ? sql`ORDER BY expense_date DESC, created_at DESC` : sql`ORDER BY created_at DESC`;
+      const limit = query.limit ?? 20;
+      const offset = query.offset ?? 0;
+
+      let fromDate = query.from_date;
+      let toDate = query.to_date;
+      if (query.month) {
+        fromDate = `${query.month}-01`;
+        const [y, m] = query.month.split("-").map(Number);
+        const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        toDate = `${query.month}-${String(lastDay).padStart(2, "0")}`;
+      }
+
+      const searchPattern = query.search?.trim() ? `%${query.search.trim()}%` : null;
 
       const rows = await sql<ExpenseRow[]>`
         SELECT id, amount_minor, category, description, expense_date, created_at, platform
         FROM expenses
-        ${whereClause}
-        ${orderClause}
+        WHERE user_id = ${userId}
+          ${query.category ? sql`AND category = ${query.category}` : sql``}
+          ${query.platform === "none" ? sql`AND (platform IS NULL OR platform = '')` : query.platform ? sql`AND platform = ${query.platform}` : sql``}
+          ${fromDate ? sql`AND expense_date >= ${fromDate}` : sql``}
+          ${toDate ? sql`AND expense_date <= ${toDate}` : sql``}
+          ${searchPattern ? sql`AND (description ILIKE ${searchPattern} OR category ILIKE ${searchPattern})` : sql``}
+        ${query.sort === "date_asc" ? sql`ORDER BY expense_date ASC, created_at ASC` : sql`ORDER BY expense_date DESC, created_at DESC`}
+        LIMIT ${limit}
+        OFFSET ${offset}
       `;
 
-      return rows.map(mapExpense);
+      const countResult = await sql<{ count: string | number }[]>`
+        SELECT COUNT(*)::int AS count
+        FROM expenses
+        WHERE user_id = ${userId}
+          ${query.category ? sql`AND category = ${query.category}` : sql``}
+          ${query.platform === "none" ? sql`AND (platform IS NULL OR platform = '')` : query.platform ? sql`AND platform = ${query.platform}` : sql``}
+          ${fromDate ? sql`AND expense_date >= ${fromDate}` : sql``}
+          ${toDate ? sql`AND expense_date <= ${toDate}` : sql``}
+          ${searchPattern ? sql`AND (description ILIKE ${searchPattern} OR category ILIKE ${searchPattern})` : sql``}
+      `;
+
+      const totalCount = Number(countResult[0]?.count ?? 0);
+      const expenses = rows.map(mapExpense);
+
+      return {
+        expenses,
+        total_count: totalCount,
+        limit,
+        offset,
+        has_more: offset + expenses.length < totalCount
+      };
+    },
+
+    async getPersonalAggregation(userId: string): Promise<PersonalAggregationRecord> {
+      await ensureSchema(sql);
+
+      const totalRows = await sql<{
+        total_amount_minor: string | number;
+        expense_count: string | number;
+      }[]>`
+        SELECT
+          COALESCE(SUM(amount_minor), 0) AS total_amount_minor,
+          COUNT(*)::int AS expense_count
+        FROM expenses
+        WHERE user_id = ${userId}
+      `;
+
+      const monthlyRows = await sql<{
+        month: string;
+        total_minor: string | number;
+        expense_count: string | number;
+      }[]>`
+        SELECT
+          TO_CHAR(expense_date, 'YYYY-MM') AS month,
+          COALESCE(SUM(amount_minor), 0) AS total_minor,
+          COUNT(*)::int AS expense_count
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY TO_CHAR(expense_date, 'YYYY-MM')
+        ORDER BY month ASC
+      `;
+
+      const categoryRows = await sql<{
+        category: string;
+        total_minor: string | number;
+        expense_count: string | number;
+        platforms_str: string | null;
+      }[]>`
+        SELECT
+          category,
+          COALESCE(SUM(amount_minor), 0) AS total_minor,
+          COUNT(*)::int AS expense_count,
+          ARRAY_TO_STRING(ARRAY_AGG(DISTINCT COALESCE(NULLIF(platform, ''), 'others')), ',') AS platforms_str
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY category
+        ORDER BY total_minor DESC
+      `;
+
+      const platformRows = await sql<{
+        platform: string;
+        total_minor: string | number;
+      }[]>`
+        SELECT
+          COALESCE(NULLIF(platform, ''), 'others') AS platform,
+          COALESCE(SUM(amount_minor), 0) AS total_minor
+        FROM expenses
+        WHERE user_id = ${userId} AND platform IS NOT NULL AND platform != ''
+        GROUP BY platform
+        ORDER BY total_minor DESC
+        LIMIT 1
+      `;
+
+      const latestRows = await sql<ExpenseRow[]>`
+        SELECT id, amount_minor, category, description, expense_date, created_at, platform
+        FROM expenses
+        WHERE user_id = ${userId}
+        ORDER BY expense_date DESC, created_at DESC
+        LIMIT 1
+      `;
+
+      const totalAmount = formatMinorUnits(Number(totalRows[0]?.total_amount_minor ?? 0));
+      const totalCount = Number(totalRows[0]?.expense_count ?? 0);
+
+      const topPlatform = platformRows[0] ? {
+        platform: platformRows[0].platform,
+        amount: Number(formatMinorUnits(Number(platformRows[0].total_minor))),
+        formattedAmount: formatMinorUnits(Number(platformRows[0].total_minor))
+      } : null;
+
+      const latestExpense = latestRows[0] ? mapExpense(latestRows[0]) : null;
+
+      return {
+        total_amount: totalAmount,
+        expense_count: totalCount,
+        monthly_totals: monthlyRows.map((r) => ({
+          month: r.month,
+          total: formatMinorUnits(Number(r.total_minor)),
+          count: Number(r.expense_count)
+        })),
+        category_totals: categoryRows.map((r) => ({
+          category: r.category,
+          total: formatMinorUnits(Number(r.total_minor)),
+          count: Number(r.expense_count),
+          platforms: r.platforms_str ? r.platforms_str.split(",") : []
+        })),
+        budget_totals: [],
+        top_platform: topPlatform,
+        latest_expense: latestExpense
+      };
     },
 
     async updateExpense(userId: string, expenseId: string, input: CreateExpenseInput): Promise<ExpenseRecord> {

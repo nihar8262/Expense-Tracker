@@ -30,6 +30,8 @@ import {
   type ReminderPreferencesRecord,
   type CreateExpenseResult,
   type ExpenseRecord,
+  type PaginatedExpensesResult,
+  type PersonalAggregationRecord,
   type ExpenseStore,
   WalletBudgetNotFoundError,
   WalletExpenseNotFoundError,
@@ -1005,20 +1007,121 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     };
   }
 
-  async function listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]> {
+  async function listExpenses(userId: string, query: ExpensesQueryInput): Promise<PaginatedExpensesResult> {
+    const limit = query.limit ?? 20;
+    const offset = query.offset ?? 0;
+
+    let fromDate = query.from_date;
+    let toDate = query.to_date;
+    if (query.month) {
+      fromDate = `${query.month}-01`;
+      const [y, m] = query.month.split("-").map(Number);
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      toDate = `${query.month}-${String(lastDay).padStart(2, "0")}`;
+    }
+
+    const search = query.search?.trim().toLowerCase();
+
     const filteredExpenses = [...expenses.values()]
       .filter((expense) => expense.userId === userId)
-      .filter((expense) => !query.category || expense.category === query.category)
+      .filter((expense) => !query.category || expense.category.toLowerCase() === query.category.toLowerCase())
+      .filter((expense) => {
+        if (!query.platform) return true;
+        if (query.platform === "none") return !expense.platform;
+        return expense.platform === query.platform;
+      })
+      .filter((expense) => !fromDate || expense.date >= fromDate)
+      .filter((expense) => !toDate || expense.date <= toDate)
+      .filter((expense) => {
+        if (!search) return true;
+        return expense.description.toLowerCase().includes(search) || expense.category.toLowerCase().includes(search);
+      })
       .sort((left, right) => {
-        if (query.sort === "date_desc") {
-          const byDate = right.date.localeCompare(left.date);
-          return byDate !== 0 ? byDate : right.createdAt.localeCompare(left.createdAt);
+        if (query.sort === "date_asc") {
+          const byDate = left.date.localeCompare(right.date);
+          return byDate !== 0 ? byDate : left.createdAt.localeCompare(right.createdAt);
         }
-
-        return right.createdAt.localeCompare(left.createdAt);
+        const byDate = right.date.localeCompare(left.date);
+        return byDate !== 0 ? byDate : right.createdAt.localeCompare(left.createdAt);
       });
 
-    return filteredExpenses.map(mapExpense);
+    const totalCount = filteredExpenses.length;
+    const paginated = filteredExpenses.slice(offset, offset + limit);
+
+    return {
+      expenses: paginated.map(mapExpense),
+      total_count: totalCount,
+      limit,
+      offset,
+      has_more: offset + paginated.length < totalCount
+    };
+  }
+
+  async function getPersonalAggregation(userId: string): Promise<PersonalAggregationRecord> {
+    const userExpenses = [...expenses.values()]
+      .filter((e) => e.userId === userId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    let totalMinor = 0;
+    const monthlyMap = new Map<string, { totalMinor: number; count: number }>();
+    const categoryMap = new Map<string, { totalMinor: number; count: number; platforms: Set<string> }>();
+    const platformMap = new Map<string, number>();
+
+    for (const e of userExpenses) {
+      totalMinor += e.amountMinor;
+
+      const month = e.date.slice(0, 7);
+      const mEntry = monthlyMap.get(month) ?? { totalMinor: 0, count: 0 };
+      mEntry.totalMinor += e.amountMinor;
+      mEntry.count += 1;
+      monthlyMap.set(month, mEntry);
+
+      const cEntry = categoryMap.get(e.category) ?? { totalMinor: 0, count: 0, platforms: new Set<string>() };
+      cEntry.totalMinor += e.amountMinor;
+      cEntry.count += 1;
+      if (e.platform) cEntry.platforms.add(e.platform);
+      categoryMap.set(e.category, cEntry);
+
+      if (e.platform) {
+        platformMap.set(e.platform, (platformMap.get(e.platform) ?? 0) + e.amountMinor);
+      }
+    }
+
+    const monthlyTotals: WalletAggregationMonthlyRecord[] = [...monthlyMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, data]) => ({
+        month,
+        total: formatMinorUnits(data.totalMinor),
+        count: data.count
+      }));
+
+    const categoryTotals: WalletAggregationCategoryRecord[] = [...categoryMap.entries()]
+      .sort((a, b) => b[1].totalMinor - a[1].totalMinor)
+      .map(([category, data]) => ({
+        category,
+        total: formatMinorUnits(data.totalMinor),
+        count: data.count,
+        platforms: [...data.platforms]
+      }));
+
+    const sortedPlatforms = [...platformMap.entries()].sort((a, b) => b[1] - a[1]);
+    const topPlatform = sortedPlatforms[0] ? {
+      platform: sortedPlatforms[0][0],
+      amount: Number(formatMinorUnits(sortedPlatforms[0][1])),
+      formattedAmount: formatMinorUnits(sortedPlatforms[0][1])
+    } : null;
+
+    const latestExpense = userExpenses[0] ? mapExpense(userExpenses[0]) : null;
+
+    return {
+      total_amount: formatMinorUnits(totalMinor),
+      expense_count: userExpenses.length,
+      monthly_totals: monthlyTotals,
+      category_totals: categoryTotals,
+      budget_totals: [],
+      top_platform: topPlatform,
+      latest_expense: latestExpense
+    };
   }
 
   async function updateExpense(userId: string, expenseId: string, input: CreateExpenseInput): Promise<ExpenseRecord> {
@@ -2852,6 +2955,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   return {
     createExpense,
     listExpenses,
+    getPersonalAggregation,
     updateExpense,
     deleteExpense,
     createBudget,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { NotificationCenterProps } from "../types";
 import { EmptyState, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
+import { FilterDropdown } from "./FilterDropdown";
 
 type AlertsSurfaceProps = Omit<NotificationCenterProps, "notificationPanelRef" | "isOpen" | "onToggle" | "unreadCount"> & {
   layout?: "popover" | "page";
@@ -321,15 +322,18 @@ export function AlertsSurface({
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Recurrence
-                  <select value={billRecurrence} onChange={(event) => setBillRecurrence(event.target.value as "once" | "weekly" | "monthly" | "yearly") }>
-                    <option value="once">Once</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </label>
+                <FilterDropdown
+                  label="Recurrence"
+                  variant="form"
+                  value={billRecurrence}
+                  onChange={(val) => setBillRecurrence(val as "once" | "weekly" | "monthly" | "yearly")}
+                  options={[
+                    { value: "once", label: "Once" },
+                    { value: "weekly", label: "Weekly" },
+                    { value: "monthly", label: "Monthly" },
+                    { value: "yearly", label: "Yearly" },
+                  ]}
+                />
                 <label className="grid gap-2 text-sm font-medium text-secondary">
                   Interval count
                   <input type="number" min={1} max={24} value={billIntervalCount} onChange={(event) => setBillIntervalCount(Number(event.target.value) || 1)} />
@@ -364,23 +368,23 @@ export function AlertsSurface({
 
       {!isPopoverLayout ? (
         preferences ? (
-          <SurfaceCard className="space-y-5 p-5 sm:p-6">
+          <SurfaceCard className="relative z-20 space-y-5 p-5 sm:p-6">
             <SectionHeader eyebrow="Preferences" title="Scheduled checks" description="Tune daily nudges and budget alert thresholds without changing your main dashboard layout." />
             
-            <div className="grid gap-2 text-sm font-medium text-secondary max-w-sm">
-              <span>Alert preference scope</span>
-              <select
+            <div className="max-w-sm">
+              <FilterDropdown
+                label="Alert preference scope"
+                variant="form"
                 value={preferenceScope}
-                onChange={(e) => onPreferenceScopeChange(e.target.value)}
-                className="w-full rounded-[22px] border border-[color:var(--border)] bg-white px-4 py-2 text-sm font-medium"
-              >
-                <option value="personal">Personal Account</option>
-                {wallets.map((wallet) => (
-                  <option key={wallet.id} value={wallet.id}>
-                    Wallet: {wallet.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => onPreferenceScopeChange(val)}
+                options={[
+                  { value: "personal", label: "Personal Account" },
+                  ...wallets.map((wallet) => ({
+                    value: wallet.id,
+                    label: `Wallet: ${wallet.name}`,
+                  })),
+                ]}
+              />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">

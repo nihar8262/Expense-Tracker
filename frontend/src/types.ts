@@ -11,6 +11,36 @@ export type Expense = {
 	platform?: string | null;
 };
 
+export type ExpensesQuery = {
+	category?: string;
+	platform?: string;
+	month?: string;
+	from_date?: string;
+	to_date?: string;
+	search?: string;
+	sort?: "date_desc" | "date_asc" | "none";
+	limit?: number;
+	offset?: number;
+};
+
+export type PaginatedExpenses = {
+	expenses: Expense[];
+	total_count: number;
+	limit: number;
+	offset: number;
+	has_more: boolean;
+};
+
+export type PersonalAggregation = {
+	total_amount: string;
+	expense_count: number;
+	monthly_totals: Array<{ month: string; total: string; count: number }>;
+	category_totals: Array<{ category: string; total: string; count: number; platforms: string[] }>;
+	budget_totals: Array<{ month: string; category: string | null; total: string }>;
+	top_platform: { platform: string; amount: number; formattedAmount: string } | null;
+	latest_expense: Expense | null;
+};
+
 export type ExpenseForm = {
 	amount: string;
 	category: string;

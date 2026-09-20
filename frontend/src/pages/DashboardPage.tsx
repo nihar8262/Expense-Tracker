@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { EmptyState, PageHero, SectionHeader, SurfaceCard, ModalFrame, cn } from "../components/ui";
 import { TrendChart } from "../components/TrendChart";
+import { FilterDropdown } from "../components/FilterDropdown";
+import { CategoryIcon } from "../components/CategoryIcon";
 import { useNavigate } from "react-router-dom";
 import { PLATFORMS } from "../lib/platforms";
 import { PlatformLogo } from "../components/PlatformPicker";
@@ -316,7 +318,7 @@ export function DashboardPage({
         }
       />
 
-      <SurfaceCard className="space-y-4 p-5 sm:p-6">
+      <SurfaceCard className="relative z-30 space-y-4 p-5 sm:p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
           {isDashboardLoading && !showFullLoadingScreen && (
@@ -355,57 +357,77 @@ export function DashboardPage({
           </div>
 
           {dashboardViewMode === "wallet" && wallets.length > 0 ? (
-            <label className="grid gap-1.5 text-sm font-medium text-secondary w-full sm:max-w-xs animate-in fade-in duration-200">
-              <span>Active Wallet</span>
-              <select value={dashboardWalletId ?? ""} onChange={(e) => onDashboardWalletIdChange(e.target.value)}>
-                {wallets.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-              </select>
-            </label>
+            <div className="w-full sm:max-w-xs animate-in fade-in duration-200">
+              <FilterDropdown
+                label="Active Wallet"
+                value={dashboardWalletId ?? ""}
+                placeholder="Select wallet"
+                onChange={(val) => onDashboardWalletIdChange(val)}
+                options={wallets.map((w) => ({
+                  value: w.id,
+                  label: w.name,
+                }))}
+              />
+            </div>
           ) : null}
         </div>
 
         {/* Stable 3-Column Filter Row: Category, Platform, Range */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* Category */}
-          <label className="grid gap-1.5 text-sm font-medium text-secondary">
-            <span>Category</span>
-            <select value={selectedCategory} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterDropdown
+            label="Category"
+            value={selectedCategory}
+            placeholder="All categories"
+            searchable
+            onChange={(val) => onSelectedCategoryChange(val)}
+            options={[
+              { value: "", label: "All categories" },
+              ...categories.map((cat) => {
+                const match = budgetCategoryOptions.find(
+                  (opt) => opt.label.toLowerCase() === cat.toLowerCase()
+                );
+                return {
+                  value: cat,
+                  label: cat,
+                  icon: match ? <CategoryIcon iconId={match.icon} /> : undefined,
+                };
+              }),
+            ]}
+          />
 
           {/* Platform */}
-          <label className="grid gap-1.5 text-sm font-medium text-secondary">
-            <span>Platform</span>
-            <select value={selectedPlatform} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
-              <option value="">All platforms</option>
-              <option value="none">No platform</option>
-              {PLATFORMS.filter(p => p.id !== "others").map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-              <option value="others">Others</option>
-            </select>
-          </label>
+          <FilterDropdown
+            label="Platform"
+            value={selectedPlatform}
+            placeholder="All platforms"
+            onChange={(val) => onSelectedPlatformChange(val)}
+            options={[
+              { value: "", label: "All platforms" },
+              { value: "none", label: "No platform" },
+              ...PLATFORMS.filter((p) => p.id !== "others").map((p) => ({
+                value: p.id,
+                label: p.name,
+                icon: <img src={p.logo} alt="" className="h-4 w-4 rounded-full object-cover shrink-0" />,
+              })),
+              { value: "others", label: "Others" },
+            ]}
+          />
 
           {/* Time range */}
-          <label className="grid gap-1.5 text-sm font-medium text-secondary">
-            <span>Range</span>
-            <select value={selectedTimeRange} onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}>
-              <option value="all">All time</option>
-              <option value="week">This week</option>
-              <option value="month">This month</option>
-              <option value="year">This year</option>
-            </select>
-          </label>
+          <FilterDropdown
+            label="Range"
+            value={selectedTimeRange}
+            placeholder="All time"
+            onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+            align="right"
+            options={[
+              { value: "all", label: "All time" },
+              { value: "week", label: "This week" },
+              { value: "month", label: "This month" },
+              { value: "year", label: "This year" },
+            ]}
+          />
         </div>
       </SurfaceCard>
 
@@ -665,29 +687,34 @@ export function DashboardPage({
       </section>
 
       <section ref={trendSectionRef}>
-        <SurfaceCard className="space-y-6 p-5 sm:p-6 lg:p-7">
+        <SurfaceCard className="relative z-20 space-y-6 p-5 sm:p-6 lg:p-7">
           <SectionHeader
             title="Spend trend"
             description="Track how your spending moves across the active category and time filters."
             actions={
-              <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:min-w-[420px]">
-                <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Graph by
-                  <select value={chartGranularity} onChange={(event) => onChartGranularityChange(event.target.value as ChartGranularity)}>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-                </label>
+              <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:min-w-[340px]">
+                <FilterDropdown
+                  label="Graph by"
+                  value={chartGranularity}
+                  onChange={(val) => onChartGranularityChange(val as ChartGranularity)}
+                  options={[
+                    { value: "weekly", label: "Weekly" },
+                    { value: "monthly", label: "Monthly" },
+                    { value: "quarterly", label: "Quarterly" },
+                    { value: "yearly", label: "Yearly" },
+                  ]}
+                />
 
-                <label className="grid gap-2 text-sm font-medium text-secondary">
-                  Chart type
-                  <select value={chartDisplayType} onChange={(event) => onChartDisplayTypeChange(event.target.value as ChartDisplayType)}>
-                    <option value="area">Area</option>
-                    <option value="bar">Bar</option>
-                  </select>
-                </label>
+                <FilterDropdown
+                  label="Chart type"
+                  value={chartDisplayType}
+                  onChange={(val) => onChartDisplayTypeChange(val as ChartDisplayType)}
+                  align="right"
+                  options={[
+                    { value: "area", label: "Area" },
+                    { value: "bar", label: "Bar" },
+                  ]}
+                />
               </div>
             }
           />

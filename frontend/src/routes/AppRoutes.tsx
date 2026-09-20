@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Component } from "react";
 import type { ReactNode } from "react";
 import { updateProfile, type User } from "firebase/auth";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, providerOptions } from "../hooks/useAuth";
 import { useBudgets } from "../hooks/useBudgets";
 import { useExpenses } from "../hooks/useExpenses";
@@ -32,6 +32,7 @@ import type {
   Expense,
   ExpenseForm,
   Notification,
+  PersonalAggregation,
   ReminderPreferences,
   SplitRule,
   TimeRangeFilter,
@@ -78,7 +79,7 @@ declare global {
   }
 }
 
-const EXPENSES_PAGE_SIZE = 25;
+const EXPENSES_PAGE_SIZE = 20;
 
 function createInitialFormState(baseDate = new Date()): ExpenseForm {
   return {
@@ -308,6 +309,7 @@ function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranu
 
 export function AppRoutes() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((message: unknown, type: "success" | "error" | "info" = "success") => {
@@ -352,7 +354,7 @@ export function AppRoutes() {
     };
   }, [addToast]);
   const { authLoading, currentUser, authMessage, setAuthMessage, setCurrentUser, signIn, signOutCurrentUser, signInWithEmail, signUpWithEmail, sendPasswordReset } = useAuth();
-  const { listExpenses, createExpense, updateExpense, deleteExpense } = useExpenses();
+  const { listExpenses, getPersonalAggregation, createExpense, updateExpense, deleteExpense } = useExpenses();
   const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
   const {
     listWallets,
@@ -404,6 +406,8 @@ export function AppRoutes() {
   const [form, setForm] = useState<ExpenseForm>(initialFormState);
   const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [totalPersonalExpenses, setTotalPersonalExpenses] = useState(0);
+  const [personalAggregation, setPersonalAggregation] = useState<PersonalAggregation | null>(null);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [loans, setLoans] = useState<WalletLoan[]>([]);
@@ -531,12 +535,21 @@ export function AppRoutes() {
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const [selectedWallet, _setSelectedWallet] = useState<WalletDetail | null>(null);
+  const [walletCache, setWalletCache] = useState<Record<string, WalletDetail>>({});
+  const [isLoadingMoreWalletExpenses, setIsLoadingMoreWalletExpenses] = useState(false);
+
+  const [hasLoadedBudgets, setHasLoadedBudgets] = useState(false);
+  const [hasLoadedWallets, setHasLoadedWallets] = useState(false);
+  const [hasLoadedAlerts, setHasLoadedAlerts] = useState(false);
 
   const setSelectedWallet = useCallback((val: WalletDetail | null | ((prev: WalletDetail | null) => WalletDetail | null)) => {
     _setSelectedWallet((prev) => {
       const next = typeof val === "function" ? val(prev) : val;
-      if (next && dashboardWalletId === next.wallet.id) {
-        setDashboardWallet(next);
+      if (next) {
+        setWalletCache((cache) => ({ ...cache, [next.wallet.id]: next }));
+        if (dashboardWalletId === next.wallet.id) {
+          setDashboardWallet(next);
+        }
       }
       return next;
     });
@@ -560,7 +573,12 @@ export function AppRoutes() {
     selectedWalletIdRef.current = selectedWalletId;
   }, [selectedWalletId]);
 
-  const categories = useMemo(() => [...new Set(expenses.map((expense) => expense.category))].sort((left, right) => left.localeCompare(right)), [expenses]);
+  const rawExpenseCategories = useMemo(() => {
+    if (personalAggregation && personalAggregation.category_totals.length > 0) {
+      return personalAggregation.category_totals.map((c) => c.category).sort((left, right) => left.localeCompare(right));
+    }
+    return [...new Set(expenses.map((expense) => expense.category))].sort((left, right) => left.localeCompare(right));
+  }, [personalAggregation, expenses]);
 
   const availableCategoryOptions = useMemo(() => {
     const byLabel = new Map<string, CategoryOption>();
@@ -578,7 +596,7 @@ export function AppRoutes() {
       byLabel.set(category.label.toLowerCase(), category);
     }
 
-    for (const category of categories) {
+    for (const category of rawExpenseCategories) {
       const key = category.toLowerCase();
 
       if (!byLabel.has(key)) {
@@ -597,7 +615,23 @@ export function AppRoutes() {
     }
 
     return orderedCategories;
-  }, [categories, customCategories]);
+  }, [rawExpenseCategories, customCategories]);
+
+  // Master categories list always includes standard categories (Entertainment, Sports, etc.) plus any custom categories
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const opt of availableCategoryOptions) {
+      if (opt.label && opt.id !== "others") {
+        set.add(opt.label);
+      }
+    }
+    for (const exp of expenses) {
+      if (exp.category) {
+        set.add(exp.category);
+      }
+    }
+    return [...set].sort((left, right) => left.localeCompare(right));
+  }, [availableCategoryOptions, expenses]);
 
   const budgetCategoryOptions = useMemo(() => availableCategoryOptions.filter((option) => option.id !== "others"), [availableCategoryOptions]);
 
@@ -628,15 +662,7 @@ export function AppRoutes() {
     [dashboardExpenses]
   );
 
-  const visibleExpenses = useMemo(() => {
-    return expenses
-      .filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange))
-      .filter((expense) => {
-        if (!selectedPlatform) return true;
-        if (selectedPlatform === "none") return !expense.platform;
-        return expense.platform === selectedPlatform;
-      });
-  }, [expenses, selectedTimeRange, selectedPlatform]);
+  const visibleExpenses = expenses;
 
   const dashboardVisibleExpenses = useMemo(() => {
     return dashboardExpenses
@@ -647,24 +673,118 @@ export function AppRoutes() {
         return expense.platform === selectedPlatform;
       });
   }, [dashboardExpenses, selectedTimeRange, selectedPlatform]);
-  const totalExpensePages = Math.max(1, Math.ceil(visibleExpenses.length / EXPENSES_PAGE_SIZE));
-  const paginatedExpenses = useMemo(() => {
-    const startIndex = (currentExpensesPage - 1) * EXPENSES_PAGE_SIZE;
-    return visibleExpenses.slice(startIndex, startIndex + EXPENSES_PAGE_SIZE);
-  }, [currentExpensesPage, visibleExpenses]);
-  const allFilteredExpenseIds = useMemo(() => visibleExpenses.map((expense) => expense.id), [visibleExpenses]);
-  const allVisibleExpenseIds = useMemo(() => paginatedExpenses.map((expense) => expense.id), [paginatedExpenses]);
+
+  const totalExpensePages = Math.max(1, Math.ceil(totalPersonalExpenses / EXPENSES_PAGE_SIZE));
+  const paginatedExpenses = expenses;
+  const allFilteredExpenseIds = useMemo(() => expenses.map((expense) => expense.id), [expenses]);
+  const allVisibleExpenseIds = useMemo(() => expenses.map((expense) => expense.id), [expenses]);
   const selectedVisibleExpenseIds = useMemo(() => allVisibleExpenseIds.filter((expenseId) => selectedExpenseIds.includes(expenseId)), [allVisibleExpenseIds, selectedExpenseIds]);
   const areAllVisibleExpensesSelected = allVisibleExpenseIds.length > 0 && selectedVisibleExpenseIds.length === allVisibleExpenseIds.length;
 
   // Derive sorted unique YYYY-MM month strings from all expenses for the month picker
   const expenseMonthOptions = useMemo(() => {
+    if (personalAggregation && personalAggregation.monthly_totals.length > 0) {
+      return personalAggregation.monthly_totals.map((m) => m.month).sort((a, b) => b.localeCompare(a));
+    }
     const months = [...new Set(expenses.map((e) => e.date.slice(0, 7)))].sort((a, b) => b.localeCompare(a));
     return months;
-  }, [expenses]);
+  }, [personalAggregation, expenses]);
 
   const spendTrend = useMemo(() => {
     if (dashboardViewMode === "personal") {
+      if (personalAggregation && personalAggregation.monthly_totals.length > 0 && !selectedCategory && !selectedPlatform) {
+        const today = new Date();
+        const currentYear = today.getFullYear().toString();
+
+        let filteredTotals = personalAggregation.monthly_totals;
+        if (selectedTimeRange === "year") {
+          filteredTotals = filteredTotals.filter(m => m.month.startsWith(currentYear));
+        }
+
+        if (chartGranularity === "monthly") {
+          return filteredTotals.map(m => {
+            const [year, monthNum] = m.month.split("-").map(Number);
+            const parsedDate = new Date(year, monthNum - 1, 1);
+            const label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(parsedDate);
+            const shortLabel = new Intl.DateTimeFormat("en-IN", { month: "short" }).format(parsedDate);
+            return {
+              key: m.month,
+              label,
+              shortLabel,
+              total: Number(m.total),
+              count: m.count,
+              order: parsedDate.getTime()
+            };
+          });
+        }
+
+        if (chartGranularity === "quarterly") {
+          const quarterBuckets = new Map<string, { total: number; count: number; order: number }>();
+          for (const m of filteredTotals) {
+            const [year, monthNum] = m.month.split("-").map(Number);
+            const quarter = Math.floor((monthNum - 1) / 3) + 1;
+            const key = `${year}-Q${quarter}`;
+            const existing = quarterBuckets.get(key);
+            if (existing) {
+              existing.total += Number(m.total);
+              existing.count += m.count;
+            } else {
+              quarterBuckets.set(key, {
+                total: Number(m.total),
+                count: m.count,
+                order: new Date(year, (quarter - 1) * 3, 1).getTime()
+              });
+            }
+          }
+
+          return [...quarterBuckets.entries()]
+            .sort((a, b) => a[1].order - b[1].order)
+            .map(([key, data]) => {
+              const [year, qStr] = key.split("-Q");
+              return {
+                key,
+                label: `Q${qStr} ${year}`,
+                shortLabel: `Q${qStr}`,
+                total: data.total,
+                count: data.count,
+                order: data.order
+              };
+            });
+        }
+
+        if (chartGranularity === "yearly") {
+          const yearBuckets = new Map<string, { total: number; count: number; order: number }>();
+          for (const m of filteredTotals) {
+            const [year] = m.month.split("-");
+            const key = year;
+            const existing = yearBuckets.get(key);
+            if (existing) {
+              existing.total += Number(m.total);
+              existing.count += m.count;
+            } else {
+              yearBuckets.set(key, {
+                total: Number(m.total),
+                count: m.count,
+                order: new Date(Number(year), 0, 1).getTime()
+              });
+            }
+          }
+
+          return [...yearBuckets.entries()]
+            .sort((a, b) => a[1].order - b[1].order)
+            .map(([key, data]) => {
+              return {
+                key,
+                label: key,
+                shortLabel: key,
+                total: data.total,
+                count: data.count,
+                order: data.order
+              };
+            });
+        }
+      }
+
       return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
     }
     if (!dashboardWallet) {
@@ -765,7 +885,7 @@ export function AppRoutes() {
     }
 
     return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
-  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, chartGranularity, selectedTimeRange]);
+  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, chartGranularity, selectedTimeRange, selectedCategory, selectedPlatform]);
 
   const trendDetailLookup = useMemo(() => {
     if (dashboardViewMode === "personal") {
@@ -807,6 +927,26 @@ export function AppRoutes() {
 
   const totalVal = useMemo(() => {
     if (dashboardViewMode === "personal") {
+      if (personalAggregation && !selectedCategory && !selectedPlatform) {
+        const today = new Date();
+        const currentYear = today.getFullYear().toString();
+        const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+        if (selectedTimeRange === "all") {
+          return Number(personalAggregation.total_amount).toFixed(2);
+        } else if (selectedTimeRange === "month") {
+          const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
+          return Number(monthData?.total ?? 0).toFixed(2);
+        } else if (selectedTimeRange === "year") {
+          const yearTotal = personalAggregation.monthly_totals
+            .filter(m => m.month.startsWith(currentYear))
+            .reduce((sum, m) => sum + Number(m.total), 0);
+          return yearTotal.toFixed(2);
+        } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
+          const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
+          return Number(monthData?.total ?? 0).toFixed(2);
+        }
+      }
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
     }
     if (!dashboardWallet || !dashboardWallet.walletAggregation) {
@@ -830,7 +970,7 @@ export function AppRoutes() {
     } else {
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
     }
-  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, selectedTimeRange]);
+  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, selectedTimeRange, selectedCategory, selectedPlatform]);
 
   const total = useMemo(() => {
     const currency = (dashboardViewMode === "wallet" && dashboardWallet) ? dashboardWallet.wallet.currency : undefined;
@@ -838,7 +978,36 @@ export function AppRoutes() {
   }, [totalVal, dashboardViewMode, dashboardWallet, formatCurrency]);
 
   const dashboardStats = useMemo<DashboardStats>(() => {
-    if (dashboardViewMode === "personal" || !dashboardWallet || !dashboardWallet.walletAggregation) {
+    if (dashboardViewMode === "personal") {
+      if (personalAggregation && selectedTimeRange === "all" && !selectedCategory && !selectedPlatform) {
+        const rawTotal = Number(personalAggregation.total_amount);
+        const expenseCount = personalAggregation.expense_count;
+        const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
+        const categoryBreakdown = personalAggregation.category_totals.map((c) => {
+          const amount = Number(c.total);
+          return {
+            category: c.category,
+            amount,
+            formattedAmount: formatCurrency(amount.toFixed(2)),
+            share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
+            platforms: c.platforms
+          };
+        });
+
+        return {
+          expenseCount,
+          average: formatCurrency(average.toFixed(2)),
+          topCategory: categoryBreakdown[0] ?? null,
+          latestExpense: personalAggregation.latest_expense,
+          categoryBreakdown,
+          topPlatform: personalAggregation.top_platform ? {
+            platform: personalAggregation.top_platform.platform,
+            amount: personalAggregation.top_platform.amount,
+            formattedAmount: formatCurrency(personalAggregation.top_platform.amount.toFixed(2))
+          } : null
+        };
+      }
+
       const expenseCount = dashboardVisibleExpenses.length;
       const rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
       const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
@@ -1172,16 +1341,69 @@ export function AppRoutes() {
 
   const unreadNotificationCount = useMemo(() => notifications.filter((notification) => notification.status === "unread").length, [notifications]);
 
-  async function loadExpenses(user: User, activeCategory = selectedCategory, activeSort = sortNewestFirst) {
+  async function loadExpenses(
+    user: User,
+    activeCategory = selectedCategory,
+    activeSort = sortNewestFirst,
+    page = currentExpensesPage,
+    platform = selectedPlatform,
+    timeRange = selectedTimeRange
+  ) {
     setIsLoading(true);
     setErrorMessage("");
 
     try {
-      setExpenses(await listExpenses(user, activeCategory, activeSort));
+      let from_date: string | undefined;
+      let to_date: string | undefined;
+      let month: string | undefined;
+
+      if (/^\d{4}-\d{2}$/.test(timeRange)) {
+        month = timeRange;
+      } else if (timeRange === "week") {
+        const today = new Date();
+        const startOfWeek = new Date(today);
+        const day = startOfWeek.getDay();
+        const offset = day === 0 ? 6 : day - 1;
+        startOfWeek.setDate(startOfWeek.getDate() - offset);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        from_date = getIsoDateString(startOfWeek);
+        to_date = getIsoDateString(endOfWeek);
+      } else if (timeRange === "month") {
+        const today = new Date();
+        month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+      } else if (timeRange === "year") {
+        const today = new Date();
+        from_date = `${today.getFullYear()}-01-01`;
+        to_date = `${today.getFullYear()}-12-31`;
+      }
+
+      const res = await listExpenses(user, {
+        category: activeCategory || undefined,
+        platform: platform || undefined,
+        month,
+        from_date,
+        to_date,
+        sort: activeSort ? "date_desc" : "date_asc",
+        limit: EXPENSES_PAGE_SIZE,
+        offset: (page - 1) * EXPENSES_PAGE_SIZE
+      });
+
+      setExpenses(res.expenses);
+      setTotalPersonalExpenses(res.total_count);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load expenses.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadPersonalAggregation(user: User) {
+    try {
+      const agg = await getPersonalAggregation(user);
+      setPersonalAggregation(agg);
+    } catch (error) {
+      console.warn("Could not load personal aggregation:", error);
     }
   }
 
@@ -1219,11 +1441,20 @@ export function AppRoutes() {
     }
   }
 
-  async function loadSelectedWallet(user: User, walletId: string) {
+  async function loadSelectedWallet(user: User, walletId: string, force = false) {
     const seq = ++walletRequestSeqRef.current;
+    const cached = walletCache[walletId];
+    if (cached && !force) {
+      _setSelectedWallet(cached);
+      setIsWalletLoading(false);
+      return;
+    }
+
     setIsWalletLoading(true);
     setWalletErrorMessage("");
-    setSelectedWallet(null);
+    if (!cached) {
+      _setSelectedWallet(null);
+    }
 
     try {
       const wallet = await getWalletDetail(walletId, user);
@@ -1313,6 +1544,8 @@ export function AppRoutes() {
 
     if (!currentUser) {
       setExpenses([]);
+      setTotalPersonalExpenses(0);
+      setPersonalAggregation(null);
       setBudgets([]);
       setWallets([]);
       setLoans([]);
@@ -1345,35 +1578,25 @@ export function AppRoutes() {
     if (!currentUser) {
       setIsLoading(false);
       setExpenses([]);
+      setTotalPersonalExpenses(0);
+      setPersonalAggregation(null);
       return;
     }
 
-    void loadExpenses(currentUser, selectedCategory, sortNewestFirst);
-  }, [authLoading, currentUser, selectedCategory, sortNewestFirst]);
+    void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+  }, [authLoading, currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
   useEffect(() => {
     if (!currentUser) return;
     const handleExpenseAdded = () => {
-      void loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+      void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+      void loadPersonalAggregation(currentUser);
     };
     window.addEventListener("expense-added", handleExpenseAdded);
     return () => window.removeEventListener("expense-added", handleExpenseAdded);
-  }, [currentUser, selectedCategory, sortNewestFirst]);
+  }, [currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
-  useEffect(() => {
-    if (authLoading) {
-      return;
-    }
-
-    if (!currentUser) {
-      setIsBudgetLoading(false);
-      setBudgets([]);
-      return;
-    }
-
-    void loadBudgets(currentUser);
-  }, [authLoading, currentUser]);
-
+  // Load Preferences & Notifications on login
   useEffect(() => {
     if (authLoading) {
       return;
@@ -1381,10 +1604,15 @@ export function AppRoutes() {
 
     if (!currentUser) {
       setIsWalletLoading(false);
+      setIsBudgetLoading(false);
       setWallets([]);
+      setBudgets([]);
       setLoans([]);
       setHasLoadedLoans(false);
       setIsLoansLoading(false);
+      setHasLoadedBudgets(false);
+      setHasLoadedWallets(false);
+      setHasLoadedAlerts(false);
       setSelectedWalletId(null);
       setSelectedWallet(null);
       setDashboardWallet(null);
@@ -1393,23 +1621,43 @@ export function AppRoutes() {
       setNotifications([]);
       setBillReminders([]);
       setReminderPreferences(null);
+      setWalletCache({});
       return;
     }
 
-    void loadWallets(currentUser);
-    // Loans data is deferred and loaded on-demand only when the Peer Loans tab is opened
-    void loadBillReminders(currentUser);
     void loadReminderPreferences(currentUser);
     void loadNotifications(currentUser);
 
-    // Defer heavy background checks (budget threshold scans, overdue alerts) by 12s
-    // to prioritize instant rendering of critical financial cards and wallets
+    // Defer heavy background checks by 12s to prioritize instant rendering of critical data
     const checksTimer = setTimeout(() => {
       void runChecksAndReloadNotifications(currentUser);
     }, 12000);
 
     return () => clearTimeout(checksTimer);
   }, [authLoading, currentUser]);
+
+  // Route-based on-demand lazy loading: only fetch resources when navigating to their respective routes
+  useEffect(() => {
+    if (!currentUser || authLoading) return;
+
+    // Load budgets when visiting dashboard
+    if ((location.pathname === "/dashboard" || dashboardViewMode === "wallet") && !hasLoadedBudgets) {
+      setHasLoadedBudgets(true);
+      void loadBudgets(currentUser);
+    }
+
+    // Load wallets metadata when visiting wallets page or dashboard shared-wallet mode
+    if ((location.pathname === "/wallets" || (location.pathname === "/dashboard" && dashboardViewMode === "wallet")) && !hasLoadedWallets) {
+      setHasLoadedWallets(true);
+      void loadWallets(currentUser);
+    }
+
+    // Load bill reminders when visiting alerts
+    if (location.pathname === "/alerts" && !hasLoadedAlerts) {
+      setHasLoadedAlerts(true);
+      void loadBillReminders(currentUser);
+    }
+  }, [currentUser, authLoading, location.pathname, dashboardViewMode, hasLoadedBudgets, hasLoadedWallets, hasLoadedAlerts]);
 
   useEffect(() => {
     setWalletExpenseOffset(0);
@@ -1626,7 +1874,8 @@ export function AppRoutes() {
 
       if (deletedExpenseIds.length > 0) {
         setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
-        await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+        await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+        void loadPersonalAggregation(currentUser);
       }
 
       return {
@@ -2356,7 +2605,7 @@ export function AppRoutes() {
 
     const nextOffset = walletExpenseOffset + 50;
     try {
-      setIsWalletLoading(true);
+      setIsLoadingMoreWalletExpenses(true);
       const moreData = await getWalletDetail(selectedWalletId, currentUser, nextOffset);
       setSelectedWallet((prev) => prev ? {
         ...prev,
@@ -2368,7 +2617,7 @@ export function AppRoutes() {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load more expenses.");
       throw error;
     } finally {
-      setIsWalletLoading(false);
+      setIsLoadingMoreWalletExpenses(false);
     }
   }
 
@@ -2708,7 +2957,8 @@ export function AppRoutes() {
         setEditingExpenseId(null);
         setForm(initialFormState);
         setStatusMessage("Expense updated.");
-        await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+        await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+        void loadPersonalAggregation(currentUser);
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Failed to update expense.");
       } finally {
@@ -2727,7 +2977,8 @@ export function AppRoutes() {
       writePendingSubmission(null);
       setForm(initialFormState);
       setStatusMessage("Expense saved.");
-      await loadExpenses(currentUser, selectedCategory, sortNewestFirst);
+      await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+      void loadPersonalAggregation(currentUser);
       void runChecksAndReloadNotifications(currentUser);
     } catch (error) {
       if (error instanceof ApiError && !error.retryable) {
@@ -2943,6 +3194,7 @@ export function AppRoutes() {
     setSelectedTimeRange("all");
     setSelectedPlatform("");
     setSortNewestFirst(true);
+    setCurrentExpensesPage(1);
   }
 
   function renderSignedInPage(page: "dashboard" | "expenses" | "wallets" | "alerts" | "profile") {
@@ -3175,6 +3427,7 @@ export function AppRoutes() {
             onUpdateStandaloneLoanRepayment={handleUpdateStandaloneLoanRepayment}
             onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
             onLoadMoreExpenses={handleLoadMoreWalletExpenses}
+            isLoadingMoreExpenses={isLoadingMoreWalletExpenses}
           />
         ) : page === "alerts" ? (
           <AlertsPage
@@ -3231,15 +3484,67 @@ export function AppRoutes() {
       <Routes>
         {currentUser ? (
           <>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/signin" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/signup" element={<Navigate to="/dashboard" replace />} />
+            <Route
+              path="/"
+              element={
+                <Navigate
+                  to={
+                    typeof window !== "undefined" &&
+                    localStorage.getItem("default_landing_page") === "dashboard"
+                      ? "/dashboard"
+                      : "/expenses"
+                  }
+                  replace
+                />
+              }
+            />
+            <Route
+              path="/signin"
+              element={
+                <Navigate
+                  to={
+                    typeof window !== "undefined" &&
+                    localStorage.getItem("default_landing_page") === "dashboard"
+                      ? "/dashboard"
+                      : "/expenses"
+                  }
+                  replace
+                />
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <Navigate
+                  to={
+                    typeof window !== "undefined" &&
+                    localStorage.getItem("default_landing_page") === "dashboard"
+                      ? "/dashboard"
+                      : "/expenses"
+                  }
+                  replace
+                />
+              }
+            />
             <Route path="/dashboard" element={renderSignedInPage("dashboard")} />
             <Route path="/expenses" element={renderSignedInPage("expenses")} />
             <Route path="/wallets" element={renderSignedInPage("wallets")} />
             <Route path="/alerts" element={renderSignedInPage("alerts")} />
             <Route path="/profile" element={renderSignedInPage("profile")} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route
+              path="*"
+              element={
+                <Navigate
+                  to={
+                    typeof window !== "undefined" &&
+                    localStorage.getItem("default_landing_page") === "dashboard"
+                      ? "/dashboard"
+                      : "/expenses"
+                  }
+                  replace
+                />
+              }
+            />
           </>
         ) : (
           <>

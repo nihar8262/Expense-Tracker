@@ -4,8 +4,10 @@ import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
 import { PLATFORMS } from "../lib/platforms";
+import { FilterDropdown } from "../components/FilterDropdown";
 import {
   EmptyState,
+  ItemActionButtons,
   ModalFrame,
   PageHero,
   SectionHeader,
@@ -121,6 +123,7 @@ type WalletsPageProps = {
   currentUserEmail?: string | null;
   budgetCategoryOptions: CategoryOption[];
   isLoading: boolean;
+  isLoadingMoreExpenses?: boolean;
   isSubmitting: boolean;
   submittingAction: string;
   statusMessage: string;
@@ -412,6 +415,7 @@ export function WalletsPage({
   currentUserEmail,
   budgetCategoryOptions,
   isLoading,
+  isLoadingMoreExpenses = false,
   isSubmitting,
   submittingAction,
   statusMessage,
@@ -1069,7 +1073,7 @@ export function WalletsPage({
   );
 
   const isSwitchingWallet = Boolean(
-    isLoading ||
+    (isLoading && (!selectedWallet || selectedWallet.wallet.id !== selectedWalletId)) ||
     (selectedWalletId && (!selectedWallet || selectedWallet.wallet.id !== selectedWalletId))
   );
 
@@ -1183,11 +1187,19 @@ export function WalletsPage({
   }, [selectedWallet]);
 
   const expenseCategoryOptions = useMemo(() => {
-    const cats = new Set(
-      (selectedWallet?.expenses ?? []).map((e) => e.category),
-    );
-    return [...cats].sort();
-  }, [selectedWallet]);
+    const cats = new Set<string>();
+    for (const opt of budgetCategoryOptions) {
+      if (opt.label && opt.id !== "others") {
+        cats.add(opt.label);
+      }
+    }
+    for (const e of selectedWallet?.expenses ?? []) {
+      if (e.category) {
+        cats.add(e.category);
+      }
+    }
+    return [...cats].sort((a, b) => a.localeCompare(b));
+  }, [budgetCategoryOptions, selectedWallet]);
 
   const settlementMonthOptions = useMemo(() => {
     const months = new Set(
@@ -2235,35 +2247,34 @@ export function WalletsPage({
             </div>
           </details>
         )}
-        <label className="grid gap-2 text-sm font-medium text-secondary">
-          Paid by
-          <select
-            value={expensePayerId}
-            onChange={(event) => setExpensePayerId(event.target.value)}
-          >
-            {selectedWallet!.members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterDropdown
+          label="Paid by"
+          variant="form"
+          value={expensePayerId}
+          onChange={(val) => setExpensePayerId(val)}
+          options={selectedWallet!.members.map((member) => ({
+            value: member.id,
+            label: member.display_name,
+          }))}
+        />
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Amount</span>
             <div className="relative">
               <input
+                type="number"
                 className="pl-8"
+                min="0.01"
+                step="0.01"
+                required
                 value={expenseAmount}
                 onChange={(event) => setExpenseAmount(event.target.value)}
-                placeholder="0.00"
-                required
                 aria-invalid={
                   showExpenseValidation && Boolean(expenseErrors.amount)
                 }
               />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 z-10">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none text-zinc-950 dark:text-zinc-100 z-10">
                 {currencySymbol}
               </span>
             </div>
@@ -2273,13 +2284,14 @@ export function WalletsPage({
               </span>
             ) : null}
           </label>
+
           <label className="grid gap-2 text-sm font-medium text-secondary">
             <span className="required-mark">Date</span>
             <input
               type="date"
+              required
               value={expenseDate}
               onChange={(event) => setExpenseDate(event.target.value)}
-              required
               aria-invalid={
                 showExpenseValidation && Boolean(expenseErrors.date)
               }
@@ -2292,60 +2304,40 @@ export function WalletsPage({
           </label>
         </div>
 
-        <div className="grid gap-2 text-sm font-medium text-secondary">
-          <span className="required-mark">Category</span>
-          <div className="flex items-center gap-3">
-            {expenseCategory ? (
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
-                <CategoryIcon
-                  iconId={
-                    walletBudgetCategoryChoices.find(
-                      (option) => option.label === expenseCategory,
-                    )?.icon ?? "other"
-                  }
-                />
-              </span>
-            ) : null}
-            <select
-              value={expenseCategory}
-              onChange={(event) => setExpenseCategory(event.target.value)}
-              required
-              aria-invalid={
-                showExpenseValidation && Boolean(expenseErrors.category)
-              }
-            >
-              <option value="">Select a category</option>
-              {walletBudgetCategoryChoices.map((option) => (
-                <option key={option.id} value={option.label}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {showExpenseValidation && expenseErrors.category ? (
-            <span className="text-sm text-[color:var(--danger-text)]">
-              {expenseErrors.category}
-            </span>
-          ) : null}
+        <div className="grid gap-1">
+          <FilterDropdown
+            label="Category"
+            variant="form"
+            required
+            searchable
+            value={expenseCategory}
+            placeholder="Select a category"
+            error={showExpenseValidation && expenseErrors.category ? expenseErrors.category : undefined}
+            onChange={(val) => setExpenseCategory(val)}
+            options={walletBudgetCategoryChoices.map((option) => ({
+              value: option.label,
+              label: option.label,
+              icon: <CategoryIcon iconId={option.icon} />,
+            }))}
+          />
         </div>
 
         <div className="grid gap-3">
           <span className="text-sm font-medium text-secondary">Platform / Source</span>
-          <div className="flex items-center gap-3">
-            <PlatformPicker
-              value={expensePlatform}
-              onChange={setExpensePlatform}
-            />
-          </div>
+          <PlatformPicker
+            value={expensePlatform}
+            onChange={setExpensePlatform}
+          />
         </div>
 
         <label className="grid gap-2 text-sm font-medium text-secondary">
           <span className="required-mark">Description</span>
           <input
+            type="text"
+            required
+            placeholder="Hotel, groceries, tickets"
             value={expenseDescription}
             onChange={(event) => setExpenseDescription(event.target.value)}
-            placeholder="Hotel, groceries, tickets"
-            required
             aria-invalid={
               showExpenseValidation && Boolean(expenseErrors.description)
             }
@@ -2357,19 +2349,17 @@ export function WalletsPage({
           ) : null}
         </label>
 
-        <label className="grid gap-2 text-sm font-medium text-secondary">
-          Split rule
-          <select
-            value={expenseSplitRule}
-            onChange={(event) =>
-              setExpenseSplitRule(event.target.value as SplitRule)
-            }
-          >
-            <option value="equal">Equal</option>
-            <option value="fixed">Fixed amounts</option>
-            <option value="percentage">Percentages</option>
-          </select>
-        </label>
+        <FilterDropdown
+          label="Split rule"
+          variant="form"
+          value={expenseSplitRule}
+          onChange={(val) => setExpenseSplitRule(val as SplitRule)}
+          options={[
+            { value: "equal", label: "Equal" },
+            { value: "fixed", label: "Fixed amounts" },
+            { value: "percentage", label: "Percentages" },
+          ]}
+        />
 
         <div className="space-y-3 rounded-3xl border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
           <p className="section-eyebrow">Split members</p>
@@ -2492,33 +2482,27 @@ export function WalletsPage({
         noValidate
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            From member
-            <select
-              value={settlementFromMemberId}
-              onChange={(event) => setSettlementFromMemberId(event.target.value)}
-            >
-              {selectedWallet!.members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterDropdown
+            label="From member"
+            variant="form"
+            value={settlementFromMemberId}
+            onChange={(val) => setSettlementFromMemberId(val)}
+            options={selectedWallet!.members.map((member) => ({
+              value: member.id,
+              label: member.display_name,
+            }))}
+          />
 
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            To member
-            <select
-              value={settlementToMemberId}
-              onChange={(event) => setSettlementToMemberId(event.target.value)}
-            >
-              {selectedWallet!.members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterDropdown
+            label="To member"
+            variant="form"
+            value={settlementToMemberId}
+            onChange={(val) => setSettlementToMemberId(val)}
+            options={selectedWallet!.members.map((member) => ({
+              value: member.id,
+              label: member.display_name,
+            }))}
+          />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -2769,52 +2753,57 @@ export function WalletsPage({
             <SurfaceCard className="relative overflow-hidden border-primary/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.9))] p-5 sm:p-6 shadow-[0_16px_40px_rgba(30,122,83,0.08)] backdrop-blur-xl">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                 {/* Left side: Avatar + Details */}
-                <div className="flex flex-col sm:flex-row items-start gap-4 min-w-0 flex-1">
-                  {displayWallet.picture_url ? (
-                    <img
-                      src={displayWallet.picture_url}
-                      alt={displayWallet.name}
-                      className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover ring-2 ring-primary/20 shadow-md shrink-0"
-                    />
-                  ) : (
-                    <div className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-2xl sm:text-3xl font-bold font-display text-white shadow-md">
-                      {displayWallet.name.slice(0, 2).toUpperCase()}
-                    </div>
-                  )}
+                <div className="flex flex-col gap-3.5 sm:gap-4 min-w-0 flex-1">
+                  {/* Group Avatar and Name & Description aligned side-by-side */}
+                  <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
+                    {displayWallet.picture_url ? (
+                      <img
+                        src={displayWallet.picture_url}
+                        alt={displayWallet.name}
+                        className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover ring-2 ring-primary/20 shadow-md shrink-0"
+                      />
+                    ) : (
+                      <div className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-2xl sm:text-3xl font-bold font-display text-white shadow-md">
+                        {displayWallet.name.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {isSwitchingWallet ? (
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold font-display text-ink tracking-tight truncate">
+                        {displayWallet.name}
+                      </h2>
+
+                      <p className="text-sm text-secondary line-clamp-2 mt-0.5 sm:mt-1">
+                        {displayWallet.description || "No description provided for this group yet."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Badges row */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isSwitchingWallet ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                        <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                        Loading wallet...
+                      </span>
+                    ) : (
+                      <>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
                           <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                          Loading wallet...
+                          Active Shared Wallet
                         </span>
-                      ) : (
-                        <>
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                            Active Shared Wallet
-                          </span>
-                          <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-xs font-medium text-secondary">
-                            {isWalletOwner ? "👑 Group Owner" : "Member"}
-                          </span>
-                        </>
-                      )}
-                      <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-ink">
-                        {displayWallet.currency || "INR"}
-                      </span>
-                      <span className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-ink capitalize">
-                        {displayWallet.default_split_rule} split by default
-                      </span>
-                    </div>
-
-                    <h2 className="text-2xl sm:text-3xl font-bold font-display text-ink tracking-tight mt-1.5 truncate">
-                      {displayWallet.name}
-                    </h2>
-
-                    <p className="text-sm text-secondary line-clamp-2 mt-1">
-                      {displayWallet.description || "No description provided for this group yet."}
-                    </p>
+                        <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-xs font-medium text-secondary">
+                          {isWalletOwner ? "👑 Group Owner" : "Member"}
+                        </span>
+                      </>
+                    )}
+                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-ink">
+                      {displayWallet.currency || "INR"}
+                    </span>
+                    <span className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-ink capitalize">
+                      {displayWallet.default_split_rule} split by default
+                    </span>
+                  </div>
 
                     {/* Member Initials Chips Row */}
                     {isSwitchingWallet ? (
@@ -2859,7 +2848,6 @@ export function WalletsPage({
                       </div>
                     ) : null}
                   </div>
-                </div>
 
                 {/* Right side: Actions */}
                 <div className="flex flex-wrap items-center gap-2 shrink-0 self-start">
@@ -3393,7 +3381,7 @@ export function WalletsPage({
                                 <button
                                   type="button"
                                   className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
-                                  disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                                  disabled={isLoading || isLoadingMoreExpenses || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
                                   onClick={async () => {
                                     if (isLoadMoreMode) {
                                       if (onLoadMoreExpenses) {
@@ -3409,7 +3397,7 @@ export function WalletsPage({
                                   title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
                                 >
                                   {isLoadMoreMode ? (
-                                    isLoading ? (
+                                    (isLoading || isLoadingMoreExpenses) ? (
                                       <>
                                         <span className="hidden sm:inline">Loading...</span>
                                         <span className="inline sm:hidden">...</span>
@@ -3425,7 +3413,7 @@ export function WalletsPage({
                                       <span className="hidden sm:inline">Next</span>
                                     </>
                                   )}
-                                  {!isLoading && (
+                                  {!(isLoading || isLoadingMoreExpenses) && (
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
                                       {isLoadMoreMode ? (
                                         <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
@@ -3485,39 +3473,24 @@ export function WalletsPage({
                                 </p>
                               </div>
                             </div>
-                            <div className="text-left lg:text-right shrink-0">
-                              <strong className="block text-xl font-bold tracking-tight text-ink">
-                                {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
-                              </strong>
-                              <span className="text-xs font-medium text-secondary">
-                                {expense.split_rule} split
-                              </span>
+                            <div className="flex items-center gap-3.5 shrink-0 justify-between lg:justify-end">
+                              <div className="text-left lg:text-right">
+                                <strong className="block text-lg sm:text-xl font-bold tracking-tight text-ink">
+                                  {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
+                                </strong>
+                                <span className="text-xs font-medium text-secondary">
+                                  {expense.split_rule} split
+                                </span>
+                              </div>
+                              <div className="pl-2 border-l border-[color:var(--border)]/60">
+                                <ItemActionButtons
+                                  description={expense.description}
+                                  isDeleting={deletingExpenseIds.includes(expense.id)}
+                                  onEdit={() => handleStartExpenseEdit(expense.id)}
+                                  onDelete={() => void handleDeleteExpenseClick(expense.id)}
+                                />
+                              </div>
                             </div>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100 transition-opacity duration-150">
-                            <button
-                              type="button"
-                              className="ui-button-ghost ui-button-sm font-semibold"
-                              onClick={() =>
-                                handleStartExpenseEdit(expense.id)
-                              }
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-danger ui-button-sm font-semibold"
-                              disabled={deletingExpenseIds.includes(
-                                expense.id,
-                              )}
-                              onClick={() =>
-                                void handleDeleteExpenseClick(expense.id)
-                              }
-                            >
-                              {deletingExpenseIds.includes(expense.id)
-                                ? "Deleting..."
-                                : "Delete"}
-                            </button>
                           </div>
                         </article>
                       ))}
@@ -3561,10 +3534,13 @@ export function WalletsPage({
                             <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
                           </div>
 
-                          <div className="space-y-2">
-                            <strong className="block text-lg text-ink">{expense.description}</strong>
-                            <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                          <div className="space-y-1">
+                            <strong className="block text-base font-semibold text-ink">{expense.description}</strong>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2.5">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
                               <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                               <span>•</span>
                               <span>{expense.date}</span>
@@ -3573,24 +3549,12 @@ export function WalletsPage({
                                 {expense.split_rule} split
                               </span>
                             </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="ui-button-secondary"
-                              onClick={() => handleStartExpenseEdit(expense.id)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-danger"
-                              disabled={deletingExpenseIds.includes(expense.id)}
-                              onClick={() => void handleDeleteExpenseClick(expense.id)}
-                            >
-                              {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                            </button>
+                            <ItemActionButtons
+                              description={expense.description}
+                              isDeleting={deletingExpenseIds.includes(expense.id)}
+                              onEdit={() => handleStartExpenseEdit(expense.id)}
+                              onDelete={() => void handleDeleteExpenseClick(expense.id)}
+                            />
                           </div>
                         </article>
                       ))}
@@ -3626,7 +3590,7 @@ export function WalletsPage({
                             <button
                               type="button"
                               className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[80px]"
-                              disabled={isLoading || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
+                              disabled={isLoading || isLoadingMoreExpenses || (!isLoadMoreMode && currentWalletExpensesPage === totalWalletExpensePages)}
                               onClick={async () => {
                                 if (isLoadMoreMode) {
                                   if (onLoadMoreExpenses) {
@@ -3644,7 +3608,7 @@ export function WalletsPage({
                               title={isLoadMoreMode ? "Load More Expenses" : "Next Page"}
                             >
                               {isLoadMoreMode ? (
-                                isLoading ? (
+                                (isLoading || isLoadingMoreExpenses) ? (
                                   <>
                                     <span className="hidden sm:inline">Loading...</span>
                                     <span className="inline sm:hidden">...</span>
@@ -3660,7 +3624,7 @@ export function WalletsPage({
                                   <span className="hidden sm:inline">Next</span>
                                 </>
                               )}
-                              {!isLoading && (
+                              {!(isLoading || isLoadingMoreExpenses) && (
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 sm:ml-1">
                                   {isLoadMoreMode ? (
                                     <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
@@ -3907,14 +3871,14 @@ export function WalletsPage({
                             type="button"
                             className="ui-button-secondary ui-button-sm flex items-center gap-1.5"
                             onClick={onLoadMoreExpenses}
-                            disabled={isLoading}
+                            disabled={isLoading || isLoadingMoreExpenses}
                             title="Load 50 more older expenses"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
                               <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
                             </svg>
-                            <span className="hidden sm:inline">{isLoading ? "Loading..." : "Load More"}</span>
-                            <span className="inline sm:hidden">{isLoading ? "..." : "+50"}</span>
+                            <span className="hidden sm:inline">{isLoading || isLoadingMoreExpenses ? "Loading..." : "Load More"}</span>
+                            <span className="inline sm:hidden">{isLoading || isLoadingMoreExpenses ? "..." : "+50"}</span>
                           </button>
                         ) : null}
                         <button
@@ -3926,75 +3890,69 @@ export function WalletsPage({
                         </button>
                       </div>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Month
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={expenseFilterMonth}
-                          onChange={(e) =>
-                            setExpenseFilterMonth(e.target.value)
-                          }
-                        >
-                          <option value="all">All months</option>
-                          {expenseMonthOptions.map((m) => (
-                            <option key={m} value={m}>
-                              {formatBudgetMonth(m)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Category
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={expenseFilterCategory}
-                          onChange={(e) =>
-                            setExpenseFilterCategory(e.target.value)
-                          }
-                        >
-                          <option value="all">All categories</option>
-                          {expenseCategoryOptions.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Amount
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={expenseFilterAmount}
-                          onChange={(e) =>
-                            setExpenseFilterAmount(e.target.value)
-                          }
-                        >
-                          <option value="all">Any amount</option>
-                          <option value="lt100">Under 100</option>
-                          <option value="100to500">100 – 500</option>
-                          <option value="gt500">Over 500</option>
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Platform / Source
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={expenseFilterPlatform}
-                          onChange={(e) =>
-                            setExpenseFilterPlatform(e.target.value)
-                          }
-                        >
-                          <option value="all">All platforms</option>
-                          <option value="none">No platform</option>
-                          {PLATFORMS.filter(p => p.id !== "others").map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                          <option value="others">Others</option>
-                        </select>
-                      </label>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      <FilterDropdown
+                        label="Month"
+                        value={expenseFilterMonth}
+                        placeholder="All months"
+                        onChange={setExpenseFilterMonth}
+                        searchable={expenseMonthOptions.length > 6}
+                        options={[
+                          { value: "all", label: "All months" },
+                          ...expenseMonthOptions.map((m) => ({
+                            value: m,
+                            label: formatBudgetMonth(m),
+                          })),
+                        ]}
+                      />
+                      <FilterDropdown
+                        label="Category"
+                        value={expenseFilterCategory}
+                        placeholder="All categories"
+                        onChange={setExpenseFilterCategory}
+                        searchable
+                        options={[
+                          { value: "all", label: "All categories" },
+                          ...expenseCategoryOptions.map((c) => {
+                            const match = budgetCategoryOptions.find(
+                              (opt) => opt.label.toLowerCase() === c.toLowerCase()
+                            );
+                            return {
+                              value: c,
+                              label: c,
+                              icon: match ? <CategoryIcon iconId={match.icon} /> : undefined,
+                            };
+                          }),
+                        ]}
+                      />
+                      <FilterDropdown
+                        label="Amount"
+                        value={expenseFilterAmount}
+                        placeholder="Any amount"
+                        onChange={setExpenseFilterAmount}
+                        options={[
+                          { value: "all", label: "Any amount" },
+                          { value: "lt100", label: "Under 100" },
+                          { value: "100to500", label: "100 – 500" },
+                          { value: "gt500", label: "Over 500" },
+                        ]}
+                      />
+                      <FilterDropdown
+                        label="Platform / Source"
+                        value={expenseFilterPlatform}
+                        placeholder="All platforms"
+                        onChange={setExpenseFilterPlatform}
+                        options={[
+                          { value: "all", label: "All platforms" },
+                          { value: "none", label: "No platform" },
+                          ...PLATFORMS.filter((p) => p.id !== "others").map((p) => ({
+                            value: p.id,
+                            label: p.name,
+                            icon: <img src={p.logo} alt="" className="h-4 w-4 rounded-full object-cover shrink-0" />,
+                          })),
+                          { value: "others", label: "Others" },
+                        ]}
+                      />
                     </div>
                   </div>
                   <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
@@ -4072,40 +4030,27 @@ export function WalletsPage({
                                     </p>
                                   </div>
                                 </div>
-                                <div className="shrink-0 text-left sm:text-right">
-                                  <strong className="block text-xl font-bold tracking-tight text-ink">
-                                    {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
-                                  </strong>
-                                  <span className="text-xs font-medium text-secondary">
-                                    {expense.split_rule} split
-                                  </span>
+                                <div className="flex items-center gap-3.5 shrink-0 justify-between sm:justify-end">
+                                  <div className="text-left sm:text-right">
+                                    <strong className="block text-xl font-bold tracking-tight text-ink">
+                                      {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
+                                    </strong>
+                                    <span className="text-xs font-medium text-secondary">
+                                      {expense.split_rule} split
+                                    </span>
+                                  </div>
+                                  <div className="pl-2 border-l border-[color:var(--border)]/60">
+                                    <ItemActionButtons
+                                      description={expense.description}
+                                      isDeleting={deletingExpenseIds.includes(expense.id)}
+                                      onEdit={() => {
+                                        handleStartExpenseEdit(expense.id);
+                                        setIsExpenseModalOpen(false);
+                                      }}
+                                      onDelete={() => void handleDeleteExpenseClick(expense.id)}
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-3">
-                                <button
-                                  type="button"
-                                  className="ui-button-ghost ui-button-sm"
-                                  onClick={() => {
-                                    handleStartExpenseEdit(expense.id);
-                                    setIsExpenseModalOpen(false);
-                                  }}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ui-button-danger ui-button-sm"
-                                  disabled={deletingExpenseIds.includes(
-                                    expense.id,
-                                  )}
-                                  onClick={() =>
-                                    void handleDeleteExpenseClick(expense.id)
-                                  }
-                                >
-                                  {deletingExpenseIds.includes(expense.id)
-                                    ? "Deleting..."
-                                    : "Delete"}
-                                </button>
                               </div>
                             </article>
                           ))}
@@ -4149,10 +4094,13 @@ export function WalletsPage({
                                 <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
                               </div>
 
-                              <div className="space-y-2">
-                                <strong className="block text-lg text-ink">{expense.description}</strong>
-                                <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                              <div className="space-y-1">
+                                <strong className="block text-base font-semibold text-ink">{expense.description}</strong>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2.5">
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
                                   <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                                   <span>•</span>
                                   <span>{expense.date}</span>
@@ -4161,27 +4109,15 @@ export function WalletsPage({
                                     {expense.split_rule} split
                                   </span>
                                 </div>
-                              </div>
-
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className="ui-button-secondary"
-                                  onClick={() => {
+                                <ItemActionButtons
+                                  description={expense.description}
+                                  isDeleting={deletingExpenseIds.includes(expense.id)}
+                                  onEdit={() => {
                                     handleStartExpenseEdit(expense.id);
                                     setIsExpenseModalOpen(false);
                                   }}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ui-button-danger"
-                                  disabled={deletingExpenseIds.includes(expense.id)}
-                                  onClick={() => void handleDeleteExpenseClick(expense.id)}
-                                >
-                                  {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                                </button>
+                                  onDelete={() => void handleDeleteExpenseClick(expense.id)}
+                                />
                               </div>
                             </article>
                           ))}
@@ -4216,39 +4152,33 @@ export function WalletsPage({
                         Close
                       </button>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Month
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={settlementFilterMonth}
-                          onChange={(e) =>
-                            setSettlementFilterMonth(e.target.value)
-                          }
-                        >
-                          <option value="all">All months</option>
-                          {settlementMonthOptions.map((m) => (
-                            <option key={m} value={m}>
-                              {formatBudgetMonth(m)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-2xs uppercase tracking-wider font-semibold text-secondary">
-                        Amount
-                        <select
-                          className="h-8 py-1 pr-7 pl-2 text-xs rounded-xl bg-[position:calc(100%-12px)_50%,calc(100%-8px)_50%] bg-zinc-50 border border-[color:var(--border)]"
-                          value={settlementFilterAmount}
-                          onChange={(e) =>
-                            setSettlementFilterAmount(e.target.value)
-                          }
-                        >
-                          <option value="all">Any amount</option>
-                          <option value="lt100">Under 100</option>
-                          <option value="100to500">100 – 500</option>
-                          <option value="gt500">Over 500</option>
-                        </select>
-                      </label>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <FilterDropdown
+                        label="Month"
+                        value={settlementFilterMonth}
+                        placeholder="All months"
+                        onChange={setSettlementFilterMonth}
+                        searchable={settlementMonthOptions.length > 6}
+                        options={[
+                          { value: "all", label: "All months" },
+                          ...settlementMonthOptions.map((m) => ({
+                            value: m,
+                            label: formatBudgetMonth(m),
+                          })),
+                        ]}
+                      />
+                      <FilterDropdown
+                        label="Amount"
+                        value={settlementFilterAmount}
+                        placeholder="Any amount"
+                        onChange={setSettlementFilterAmount}
+                        options={[
+                          { value: "all", label: "Any amount" },
+                          { value: "lt100", label: "Under 100" },
+                          { value: "100to500", label: "100 – 500" },
+                          { value: "gt500", label: "Over 500" },
+                        ]}
+                      />
                     </div>
                   </div>
                   <div className="overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
@@ -5368,39 +5298,38 @@ export function WalletsPage({
               />
             </label>
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Default split rule
-              <select
-                value={walletSplitRule}
-                onChange={(event) =>
-                  setWalletSplitRule(event.target.value as SplitRule)
-                }
-              >
-                <option value="equal">Equal</option>
-                <option value="fixed">Fixed amounts</option>
-                <option value="percentage">Percentages</option>
-              </select>
-            </label>
+            <FilterDropdown
+              label="Default split rule"
+              variant="form"
+              value={walletSplitRule}
+              onChange={(val) => setWalletSplitRule(val as SplitRule)}
+              options={[
+                { value: "equal", label: "Equal" },
+                { value: "fixed", label: "Fixed amounts" },
+                { value: "percentage", label: "Percentages" },
+              ]}
+            />
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Currency
-              <select
-                value={walletCurrency}
-                onChange={(event) => setWalletCurrency(event.target.value)}
-              >
-                <option value="INR">INR (₹)</option>
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="JPY">JPY (¥)</option>
-                <option value="CAD">CAD (C$)</option>
-                <option value="AUD">AUD (A$)</option>
-                <option value="CHF">CHF (Fr)</option>
-                <option value="CNY">CNY (元)</option>
-                <option value="SGD">SGD (S$)</option>
-                <option value="NZD">NZD (NZ$)</option>
-              </select>
-            </label>
+            <FilterDropdown
+              label="Currency"
+              variant="form"
+              value={walletCurrency}
+              searchable
+              onChange={(val) => setWalletCurrency(val)}
+              options={[
+                { value: "INR", label: "INR (₹)" },
+                { value: "USD", label: "USD ($)" },
+                { value: "EUR", label: "EUR (€)" },
+                { value: "GBP", label: "GBP (£)" },
+                { value: "JPY", label: "JPY (¥)" },
+                { value: "CAD", label: "CAD (C$)" },
+                { value: "AUD", label: "AUD (A$)" },
+                { value: "CHF", label: "CHF (Fr)" },
+                { value: "CNY", label: "CNY (元)" },
+                { value: "SGD", label: "SGD (S$)" },
+                { value: "NZD", label: "NZD (NZ$)" },
+              ]}
+            />
 
             <label className="grid gap-2 text-sm font-medium text-secondary">
               Members
@@ -5495,39 +5424,38 @@ export function WalletsPage({
               />
             </label>
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Default split rule
-              <select
-                value={editWalletSplitRule}
-                onChange={(event) =>
-                  setEditWalletSplitRule(event.target.value as SplitRule)
-                }
-              >
-                <option value="equal">Equal</option>
-                <option value="fixed">Fixed amounts</option>
-                <option value="percentage">Percentages</option>
-              </select>
-            </label>
+            <FilterDropdown
+              label="Default split rule"
+              variant="form"
+              value={editWalletSplitRule}
+              onChange={(val) => setEditWalletSplitRule(val as SplitRule)}
+              options={[
+                { value: "equal", label: "Equal" },
+                { value: "fixed", label: "Fixed amounts" },
+                { value: "percentage", label: "Percentages" },
+              ]}
+            />
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Currency
-              <select
-                value={editWalletCurrency}
-                onChange={(event) => setEditWalletCurrency(event.target.value)}
-              >
-                <option value="INR">INR (₹)</option>
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="JPY">JPY (¥)</option>
-                <option value="CAD">CAD (C$)</option>
-                <option value="AUD">AUD (A$)</option>
-                <option value="CHF">CHF (Fr)</option>
-                <option value="CNY">CNY (元)</option>
-                <option value="SGD">SGD (S$)</option>
-                <option value="NZD">NZD (NZ$)</option>
-              </select>
-            </label>
+            <FilterDropdown
+              label="Currency"
+              variant="form"
+              value={editWalletCurrency}
+              searchable
+              onChange={(val) => setEditWalletCurrency(val)}
+              options={[
+                { value: "INR", label: "INR (₹)" },
+                { value: "USD", label: "USD ($)" },
+                { value: "EUR", label: "EUR (€)" },
+                { value: "GBP", label: "GBP (£)" },
+                { value: "JPY", label: "JPY (¥)" },
+                { value: "CAD", label: "CAD (C$)" },
+                { value: "AUD", label: "AUD (A$)" },
+                { value: "CHF", label: "CHF (Fr)" },
+                { value: "CNY", label: "CNY (元)" },
+                { value: "SGD", label: "SGD (S$)" },
+                { value: "NZD", label: "NZD (NZ$)" },
+              ]}
+            />
 
             <label className="grid gap-2 text-sm font-medium text-secondary">
               Members
@@ -5698,31 +5626,24 @@ export function WalletsPage({
                 </label>
               </div>
             ) : (
-              <label className="grid gap-2 text-sm font-medium text-secondary">
-                <span className="required-mark">
-                  {loanType === "borrowed" ? "Lender (Wallet Member)" : "Borrower (Wallet Member)"}
-                </span>
-                <select
-                  value={loanBorrowerId}
-                  onChange={(e) => setLoanBorrowerId(e.target.value)}
-                  disabled={Boolean(editingLoan)}
-                  required
-                >
-                  <option value="">Select a member</option>
-                  {selectedWallet?.members
+              <FilterDropdown
+                label={loanType === "borrowed" ? "Lender (Wallet Member)" : "Borrower (Wallet Member)"}
+                variant="form"
+                required
+                disabled={Boolean(editingLoan)}
+                value={loanBorrowerId}
+                placeholder="Select a member"
+                error={showLoanValidation && loanErrors.borrower ? loanErrors.borrower : undefined}
+                onChange={(val) => setLoanBorrowerId(val)}
+                options={
+                  selectedWallet?.members
                     .filter((m) => m.role !== "owner" || editingLoan)
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.display_name} {m.role === "owner" ? "(Owner)" : ""}
-                      </option>
-                    ))}
-                </select>
-                {showLoanValidation && loanErrors.borrower && (
-                  <span className="text-sm text-[color:var(--danger-text)]">
-                    {loanErrors.borrower}
-                  </span>
-                )}
-              </label>
+                    .map((m) => ({
+                      value: m.id,
+                      label: `${m.display_name}${m.role === "owner" ? " (Owner)" : ""}`,
+                    })) ?? []
+                }
+              />
             )}
 
             {/* Amount & Lending/Borrowing Date */}
@@ -5789,30 +5710,28 @@ export function WalletsPage({
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-medium text-secondary">
-                  <span>Interest Type</span>
-                  <select
-                    value={loanInterestType}
-                    onChange={(e) => setLoanInterestType(e.target.value as "percentage" | "fixed" | "none")}
-                  >
-                    <option value="percentage">Percentage (%)</option>
-                    <option value="fixed">Fixed Amount ({currencySymbol})</option>
-                    <option value="none">No Interest (0%)</option>
-                  </select>
-                </label>
+                <FilterDropdown
+                  label="Interest Type"
+                  value={loanInterestType}
+                  onChange={(val) => setLoanInterestType(val as "percentage" | "fixed" | "none")}
+                  options={[
+                    { value: "percentage", label: "Percentage (%)" },
+                    { value: "fixed", label: `Fixed Amount (${currencySymbol})` },
+                    { value: "none", label: "No Interest (0%)" },
+                  ]}
+                />
 
-                <label className="grid gap-1.5 text-xs font-medium text-secondary">
-                  <span>Period / Frequency</span>
-                  <select
-                    value={loanInterestPeriod}
-                    onChange={(e) => setLoanInterestPeriod(e.target.value as "monthly" | "yearly" | "one-time")}
-                    disabled={loanInterestType === "fixed" || loanInterestType === "none"}
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                    <option value="one-time">One-time Flat</option>
-                  </select>
-                </label>
+                <FilterDropdown
+                  label="Period / Frequency"
+                  value={loanInterestPeriod}
+                  disabled={loanInterestType === "fixed" || loanInterestType === "none"}
+                  onChange={(val) => setLoanInterestPeriod(val as "monthly" | "yearly" | "one-time")}
+                  options={[
+                    { value: "monthly", label: "Monthly" },
+                    { value: "yearly", label: "Yearly" },
+                    { value: "one-time", label: "One-time Flat" },
+                  ]}
+                />
               </div>
 
               {/* Interest Start Date */}

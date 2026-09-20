@@ -29,7 +29,8 @@ const {
   deleteStandaloneLoanForUser,
   createStandaloneLoanRepaymentForUser,
   updateStandaloneLoanRepaymentForUser,
-  deleteStandaloneLoanRepaymentForUser
+  deleteStandaloneLoanRepaymentForUser,
+  respondToWalletInvite
 } = require("./_lib/finance");
 const { authenticateUser, getPathSegments, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
@@ -39,6 +40,36 @@ module.exports = async function handler(request, response) {
 
   if (!user) {
     return undefined;
+  }
+
+  const isInvitesApi = Boolean(
+    request.query?.invitesRoute !== undefined ||
+    (getPathSegments(request)[1] === "wallet-invites" && getPathSegments(request)[0] === "api")
+  );
+
+  if (isInvitesApi) {
+    let inviteSegments = [];
+    if (request.query?.invitesRoute) {
+      const ir = request.query.invitesRoute;
+      inviteSegments = Array.isArray(ir) ? ir.flatMap((s) => String(s).split("/").filter(Boolean)) : String(ir).split("/").filter(Boolean);
+    } else {
+      const allSegs = getPathSegments(request);
+      const idx = allSegs.indexOf("wallet-invites");
+      if (idx !== -1) {
+        inviteSegments = allSegs.slice(idx + 1);
+      }
+    }
+
+    if (inviteSegments.length === 2 && inviteSegments[0] && inviteSegments[1] === "respond") {
+      if (request.method === "POST") {
+        const result = await respondToWalletInvite(user, inviteSegments[0], request.body);
+        return sendResult(response, result);
+      }
+
+      return methodNotAllowed(response, "POST");
+    }
+
+    return notFound(response);
   }
 
   const isLoansApi = Boolean(

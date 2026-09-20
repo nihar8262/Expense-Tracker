@@ -252,6 +252,24 @@ export type NotificationCheckResult = {
   created_notifications: NotificationRecord[];
 };
 
+export type PaginatedExpensesResult = {
+  expenses: ExpenseRecord[];
+  total_count: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+export type PersonalAggregationRecord = {
+  total_amount: string;
+  expense_count: number;
+  monthly_totals: WalletAggregationMonthlyRecord[];
+  category_totals: WalletAggregationCategoryRecord[];
+  budget_totals: WalletAggregationBudgetRecord[];
+  top_platform: { platform: string; amount: number; formattedAmount: string } | null;
+  latest_expense: ExpenseRecord | null;
+};
+
 export type CreateExpenseResult = {
   expense: ExpenseRecord;
   created: boolean;
@@ -259,7 +277,8 @@ export type CreateExpenseResult = {
 
 export interface ExpenseStore {
   createExpense(userId: string, input: CreateExpenseInput, idempotencyKey: string): Promise<CreateExpenseResult>;
-  listExpenses(userId: string, query: ExpensesQueryInput): Promise<ExpenseRecord[]>;
+  listExpenses(userId: string, query: ExpensesQueryInput): Promise<PaginatedExpensesResult>;
+  getPersonalAggregation(userId: string): Promise<PersonalAggregationRecord>;
   updateExpense(userId: string, expenseId: string, input: CreateExpenseInput): Promise<ExpenseRecord>;
   deleteExpense(userId: string, expenseId: string): Promise<void>;
   createBudget(userId: string, input: CreateBudgetInput): Promise<BudgetRecord>;

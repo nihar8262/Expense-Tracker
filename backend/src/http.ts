@@ -56,10 +56,24 @@ export async function handleListExpenses(rawQuery: unknown, userId: string, stor
     };
   }
 
-  const expenses = await store.listExpenses(userId, result.data);
+  const paginatedResult = await store.listExpenses(userId, result.data);
   return {
     status: 200,
-    body: { expenses }
+    body: {
+      expenses: paginatedResult.expenses,
+      total_count: paginatedResult.total_count,
+      limit: paginatedResult.limit,
+      offset: paginatedResult.offset,
+      has_more: paginatedResult.has_more
+    }
+  };
+}
+
+export async function handleGetPersonalAggregation(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const aggregation = await store.getPersonalAggregation(userId);
+  return {
+    status: 200,
+    body: aggregation
   };
 }
 

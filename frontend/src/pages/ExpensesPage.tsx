@@ -3,7 +3,8 @@ import type { FormEvent, KeyboardEvent } from "react";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
 import { PLATFORMS } from "../lib/platforms";
-import { EmptyState, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
+import { EmptyState, ItemActionButtons, ModalFrame, PageHero, SectionHeader, StatusNotice, SurfaceCard, cn } from "../components/ui";
+import { FilterDropdown } from "../components/FilterDropdown";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
 import { formatBudgetMonth } from "../utils/format";
@@ -302,35 +303,29 @@ export function ExpensesPage({
             {showValidation && validationErrors.amount ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.amount}</span> : null}
           </label>
 
-          <div className="grid gap-3">
-            <span className="text-sm font-medium text-secondary required-mark">Category</span>
-            <div className="flex items-center gap-3">
-              {selectedCategoryOption ? (
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/90 text-ink shadow-sm">
-                  <CategoryIcon iconId={selectedCategoryOption.icon} />
-                </span>
-              ) : null}
-              <select
-                value={selectedCategoryOption?.label ?? ""}
-                disabled={!currentUserPresent}
-                onChange={(event) => {
-                  const match = availableCategoryOptions.find((option) => option.label === event.target.value);
-                  if (match) {
-                    onCategorySelect(match);
-                    requestAnimationFrame(() => descriptionInputRef.current?.focus());
-                  }
-                }}
-                aria-invalid={showValidation && Boolean(validationErrors.category)}
-              >
-                <option value="">Select a category</option>
-                {availableCategoryOptions.map((category) => (
-                  <option key={category.id} value={category.label}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {showValidation && validationErrors.category ? <span className="text-sm text-[color:var(--danger-text)]">{validationErrors.category}</span> : null}
+          <div className="grid gap-1">
+            <FilterDropdown
+              label="Category"
+              variant="form"
+              required
+              value={selectedCategoryOption?.label ?? ""}
+              placeholder="Select a category"
+              disabled={!currentUserPresent}
+              searchable
+              error={showValidation && validationErrors.category ? validationErrors.category : undefined}
+              onChange={(val) => {
+                const match = availableCategoryOptions.find((option) => option.label === val);
+                if (match) {
+                  onCategorySelect(match);
+                  requestAnimationFrame(() => descriptionInputRef.current?.focus());
+                }
+              }}
+              options={availableCategoryOptions.map((category) => ({
+                value: category.label,
+                label: category.label,
+                icon: <CategoryIcon iconId={category.icon} />,
+              }))}
+            />
           </div>
 
           {isOtherCategorySelected ? (
@@ -427,60 +422,78 @@ export function ExpensesPage({
         }
       />
 
-      <div className="hidden lg:block">{renderExpenseForm(false)}</div>
+      <div className="hidden lg:block relative z-40">{renderExpenseForm(false)}</div>
 
-      <SurfaceCard className="space-y-5 p-5 sm:p-6">
+      <SurfaceCard className="relative z-30 space-y-5 p-5 sm:p-6">
         <SectionHeader title="Expense view" description="Filter by category, sort order, and time range without losing context." />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Category
-            <select value={selectedCategory} disabled={!currentUserPresent} onChange={(event) => onSelectedCategoryChange(event.target.value)}>
-              <option value="">All categories</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterDropdown
+            label="Category"
+            value={selectedCategory}
+            placeholder="All categories"
+            disabled={!currentUserPresent}
+            onChange={onSelectedCategoryChange}
+            searchable
+            options={[
+              { value: "", label: "All categories" },
+              ...categories.map((category) => {
+                const match = availableCategoryOptions.find(
+                  (opt) => opt.label.toLowerCase() === category.toLowerCase()
+                );
+                return {
+                  value: category,
+                  label: category,
+                  icon: match ? <CategoryIcon iconId={match.icon} /> : undefined,
+                };
+              }),
+            ]}
+          />
 
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Platform / Source
-            <select value={selectedPlatform} disabled={!currentUserPresent} onChange={(event) => onSelectedPlatformChange(event.target.value)}>
-              <option value="">All platforms</option>
-              <option value="none">No platform</option>
-              {PLATFORMS.filter(p => p.id !== "others").map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-              <option value="others">Others</option>
-            </select>
-          </label>
+          <FilterDropdown
+            label="Platform / Source"
+            value={selectedPlatform}
+            placeholder="All platforms"
+            disabled={!currentUserPresent}
+            onChange={onSelectedPlatformChange}
+            options={[
+              { value: "", label: "All platforms" },
+              { value: "none", label: "No platform" },
+              ...PLATFORMS.filter((p) => p.id !== "others").map((p) => ({
+                value: p.id,
+                label: p.name,
+                icon: <img src={p.logo} alt="" className="h-4 w-4 rounded-full object-cover shrink-0" />,
+              })),
+              { value: "others", label: "Others" },
+            ]}
+          />
 
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Sort
-            <select value={sortNewestFirst ? "date_desc" : "none"} disabled={!currentUserPresent} onChange={(event) => onSortNewestFirstChange(event.target.value === "date_desc")}>
-              <option value="date_desc">Newest first</option>
-              <option value="none">Created order</option>
-            </select>
-          </label>
+          <FilterDropdown
+            label="Sort"
+            value={sortNewestFirst ? "date_desc" : "none"}
+            disabled={!currentUserPresent}
+            onChange={(val) => onSortNewestFirstChange(val === "date_desc")}
+            options={[
+              { value: "date_desc", label: "Newest first" },
+              { value: "none", label: "Created order" },
+            ]}
+          />
 
-          <label className="grid gap-2 text-sm font-medium text-secondary">
-            Month
-            <select
-              value={selectedTimeRange}
-              disabled={!currentUserPresent}
-              onChange={(event) => onSelectedTimeRangeChange(event.target.value as TimeRangeFilter)}
-            >
-              <option value="all">All months</option>
-              {expenseMonthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {formatBudgetMonth(m)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <FilterDropdown
+            label="Month"
+            value={selectedTimeRange}
+            placeholder="All months"
+            disabled={!currentUserPresent}
+            onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+            align="right"
+            searchable={expenseMonthOptions.length > 6}
+            options={[
+              { value: "all", label: "All months" },
+              ...expenseMonthOptions.map((m) => ({
+                value: m,
+                label: formatBudgetMonth(m),
+              })),
+            ]}
+          />
         </div>
         <div className="flex flex-col gap-3 rounded-[22px] border border-[color:var(--border)] bg-white/75 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-6 text-secondary">{activeFilters.length > 0 ? `Showing: ${activeFilters.join(" • ")}` : "Showing: All categories • All time • Newest first"}</p>
@@ -495,7 +508,7 @@ export function ExpensesPage({
         </div>
       </SurfaceCard>
 
-      <SurfaceCard className="space-y-5 p-5 sm:p-6">
+      <SurfaceCard className="relative z-10 space-y-5 p-5 sm:p-6 mb-20 lg:mb-0">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <SectionHeader
             title="Your expenses"
@@ -535,7 +548,7 @@ export function ExpensesPage({
                     <th>Category</th>
                     <th>Description</th>
                     <th className="text-right">Amount</th>
-                    <th>Actions</th>
+                    <th className="text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -574,23 +587,20 @@ export function ExpensesPage({
                         <strong className="block text-ink">{expense.description}</strong>
                       </td>
                       <td className="text-right text-lg font-semibold text-ink">{formatCurrency(expense.amount)}</td>
-                      <td>
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" className="ui-button-ghost" onClick={(event) => { event.stopPropagation(); handleEditStart(expense); }}>
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="ui-button-danger"
-                            disabled={deletingExpenseIds.includes(expense.id)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleDeleteClick(expense);
-                            }}
-                          >
-                            {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                          </button>
-                        </div>
+                      <td className="text-right whitespace-nowrap">
+                        <ItemActionButtons
+                          className="justify-end"
+                          description={expense.description}
+                          isDeleting={deletingExpenseIds.includes(expense.id)}
+                          onEdit={(event) => {
+                            event.stopPropagation();
+                            handleEditStart(expense);
+                          }}
+                          onDelete={(event) => {
+                            event.stopPropagation();
+                            handleDeleteClick(expense);
+                          }}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -603,7 +613,7 @@ export function ExpensesPage({
                 <article
                   key={expense.id}
                   className={cn(
-                    "table-card-mobile space-y-4",
+                    "table-card-mobile space-y-3",
                     deletingExpenseIds.includes(expense.id) && "animate-delete"
                   )}
                 >
@@ -626,26 +636,22 @@ export function ExpensesPage({
                     <strong className="text-xl text-ink">{formatCurrency(expense.amount)}</strong>
                   </div>
 
-                  <div className="space-y-2">
-                    <strong className="block text-lg text-ink">{expense.description}</strong>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
-                      <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
-                      <span>{expense.date}</span>
-                    </div>
+                  <div className="space-y-1">
+                    <strong className="block text-base sm:text-lg text-ink">{expense.description}</strong>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="ui-button-secondary" onClick={() => handleEditStart(expense)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="ui-button-danger"
-                      disabled={deletingExpenseIds.includes(expense.id)}
-                      onClick={() => handleDeleteClick(expense)}
-                    >
-                      {deletingExpenseIds.includes(expense.id) ? "Deleting..." : "Delete"}
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[color:var(--border)]/60">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-secondary">
+                      <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                      <span>{expense.date}</span>
+                    </div>
+
+                    <ItemActionButtons
+                      description={expense.description}
+                      isDeleting={deletingExpenseIds.includes(expense.id)}
+                      onEdit={() => handleEditStart(expense)}
+                      onDelete={() => handleDeleteClick(expense)}
+                    />
                   </div>
                 </article>
               ))}

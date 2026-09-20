@@ -4,9 +4,11 @@ import type {
   BillReminder,
   BillReminderRecurrence,
   BudgetForm,
-  Expense,
   ExpenseForm,
+  ExpensesQuery,
   Notification,
+  PaginatedExpenses,
+  PersonalAggregation,
   ReminderPreferences,
   SplitRule,
   Wallet,
@@ -85,15 +87,29 @@ export async function apiRequest<T>(user: User, config: ApiRequestConfig, fallba
   }
 }
 
-export function buildExpensesUrl(category: string, sortNewestFirst: boolean): string {
+export function buildExpensesUrl(query?: ExpensesQuery | string, legacySort?: boolean): string {
   const url = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL) : new URL("/api/expenses", window.location.origin);
 
-  if (category) {
-    url.searchParams.set("category", category);
+  if (typeof query === "string") {
+    if (query) {
+      url.searchParams.set("category", query);
+    }
+    if (legacySort) {
+      url.searchParams.set("sort", "date_desc");
+    }
+    return url.toString();
   }
 
-  if (sortNewestFirst) {
-    url.searchParams.set("sort", "date_desc");
+  if (query) {
+    if (query.category) url.searchParams.set("category", query.category);
+    if (query.platform) url.searchParams.set("platform", query.platform);
+    if (query.month) url.searchParams.set("month", query.month);
+    if (query.from_date) url.searchParams.set("from_date", query.from_date);
+    if (query.to_date) url.searchParams.set("to_date", query.to_date);
+    if (query.search) url.searchParams.set("search", query.search);
+    if (query.sort) url.searchParams.set("sort", query.sort);
+    if (typeof query.limit === "number") url.searchParams.set("limit", String(query.limit));
+    if (typeof query.offset === "number") url.searchParams.set("offset", String(query.offset));
   }
 
   return url.toString();
@@ -145,9 +161,19 @@ export async function deleteExpense(expenseId: string, user: User): Promise<void
   await apiRequest<void>(user, { url: endpoint, method: "DELETE" }, "Failed to delete expense.");
 }
 
-export async function listExpenses(user: User, category: string, sortNewestFirst: boolean): Promise<Expense[]> {
-  const body = await apiRequest<{ expenses: Expense[] }>(user, { url: buildExpensesUrl(category, sortNewestFirst), method: "GET" }, "Failed to load expenses.");
-  return body.expenses;
+export async function listExpenses(
+  user: User,
+  query?: ExpensesQuery | string,
+  sortNewestFirst?: boolean
+): Promise<PaginatedExpenses> {
+  const url = buildExpensesUrl(query, sortNewestFirst);
+  const body = await apiRequest<PaginatedExpenses>(user, { url, method: "GET" }, "Failed to load expenses.");
+  return body;
+}
+
+export async function getPersonalAggregation(user: User): Promise<PersonalAggregation> {
+  const endpoint = API_BASE_URL ? new URL("/api/expenses/summary", API_BASE_URL).toString() : "/api/expenses/summary";
+  return apiRequest<PersonalAggregation>(user, { url: endpoint, method: "GET" }, "Failed to load expenses summary.");
 }
 
 export async function createBudget(payload: BudgetForm, user: User): Promise<void> {
