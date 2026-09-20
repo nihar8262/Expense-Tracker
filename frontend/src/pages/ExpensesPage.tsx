@@ -422,9 +422,9 @@ export function ExpensesPage({
         }
       />
 
-      <div className="hidden lg:block relative z-40">{renderExpenseForm(false)}</div>
+      <div className="hidden lg:block relative z-20">{renderExpenseForm(false)}</div>
 
-      <SurfaceCard className="relative z-30 space-y-5 p-5 sm:p-6">
+      <SurfaceCard className="relative z-10 space-y-5 p-5 sm:p-6">
         <SectionHeader title="Expense view" description="Filter by category, sort order, and time range without losing context." />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <FilterDropdown
@@ -508,7 +508,7 @@ export function ExpensesPage({
         </div>
       </SurfaceCard>
 
-      <SurfaceCard className="relative z-10 space-y-5 p-5 sm:p-6 mb-20 lg:mb-0">
+      <SurfaceCard className="relative z-0 space-y-5 p-5 sm:p-6 mb-20 lg:mb-0">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <SectionHeader
             title="Your expenses"

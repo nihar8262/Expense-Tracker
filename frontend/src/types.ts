@@ -39,6 +39,8 @@ export type PersonalAggregation = {
 	budget_totals: Array<{ month: string; category: string | null; total: string }>;
 	top_platform: { platform: string; amount: number; formattedAmount: string } | null;
 	latest_expense: Expense | null;
+	monthly_category_totals?: Array<{ month: string; category: string; total: string; count: number }>;
+	monthly_platform_totals?: Array<{ month: string; platform: string; total: string; count: number }>;
 };
 
 export type ExpenseForm = {

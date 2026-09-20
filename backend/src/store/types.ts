@@ -268,6 +268,8 @@ export type PersonalAggregationRecord = {
   budget_totals: WalletAggregationBudgetRecord[];
   top_platform: { platform: string; amount: number; formattedAmount: string } | null;
   latest_expense: ExpenseRecord | null;
+  monthly_category_totals?: { month: string; category: string; total: string; count: number }[];
+  monthly_platform_totals?: { month: string; platform: string; total: string; count: number }[];
 };
 
 export type CreateExpenseResult = {

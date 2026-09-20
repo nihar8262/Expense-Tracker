@@ -1685,6 +1685,40 @@ export function createPostgresExpenseStore(): ExpenseStore {
         formattedAmount: formatMinorUnits(Number(platformRows[0].total_minor))
       } : null;
 
+      const monthlyCategoryRows = await sql<{
+        month: string;
+        category: string;
+        total_minor: string | number;
+        expense_count: string | number;
+      }[]>`
+        SELECT
+          TO_CHAR(expense_date, 'YYYY-MM') AS month,
+          category,
+          COALESCE(SUM(amount_minor), 0) AS total_minor,
+          COUNT(*)::int AS expense_count
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY TO_CHAR(expense_date, 'YYYY-MM'), category
+        ORDER BY month ASC, total_minor DESC
+      `;
+
+      const monthlyPlatformRows = await sql<{
+        month: string;
+        platform: string;
+        total_minor: string | number;
+        expense_count: string | number;
+      }[]>`
+        SELECT
+          TO_CHAR(expense_date, 'YYYY-MM') AS month,
+          COALESCE(NULLIF(platform, ''), 'others') AS platform,
+          COALESCE(SUM(amount_minor), 0) AS total_minor,
+          COUNT(*)::int AS expense_count
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY TO_CHAR(expense_date, 'YYYY-MM'), COALESCE(NULLIF(platform, ''), 'others')
+        ORDER BY month ASC, total_minor DESC
+      `;
+
       const latestExpense = latestRows[0] ? mapExpense(latestRows[0]) : null;
 
       return {
@@ -1700,6 +1734,18 @@ export function createPostgresExpenseStore(): ExpenseStore {
           total: formatMinorUnits(Number(r.total_minor)),
           count: Number(r.expense_count),
           platforms: r.platforms_str ? r.platforms_str.split(",") : []
+        })),
+        monthly_category_totals: monthlyCategoryRows.map((r) => ({
+          month: r.month,
+          category: r.category,
+          total: formatMinorUnits(Number(r.total_minor)),
+          count: Number(r.expense_count)
+        })),
+        monthly_platform_totals: monthlyPlatformRows.map((r) => ({
+          month: r.month,
+          platform: r.platform,
+          total: formatMinorUnits(Number(r.total_minor)),
+          count: Number(r.expense_count)
         })),
         budget_totals: [],
         top_platform: topPlatform,

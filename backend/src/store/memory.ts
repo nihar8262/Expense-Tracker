@@ -50,6 +50,8 @@ import {
   WalletSettlementNotFoundError,
   type WalletSettlementRecord,
   WalletValidationError,
+  type WalletAggregationCategoryRecord,
+  type WalletAggregationMonthlyRecord,
   type WalletHistoryPagination
 } from "./types.js";
 
@@ -1066,6 +1068,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     const monthlyMap = new Map<string, { totalMinor: number; count: number }>();
     const categoryMap = new Map<string, { totalMinor: number; count: number; platforms: Set<string> }>();
     const platformMap = new Map<string, number>();
+    const monthlyCategoryMap = new Map<string, { totalMinor: number; count: number }>();
+    const monthlyPlatformMap = new Map<string, { totalMinor: number; count: number }>();
 
     for (const e of userExpenses) {
       totalMinor += e.amountMinor;
@@ -1081,6 +1085,19 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       cEntry.count += 1;
       if (e.platform) cEntry.platforms.add(e.platform);
       categoryMap.set(e.category, cEntry);
+
+      const mcKey = `${month}:${e.category}`;
+      const mcEntry = monthlyCategoryMap.get(mcKey) ?? { totalMinor: 0, count: 0 };
+      mcEntry.totalMinor += e.amountMinor;
+      mcEntry.count += 1;
+      monthlyCategoryMap.set(mcKey, mcEntry);
+
+      const plat = e.platform || "others";
+      const mpKey = `${month}:${plat}`;
+      const mpEntry = monthlyPlatformMap.get(mpKey) ?? { totalMinor: 0, count: 0 };
+      mpEntry.totalMinor += e.amountMinor;
+      mpEntry.count += 1;
+      monthlyPlatformMap.set(mpKey, mpEntry);
 
       if (e.platform) {
         platformMap.set(e.platform, (platformMap.get(e.platform) ?? 0) + e.amountMinor);
@@ -1104,6 +1121,30 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
         platforms: [...data.platforms]
       }));
 
+    const monthlyCategoryTotals = [...monthlyCategoryMap.entries()]
+      .map(([key, data]) => {
+        const [month, category] = key.split(":");
+        return {
+          month,
+          category,
+          total: formatMinorUnits(data.totalMinor),
+          count: data.count
+        };
+      })
+      .sort((a, b) => a.month.localeCompare(b.month) || Number(b.total) - Number(a.total));
+
+    const monthlyPlatformTotals = [...monthlyPlatformMap.entries()]
+      .map(([key, data]) => {
+        const [month, platform] = key.split(":");
+        return {
+          month,
+          platform,
+          total: formatMinorUnits(data.totalMinor),
+          count: data.count
+        };
+      })
+      .sort((a, b) => a.month.localeCompare(b.month) || Number(b.total) - Number(a.total));
+
     const sortedPlatforms = [...platformMap.entries()].sort((a, b) => b[1] - a[1]);
     const topPlatform = sortedPlatforms[0] ? {
       platform: sortedPlatforms[0][0],
@@ -1118,6 +1159,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       expense_count: userExpenses.length,
       monthly_totals: monthlyTotals,
       category_totals: categoryTotals,
+      monthly_category_totals: monthlyCategoryTotals,
+      monthly_platform_totals: monthlyPlatformTotals,
       budget_totals: [],
       top_platform: topPlatform,
       latest_expense: latestExpense

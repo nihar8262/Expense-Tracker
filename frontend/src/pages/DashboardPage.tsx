@@ -318,7 +318,7 @@ export function DashboardPage({
         }
       />
 
-      <SurfaceCard className="relative z-30 space-y-4 p-5 sm:p-6">
+      <SurfaceCard className="relative z-20 space-y-4 p-5 sm:p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
           {isDashboardLoading && !showFullLoadingScreen && (

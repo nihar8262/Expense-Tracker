@@ -109,7 +109,7 @@ export function SignedInLayout({
 
   return (
     <main className="app-page">
-      <header className="surface-card sticky top-4 z-30 px-4 py-3 sm:px-5 lg:px-6">
+      <header className="surface-card sticky top-4 z-50 px-4 py-3 sm:px-5 lg:px-6">
         <div className="flex items-center justify-between gap-3 lg:gap-6">
           <div className="min-w-0">
             <p className="section-eyebrow">Personal finance</p>
@@ -190,7 +190,7 @@ export function SignedInLayout({
 
       <div className="mt-6 app-grid lg:mt-8">{children}</div>
 
-      <nav className="fixed inset-x-4 bottom-4 z-30 rounded-[26px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(252,251,247,0.82))] p-2 shadow-[0_24px_80px_rgba(40,44,35,0.18)] backdrop-blur-xl lg:hidden" aria-label="Bottom navigation">
+      <nav className="fixed inset-x-4 bottom-4 z-50 rounded-[26px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(252,251,247,0.82))] p-2 shadow-[0_24px_80px_rgba(40,44,35,0.18)] backdrop-blur-xl lg:hidden" aria-label="Bottom navigation">
         <div className="grid grid-cols-4 gap-2">
           {mainNavItems.map((item) => (
             <NavLink

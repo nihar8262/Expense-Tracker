@@ -505,7 +505,7 @@ export function AppRoutes() {
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("all");
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("month");
   const [selectedPlatform, setSelectedPlatform] = useState("");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
   const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
@@ -661,8 +661,6 @@ export function AppRoutes() {
     () => [...new Set(dashboardExpenses.map((e) => e.category))].sort((l, r) => l.localeCompare(r)),
     [dashboardExpenses]
   );
-
-  const visibleExpenses = expenses;
 
   const dashboardVisibleExpenses = useMemo(() => {
     return dashboardExpenses
@@ -927,24 +925,52 @@ export function AppRoutes() {
 
   const totalVal = useMemo(() => {
     if (dashboardViewMode === "personal") {
-      if (personalAggregation && !selectedCategory && !selectedPlatform) {
+      if (personalAggregation) {
         const today = new Date();
         const currentYear = today.getFullYear().toString();
         const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
-        if (selectedTimeRange === "all") {
-          return Number(personalAggregation.total_amount).toFixed(2);
-        } else if (selectedTimeRange === "month") {
-          const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
-          return Number(monthData?.total ?? 0).toFixed(2);
-        } else if (selectedTimeRange === "year") {
-          const yearTotal = personalAggregation.monthly_totals
-            .filter(m => m.month.startsWith(currentYear))
-            .reduce((sum, m) => sum + Number(m.total), 0);
-          return yearTotal.toFixed(2);
-        } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
-          const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
-          return Number(monthData?.total ?? 0).toFixed(2);
+        if (!selectedCategory && !selectedPlatform) {
+          if (selectedTimeRange === "all") {
+            return Number(personalAggregation.total_amount).toFixed(2);
+          } else if (selectedTimeRange === "month") {
+            const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
+            return Number(monthData?.total ?? 0).toFixed(2);
+          } else if (selectedTimeRange === "year") {
+            const yearTotal = personalAggregation.monthly_totals
+              .filter(m => m.month.startsWith(currentYear))
+              .reduce((sum, m) => sum + Number(m.total), 0);
+            return yearTotal.toFixed(2);
+          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
+            const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
+            return Number(monthData?.total ?? 0).toFixed(2);
+          }
+        } else if (selectedCategory && !selectedPlatform && personalAggregation.monthly_category_totals) {
+          let list = personalAggregation.monthly_category_totals.filter(
+            c => c.category.toLowerCase() === selectedCategory.toLowerCase()
+          );
+          if (selectedTimeRange === "month") {
+            list = list.filter(c => c.month === currentMonthStr);
+          } else if (selectedTimeRange === "year") {
+            list = list.filter(c => c.month.startsWith(currentYear));
+          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
+            list = list.filter(c => c.month === selectedTimeRange);
+          }
+          const sum = list.reduce((acc, c) => acc + Number(c.total), 0);
+          return sum.toFixed(2);
+        } else if (selectedPlatform && !selectedCategory && personalAggregation.monthly_platform_totals) {
+          let list = personalAggregation.monthly_platform_totals.filter(
+            p => (selectedPlatform === "none" ? p.platform === "others" : p.platform === selectedPlatform)
+          );
+          if (selectedTimeRange === "month") {
+            list = list.filter(p => p.month === currentMonthStr);
+          } else if (selectedTimeRange === "year") {
+            list = list.filter(p => p.month.startsWith(currentYear));
+          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
+            list = list.filter(p => p.month === selectedTimeRange);
+          }
+          const sum = list.reduce((acc, p) => acc + Number(p.total), 0);
+          return sum.toFixed(2);
         }
       }
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
@@ -979,11 +1005,67 @@ export function AppRoutes() {
 
   const dashboardStats = useMemo<DashboardStats>(() => {
     if (dashboardViewMode === "personal") {
-      if (personalAggregation && selectedTimeRange === "all" && !selectedCategory && !selectedPlatform) {
-        const rawTotal = Number(personalAggregation.total_amount);
-        const expenseCount = personalAggregation.expense_count;
+      if (personalAggregation && !selectedCategory && !selectedPlatform) {
+        const today = new Date();
+        const currentYear = today.getFullYear().toString();
+        const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+        let expenseCount = personalAggregation.expense_count;
+        let rawTotal = Number(personalAggregation.total_amount);
+        let activeCategories = personalAggregation.category_totals;
+        let activePlatforms = personalAggregation.monthly_platform_totals;
+
+        if (selectedTimeRange === "month") {
+          const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
+          expenseCount = monthData?.count ?? 0;
+          rawTotal = Number(monthData?.total ?? 0);
+
+          if (personalAggregation.monthly_category_totals) {
+            const monthCats = personalAggregation.monthly_category_totals.filter(m => m.month === currentMonthStr);
+            activeCategories = monthCats.map(c => ({
+              category: c.category,
+              total: c.total,
+              count: c.count,
+              platforms: []
+            })).sort((a, b) => Number(b.total) - Number(a.total));
+          }
+        } else if (selectedTimeRange === "year") {
+          const yearMonths = personalAggregation.monthly_totals.filter(m => m.month.startsWith(currentYear));
+          expenseCount = yearMonths.reduce((acc, m) => acc + m.count, 0);
+          rawTotal = yearMonths.reduce((acc, m) => acc + Number(m.total), 0);
+
+          if (personalAggregation.monthly_category_totals) {
+            const yearCats = personalAggregation.monthly_category_totals.filter(m => m.month.startsWith(currentYear));
+            const catMap = new Map<string, { total: number; count: number }>();
+            for (const c of yearCats) {
+              const prev = catMap.get(c.category) || { total: 0, count: 0 };
+              catMap.set(c.category, { total: prev.total + Number(c.total), count: prev.count + c.count });
+            }
+            activeCategories = [...catMap.entries()].map(([category, d]) => ({
+              category,
+              total: d.total.toFixed(2),
+              count: d.count,
+              platforms: []
+            })).sort((a, b) => Number(b.total) - Number(a.total));
+          }
+        } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
+          const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
+          expenseCount = monthData?.count ?? 0;
+          rawTotal = Number(monthData?.total ?? 0);
+
+          if (personalAggregation.monthly_category_totals) {
+            const monthCats = personalAggregation.monthly_category_totals.filter(m => m.month === selectedTimeRange);
+            activeCategories = monthCats.map(c => ({
+              category: c.category,
+              total: c.total,
+              count: c.count,
+              platforms: []
+            })).sort((a, b) => Number(b.total) - Number(a.total));
+          }
+        }
+
         const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
-        const categoryBreakdown = personalAggregation.category_totals.map((c) => {
+        const categoryBreakdown = activeCategories.map((c) => {
           const amount = Number(c.total);
           return {
             category: c.category,
@@ -994,17 +1076,42 @@ export function AppRoutes() {
           };
         });
 
+        let topPlatform = personalAggregation.top_platform ? {
+          platform: personalAggregation.top_platform.platform,
+          amount: personalAggregation.top_platform.amount,
+          formattedAmount: formatCurrency(personalAggregation.top_platform.amount.toFixed(2))
+        } : null;
+
+        if (activePlatforms && selectedTimeRange !== "all") {
+          const filteredPlats = selectedTimeRange === "month"
+            ? activePlatforms.filter(p => p.month === currentMonthStr)
+            : selectedTimeRange === "year"
+              ? activePlatforms.filter(p => p.month.startsWith(currentYear))
+              : /^\d{4}-\d{2}$/.test(selectedTimeRange)
+                ? activePlatforms.filter(p => p.month === selectedTimeRange)
+                : activePlatforms;
+
+          const platMap = new Map<string, number>();
+          for (const p of filteredPlats) {
+            platMap.set(p.platform, (platMap.get(p.platform) ?? 0) + Number(p.total));
+          }
+          const sortedPlats = [...platMap.entries()].sort((a, b) => b[1] - a[1]);
+          if (sortedPlats[0]) {
+            topPlatform = {
+              platform: sortedPlats[0][0],
+              amount: sortedPlats[0][1],
+              formattedAmount: formatCurrency(sortedPlats[0][1].toFixed(2))
+            };
+          }
+        }
+
         return {
           expenseCount,
           average: formatCurrency(average.toFixed(2)),
           topCategory: categoryBreakdown[0] ?? null,
           latestExpense: personalAggregation.latest_expense,
           categoryBreakdown,
-          topPlatform: personalAggregation.top_platform ? {
-            platform: personalAggregation.top_platform.platform,
-            amount: personalAggregation.top_platform.amount,
-            formattedAmount: formatCurrency(personalAggregation.top_platform.amount.toFixed(2))
-          } : null
+          topPlatform
         };
       }
 
@@ -1584,6 +1691,7 @@ export function AppRoutes() {
     }
 
     void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+    void loadPersonalAggregation(currentUser);
   }, [authLoading, currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
   useEffect(() => {
@@ -3271,6 +3379,9 @@ export function AppRoutes() {
                 if (mode === "personal") {
                   setDashboardWalletId(null);
                   setDashboardWallet(null);
+                  if (currentUser) {
+                    void loadPersonalAggregation(currentUser);
+                  }
                   setTimeout(() => {
                     setIsDashboardLoading(false);
                   }, 280);
@@ -3347,7 +3458,7 @@ export function AppRoutes() {
             categories={categories}
             expenseMonthOptions={expenseMonthOptions}
             visibleExpenses={paginatedExpenses}
-            totalVisibleExpenses={visibleExpenses.length}
+            totalVisibleExpenses={totalPersonalExpenses}
             currentExpensesPage={currentExpensesPage}
             totalExpensePages={totalExpensePages}
             expensesPageSize={EXPENSES_PAGE_SIZE}
