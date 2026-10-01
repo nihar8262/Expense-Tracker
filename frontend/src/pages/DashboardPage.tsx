@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { PLATFORMS } from "../lib/platforms";
 import { PlatformLogo } from "../components/PlatformPicker";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
+import { formatBudgetMonth } from "../utils/format";
 import type {
   BudgetForm,
   BudgetHistoryGroup,
@@ -52,6 +53,7 @@ type DashboardPageProps = {
   chartDisplayType: ChartDisplayType;
   selectedCategory: string;
   selectedTimeRange: TimeRangeFilter;
+  expenseMonthOptions?: string[];
   selectedPlatform: string;
   chartGranularity: ChartGranularity;
   total: string;
@@ -111,6 +113,7 @@ export function DashboardPage({
   chartDisplayType,
   selectedCategory,
   selectedTimeRange,
+  expenseMonthOptions = [],
   selectedPlatform,
   chartGranularity,
   total,
@@ -147,6 +150,25 @@ export function DashboardPage({
   const [isSmallScreen, setIsSmallScreen] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 640 : false));
   const trendSectionRef = useRef<HTMLElement | null>(null);
 
+  const expenseYearOptions = useMemo(() => {
+    const years = (expenseMonthOptions ?? []).map((m) => m.slice(0, 4));
+    const currentYear = new Date().getFullYear().toString();
+    if (!years.includes(currentYear)) {
+      years.unshift(currentYear);
+    }
+    return [...new Set(years)].sort((a, b) => b.localeCompare(a));
+  }, [expenseMonthOptions]);
+
+  const isCustomMonth = /^\d{4}-\d{2}$/.test(selectedTimeRange);
+  const isCustomYear = /^\d{4}$/.test(selectedTimeRange);
+
+  let primaryRange = selectedTimeRange;
+  if (isCustomMonth) {
+    primaryRange = "select_month";
+  } else if (isCustomYear) {
+    primaryRange = "select_year";
+  }
+
   const targetWallet = useMemo(() => {
     return wallets.find((w) => w.id === dashboardWalletId) ?? null;
   }, [wallets, dashboardWalletId]);
@@ -181,14 +203,15 @@ export function DashboardPage({
     if (!selectedCategoryBreakdown) return [];
 
     const catItem = dashboardStats.categoryBreakdown.find((item) => item.category === selectedCategoryBreakdown);
-    if (catItem && catItem.platformShares) {
+    if (catItem && catItem.platformShares && catItem.platformShares.length > 0) {
       const data = catItem.platformShares.map((share) => {
-        const platform = PLATFORMS.find((p) => p.id === share.platform);
+        const norm = (share.platform || "others").trim().toLowerCase();
+        const platform = PLATFORMS.find((p) => p.id === norm || p.name.toLowerCase() === norm);
         return {
-          id: share.platform,
-          name: platform ? platform.name : share.platform,
+          id: norm,
+          name: platform ? platform.name : (norm === "others" ? "Others" : share.platform),
           value: share.amount,
-          logo: platform?.logo || null
+          logo: platform?.logo || "/platforms/others.jpg"
         };
       });
       return data.sort((a, b) => b.value - a.value);
@@ -200,20 +223,21 @@ export function DashboardPage({
 
     categoryExpenses.forEach((expense) => {
       const amt = Number(expense.amount) || 0;
-      if (expense.platform && expense.platform !== "others") {
-        platformSums[expense.platform] = (platformSums[expense.platform] || 0) + amt;
+      const norm = (expense.platform || "others").trim().toLowerCase();
+      if (norm !== "others") {
+        platformSums[norm] = (platformSums[norm] || 0) + amt;
       } else {
         othersSum += amt;
       }
     });
 
     const data = Object.entries(platformSums).map(([platformId, value]) => {
-      const platform = PLATFORMS.find((p) => p.id === platformId);
+      const platform = PLATFORMS.find((p) => p.id === platformId || p.name.toLowerCase() === platformId);
       return {
         id: platformId,
         name: platform ? platform.name : platformId,
         value,
-        logo: platform?.logo || null
+        logo: platform?.logo || "/platforms/others.jpg"
       };
     });
 
@@ -222,6 +246,15 @@ export function DashboardPage({
         id: "others",
         name: "Others",
         value: othersSum,
+        logo: "/platforms/others.jpg"
+      });
+    }
+
+    if (data.length === 0 && catItem && catItem.amount > 0) {
+      data.push({
+        id: "others",
+        name: "Others",
+        value: catItem.amount,
         logo: "/platforms/others.jpg"
       });
     }
@@ -372,8 +405,8 @@ export function DashboardPage({
           ) : null}
         </div>
 
-        {/* Stable 3-Column Filter Row: Category, Platform, Range */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Filter Row: Category, Platform, Range (with nested Month/Year selector) */}
+        <div className={cn("grid grid-cols-1 gap-3", (primaryRange === "select_month" || primaryRange === "select_year") ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3")}>
           {/* Category */}
           <FilterDropdown
             label="Category"
@@ -417,17 +450,60 @@ export function DashboardPage({
           {/* Time range */}
           <FilterDropdown
             label="Range"
-            value={selectedTimeRange}
+            value={primaryRange}
             placeholder="All time"
-            onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+            onChange={(val) => {
+              if (val === "select_month") {
+                const defaultMonth = expenseMonthOptions[0] || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+                onSelectedTimeRangeChange(defaultMonth as TimeRangeFilter);
+              } else if (val === "select_year") {
+                const defaultYear = expenseYearOptions[0] || new Date().getFullYear().toString();
+                onSelectedTimeRangeChange(defaultYear as TimeRangeFilter);
+              } else {
+                onSelectedTimeRangeChange(val as TimeRangeFilter);
+              }
+            }}
             align="right"
             options={[
               { value: "all", label: "All time" },
               { value: "week", label: "This week" },
               { value: "month", label: "This month" },
               { value: "year", label: "This year" },
+              { value: "select_month", label: "Select month" },
+              { value: "select_year", label: "Select year" },
             ]}
           />
+
+          {/* Nested Month Filter */}
+          {primaryRange === "select_month" && (
+            <FilterDropdown
+              label="Month"
+              value={selectedTimeRange}
+              placeholder="Pick a month"
+              onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+              align="right"
+              searchable={expenseMonthOptions.length > 6}
+              options={expenseMonthOptions.map((m) => ({
+                value: m,
+                label: formatBudgetMonth(m),
+              }))}
+            />
+          )}
+
+          {/* Nested Year Filter */}
+          {primaryRange === "select_year" && (
+            <FilterDropdown
+              label="Year"
+              value={selectedTimeRange}
+              placeholder="Pick a year"
+              onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+              align="right"
+              options={expenseYearOptions.map((y) => ({
+                value: y,
+                label: y,
+              }))}
+            />
+          )}
         </div>
       </SurfaceCard>
 
@@ -607,8 +683,8 @@ export function DashboardPage({
         onCloseBudgetHistory={onCloseBudgetHistory}
       />
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <SurfaceCard className="space-y-4 p-4 sm:p-5">
+      <section className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <SurfaceCard className="min-w-0 overflow-hidden space-y-4 p-4 sm:p-5">
           <SectionHeader title="Spending breakdown" description="Categories with the largest share of the current view." />
           {dashboardStats.categoryBreakdown.length === 0 ? (
             <EmptyState title="No breakdown yet" description="Add a few expenses to unlock category weighting and spend share signals." />
@@ -624,20 +700,28 @@ export function DashboardPage({
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center min-w-0">
                       <span className="text-sm font-semibold text-ink truncate">{item.category}</span>
-                      {item.platforms && item.platforms.length > 0 && (
+                      {item.platforms && item.platforms.length > 0 ? (
                         <div className="flex -space-x-1.5 ml-2 shrink-0">
                           {item.platforms.map((platformId) => {
-                            const platform = PLATFORMS.find((p) => p.id === platformId);
-                            if (!platform) return null;
+                            const norm = (platformId || "others").trim().toLowerCase();
+                            const platform = PLATFORMS.find((p) => p.id === norm || p.name.toLowerCase() === norm);
                             return (
                               <PlatformLogo
                                 key={platformId}
-                                logo={platform.logo}
-                                name={platform.name}
+                                logo={platform?.logo || "/platforms/others.jpg"}
+                                name={platform?.name || (norm === "others" ? "Others" : platformId)}
                                 className="w-5 h-5 rounded-full border border-white/95 ring-1 ring-black/5 shadow-xs"
                               />
                             );
                           })}
+                        </div>
+                      ) : (
+                        <div className="flex -space-x-1.5 ml-2 shrink-0">
+                          <PlatformLogo
+                            logo="/platforms/others.jpg"
+                            name="Others"
+                            className="w-5 h-5 rounded-full border border-white/95 ring-1 ring-black/5 shadow-xs"
+                          />
                         </div>
                       )}
                     </div>
@@ -655,27 +739,27 @@ export function DashboardPage({
           )}
         </SurfaceCard>
 
-          {/* Issue #9: h-full stretches the card to match Spending breakdown height */}
-          <SurfaceCard className="flex h-full flex-col space-y-4 p-5 sm:p-6">
+        {/* Issue #9: h-full stretches the card to match Spending breakdown height */}
+        <SurfaceCard className="flex h-full min-w-0 max-w-full flex-col overflow-hidden space-y-4 p-4 sm:p-5 sm:p-6">
           <SectionHeader title="Latest activity" description="The most recent expense in your current dashboard view." />
           {dashboardStats.latestExpense ? (
-            <div className="rounded-[22px] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  {dashboardStats.latestExpense.platform ? (
-                    <PlatformLogo
-                      logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo}
-                      name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? dashboardStats.latestExpense?.platform}
-                      className="w-9 h-9 ring-2 ring-primary/10 shrink-0"
-                    />
-                  ) : null}
-                  <div className="min-w-0">
-                    <strong className="block truncate text-base font-semibold tracking-tight text-ink">{dashboardStats.latestExpense.description}</strong>
-                    <p className="text-xs text-muted">{dashboardStats.latestExpense.category}</p>
+            <div className="rounded-[22px] min-w-0 max-w-full overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-3.5 sm:p-4">
+              <div className="flex items-center justify-between gap-3 min-w-0">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 overflow-hidden">
+                  <PlatformLogo
+                    logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo || "/platforms/others.jpg"}
+                    name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? (dashboardStats.latestExpense?.platform || "Others")}
+                    className="w-9 h-9 ring-2 ring-primary/10 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <strong className="block truncate text-sm sm:text-base font-semibold tracking-tight text-ink" title={dashboardStats.latestExpense.description}>
+                      {dashboardStats.latestExpense.description}
+                    </strong>
+                    <p className="text-xs text-muted truncate">{dashboardStats.latestExpense.category}</p>
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
-                  <strong className="block text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount, activeCurrency)}</strong>
+                  <strong className="block text-lg sm:text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount, activeCurrency)}</strong>
                   <span className="text-xs text-muted">{dashboardStats.latestExpense.date}</span>
                 </div>
               </div>

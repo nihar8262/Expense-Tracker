@@ -181,6 +181,11 @@ function isExpenseInTimeRange(expenseDate: string, timeRange: TimeRangeFilter): 
     return expenseDate.slice(0, 7) === timeRange;
   }
 
+  // Exact YYYY calendar year match
+  if (/^\d{4}$/.test(timeRange)) {
+    return expenseDate.slice(0, 4) === timeRange;
+  }
+
   if (timeRange === "week") {
     const startOfWeek = new Date(today);
     const day = startOfWeek.getDay();
@@ -199,7 +204,11 @@ function isExpenseInTimeRange(expenseDate: string, timeRange: TimeRangeFilter): 
     return parsedDate.getFullYear() === today.getFullYear() && parsedDate.getMonth() === today.getMonth();
   }
 
-  return parsedDate.getFullYear() === today.getFullYear();
+  if (timeRange === "year") {
+    return parsedDate.getFullYear() === today.getFullYear();
+  }
+
+  return true;
 }
 
 function buildTrendPoints(expenseItems: Expense[], granularity: ChartGranularity): TrendPoint[] {
@@ -505,8 +514,13 @@ export function AppRoutes() {
   const [customCategories, setCustomCategories] = useState<CategoryOption[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("month");
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRangeFilter>("all");
   const [selectedPlatform, setSelectedPlatform] = useState("");
+  // Independent Dashboard filter and expenses states
+  const [dashboardCategory, setDashboardCategory] = useState("");
+  const [dashboardTimeRange, setDashboardTimeRange] = useState<TimeRangeFilter>("all");
+  const [dashboardPlatform, setDashboardPlatform] = useState("");
+  const [dashboardPersonalExpenses, setDashboardPersonalExpenses] = useState<Expense[]>([]);
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
   const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
   const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
@@ -640,7 +654,7 @@ export function AppRoutes() {
 
   const dashboardExpenses = useMemo<Expense[]>(() => {
     if (dashboardViewMode === "personal") {
-      return expenses;
+      return dashboardPersonalExpenses.length > 0 ? dashboardPersonalExpenses : expenses;
     }
     if (!dashboardWallet) {
       return [];
@@ -655,7 +669,7 @@ export function AppRoutes() {
       created_at: walletExpense.created_at,
       platform: walletExpense.platform
     }));
-  }, [dashboardViewMode, dashboardWallet, expenses]);
+  }, [dashboardViewMode, dashboardWallet, dashboardPersonalExpenses, expenses]);
 
   const dashboardCategories = useMemo(
     () => [...new Set(dashboardExpenses.map((e) => e.category))].sort((l, r) => l.localeCompare(r)),
@@ -664,13 +678,17 @@ export function AppRoutes() {
 
   const dashboardVisibleExpenses = useMemo(() => {
     return dashboardExpenses
-      .filter((expense) => isExpenseInTimeRange(expense.date, selectedTimeRange))
+      .filter((expense) => isExpenseInTimeRange(expense.date, dashboardTimeRange))
       .filter((expense) => {
-        if (!selectedPlatform) return true;
-        if (selectedPlatform === "none") return !expense.platform;
-        return expense.platform === selectedPlatform;
+        if (!dashboardPlatform) return true;
+        if (dashboardPlatform === "none") return !expense.platform || expense.platform === "others";
+        return (expense.platform || "").trim().toLowerCase() === dashboardPlatform.trim().toLowerCase();
+      })
+      .filter((expense) => {
+        if (!dashboardCategory) return true;
+        return expense.category.trim().toLowerCase() === dashboardCategory.trim().toLowerCase();
       });
-  }, [dashboardExpenses, selectedTimeRange, selectedPlatform]);
+  }, [dashboardExpenses, dashboardTimeRange, dashboardPlatform, dashboardCategory]);
 
   const totalExpensePages = Math.max(1, Math.ceil(totalPersonalExpenses / EXPENSES_PAGE_SIZE));
   const paginatedExpenses = expenses;
@@ -690,13 +708,24 @@ export function AppRoutes() {
 
   const spendTrend = useMemo(() => {
     if (dashboardViewMode === "personal") {
-      if (personalAggregation && personalAggregation.monthly_totals.length > 0 && !selectedCategory && !selectedPlatform) {
+      if (dashboardTimeRange === "week") {
+        return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
+      }
+
+      if (personalAggregation && personalAggregation.monthly_totals.length > 0 && !dashboardCategory && !dashboardPlatform) {
         const today = new Date();
         const currentYear = today.getFullYear().toString();
+        const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
         let filteredTotals = personalAggregation.monthly_totals;
-        if (selectedTimeRange === "year") {
+        if (dashboardTimeRange === "month") {
+          filteredTotals = filteredTotals.filter(m => m.month === currentMonthStr);
+        } else if (dashboardTimeRange === "year") {
           filteredTotals = filteredTotals.filter(m => m.month.startsWith(currentYear));
+        } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+          filteredTotals = filteredTotals.filter(m => m.month === dashboardTimeRange);
+        } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+          filteredTotals = filteredTotals.filter(m => m.month.startsWith(dashboardTimeRange));
         }
 
         if (chartGranularity === "monthly") {
@@ -790,12 +819,23 @@ export function AppRoutes() {
     }
 
     if (dashboardWallet.walletAggregation?.monthly_totals) {
+      if (dashboardTimeRange === "week") {
+        return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
+      }
+
       const today = new Date();
       const currentYear = today.getFullYear().toString();
+      const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
       let filteredTotals = dashboardWallet.walletAggregation.monthly_totals;
-      if (selectedTimeRange === "year") {
+      if (dashboardTimeRange === "month") {
+        filteredTotals = filteredTotals.filter(m => m.month === currentMonthStr);
+      } else if (dashboardTimeRange === "year") {
         filteredTotals = filteredTotals.filter(m => m.month.startsWith(currentYear));
+      } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+        filteredTotals = filteredTotals.filter(m => m.month === dashboardTimeRange);
+      } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+        filteredTotals = filteredTotals.filter(m => m.month.startsWith(dashboardTimeRange));
       }
 
       if (chartGranularity === "monthly") {
@@ -883,7 +923,7 @@ export function AppRoutes() {
     }
 
     return buildTrendPoints(dashboardVisibleExpenses, chartGranularity);
-  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, chartGranularity, selectedTimeRange, selectedCategory, selectedPlatform]);
+  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, chartGranularity, dashboardTimeRange, dashboardCategory, dashboardPlatform]);
 
   const trendDetailLookup = useMemo(() => {
     if (dashboardViewMode === "personal") {
@@ -930,44 +970,65 @@ export function AppRoutes() {
         const currentYear = today.getFullYear().toString();
         const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
-        if (!selectedCategory && !selectedPlatform) {
-          if (selectedTimeRange === "all") {
+        if (!dashboardCategory && !dashboardPlatform) {
+          if (dashboardTimeRange === "all") {
             return Number(personalAggregation.total_amount).toFixed(2);
-          } else if (selectedTimeRange === "month") {
+          } else if (dashboardTimeRange === "week") {
+            return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+          } else if (dashboardTimeRange === "month") {
             const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
             return Number(monthData?.total ?? 0).toFixed(2);
-          } else if (selectedTimeRange === "year") {
+          } else if (dashboardTimeRange === "year") {
             const yearTotal = personalAggregation.monthly_totals
               .filter(m => m.month.startsWith(currentYear))
               .reduce((sum, m) => sum + Number(m.total), 0);
             return yearTotal.toFixed(2);
-          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
-            const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
+          } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+            const monthData = personalAggregation.monthly_totals.find(m => m.month === dashboardTimeRange);
             return Number(monthData?.total ?? 0).toFixed(2);
+          } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+            const yearTotal = personalAggregation.monthly_totals
+              .filter(m => m.month.startsWith(dashboardTimeRange))
+              .reduce((sum, m) => sum + Number(m.total), 0);
+            return yearTotal.toFixed(2);
           }
-        } else if (selectedCategory && !selectedPlatform && personalAggregation.monthly_category_totals) {
+        } else if (dashboardCategory && !dashboardPlatform && personalAggregation.monthly_category_totals) {
+          if (dashboardTimeRange === "week") {
+            return dashboardVisibleExpenses
+              .filter(e => e.category.toLowerCase() === dashboardCategory.toLowerCase())
+              .reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+          }
           let list = personalAggregation.monthly_category_totals.filter(
-            c => c.category.toLowerCase() === selectedCategory.toLowerCase()
+            c => c.category.toLowerCase() === dashboardCategory.toLowerCase()
           );
-          if (selectedTimeRange === "month") {
+          if (dashboardTimeRange === "month") {
             list = list.filter(c => c.month === currentMonthStr);
-          } else if (selectedTimeRange === "year") {
+          } else if (dashboardTimeRange === "year") {
             list = list.filter(c => c.month.startsWith(currentYear));
-          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
-            list = list.filter(c => c.month === selectedTimeRange);
+          } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+            list = list.filter(c => c.month === dashboardTimeRange);
+          } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+            list = list.filter(c => c.month.startsWith(dashboardTimeRange));
           }
           const sum = list.reduce((acc, c) => acc + Number(c.total), 0);
           return sum.toFixed(2);
-        } else if (selectedPlatform && !selectedCategory && personalAggregation.monthly_platform_totals) {
+        } else if (dashboardPlatform && !dashboardCategory && personalAggregation.monthly_platform_totals) {
+          if (dashboardTimeRange === "week") {
+            return dashboardVisibleExpenses
+              .filter(e => (dashboardPlatform === "none" ? !e.platform || e.platform === "others" : (e.platform || "").toLowerCase() === dashboardPlatform.toLowerCase()))
+              .reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+          }
           let list = personalAggregation.monthly_platform_totals.filter(
-            p => (selectedPlatform === "none" ? p.platform === "others" : p.platform === selectedPlatform)
+            p => (dashboardPlatform === "none" ? p.platform === "others" : p.platform.toLowerCase() === dashboardPlatform.toLowerCase())
           );
-          if (selectedTimeRange === "month") {
+          if (dashboardTimeRange === "month") {
             list = list.filter(p => p.month === currentMonthStr);
-          } else if (selectedTimeRange === "year") {
+          } else if (dashboardTimeRange === "year") {
             list = list.filter(p => p.month.startsWith(currentYear));
-          } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
-            list = list.filter(p => p.month === selectedTimeRange);
+          } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+            list = list.filter(p => p.month === dashboardTimeRange);
+          } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+            list = list.filter(p => p.month.startsWith(dashboardTimeRange));
           }
           const sum = list.reduce((acc, p) => acc + Number(p.total), 0);
           return sum.toFixed(2);
@@ -983,20 +1044,30 @@ export function AppRoutes() {
     const currentYear = today.getFullYear().toString();
     const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
-    if (selectedTimeRange === "all") {
+    if (dashboardTimeRange === "all") {
       return Number(dashboardWallet.walletAggregation.total_amount).toFixed(2);
-    } else if (selectedTimeRange === "month") {
+    } else if (dashboardTimeRange === "week") {
+      return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
+    } else if (dashboardTimeRange === "month") {
       const monthData = dashboardWallet.walletAggregation.monthly_totals.find(m => m.month === currentMonthStr);
       return Number(monthData?.total ?? 0).toFixed(2);
-    } else if (selectedTimeRange === "year") {
+    } else if (dashboardTimeRange === "year") {
       const yearTotal = dashboardWallet.walletAggregation.monthly_totals
         .filter(m => m.month.startsWith(currentYear))
+        .reduce((sum, m) => sum + Number(m.total), 0);
+      return yearTotal.toFixed(2);
+    } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+      const monthData = dashboardWallet.walletAggregation.monthly_totals.find(m => m.month === dashboardTimeRange);
+      return Number(monthData?.total ?? 0).toFixed(2);
+    } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+      const yearTotal = dashboardWallet.walletAggregation.monthly_totals
+        .filter(m => m.month.startsWith(dashboardTimeRange))
         .reduce((sum, m) => sum + Number(m.total), 0);
       return yearTotal.toFixed(2);
     } else {
       return dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0).toFixed(2);
     }
-  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, selectedTimeRange, selectedCategory, selectedPlatform]);
+  }, [dashboardViewMode, dashboardWallet, personalAggregation, dashboardVisibleExpenses, dashboardTimeRange, dashboardCategory, dashboardPlatform]);
 
   const total = useMemo(() => {
     const currency = (dashboardViewMode === "wallet" && dashboardWallet) ? dashboardWallet.wallet.currency : undefined;
@@ -1005,74 +1076,230 @@ export function AppRoutes() {
 
   const dashboardStats = useMemo<DashboardStats>(() => {
     if (dashboardViewMode === "personal") {
-      if (personalAggregation && !selectedCategory && !selectedPlatform) {
+      if (dashboardTimeRange === "week") {
+        const filteredExpenses = dashboardVisibleExpenses.filter(e => {
+          if (dashboardCategory && e.category.toLowerCase() !== dashboardCategory.toLowerCase()) return false;
+          if (dashboardPlatform) {
+            if (dashboardPlatform === "none") return !e.platform || e.platform === "others";
+            return (e.platform || "").toLowerCase() === dashboardPlatform.toLowerCase();
+          }
+          return true;
+        });
+
+        const expenseCount = filteredExpenses.length;
+        const rawTotal = filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+        const categoryMap = new Map<string, { total: number; count: number }>();
+        const categoryPlatformMap = new Map<string, Map<string, number>>();
+        const platformMap = new Map<string, number>();
+
+        for (const e of filteredExpenses) {
+          const cat = categoryMap.get(e.category) || { total: 0, count: 0 };
+          cat.total += Number(e.amount);
+          cat.count += 1;
+          categoryMap.set(e.category, cat);
+
+          const catPlats = categoryPlatformMap.get(e.category) || new Map<string, number>();
+          const plat = (e.platform || "others").trim().toLowerCase();
+          catPlats.set(plat, (catPlats.get(plat) || 0) + Number(e.amount));
+          categoryPlatformMap.set(e.category, catPlats);
+
+          platformMap.set(plat, (platformMap.get(plat) || 0) + Number(e.amount));
+        }
+
+        const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
+        const categoryBreakdown = [...categoryMap.entries()]
+          .sort((a, b) => b[1].total - a[1].total)
+          .map(([category, d]) => {
+            const amount = d.total;
+            const sharesMap = categoryPlatformMap.get(category);
+            const platformShares = sharesMap
+              ? [...sharesMap.entries()].sort((a, b) => b[1] - a[1]).map(([platform, amt]) => ({ platform, amount: amt }))
+              : [{ platform: "others", amount }];
+            const platforms = platformShares.map(s => s.platform);
+            return {
+              category,
+              amount,
+              formattedAmount: formatCurrency(amount.toFixed(2)),
+              share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
+              platforms,
+              platformShares
+            };
+          });
+
+        const sortedPlats = [...platformMap.entries()].sort((a, b) => b[1] - a[1]);
+        const topPlatform = sortedPlats[0] ? {
+          platform: sortedPlats[0][0],
+          amount: sortedPlats[0][1],
+          formattedAmount: formatCurrency(sortedPlats[0][1].toFixed(2))
+        } : null;
+
+        const sortedExpenses = [...filteredExpenses].sort((l, r) => r.date.localeCompare(l.date));
+
+        return {
+          expenseCount,
+          average: formatCurrency(average.toFixed(2)),
+          topCategory: categoryBreakdown[0] ?? null,
+          categoryBreakdown,
+          topPlatform,
+          latestExpense: sortedExpenses[0] ?? null
+        };
+      }
+
+      if (personalAggregation && !dashboardCategory && !dashboardPlatform) {
         const today = new Date();
         const currentYear = today.getFullYear().toString();
         const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
         let expenseCount = personalAggregation.expense_count;
         let rawTotal = Number(personalAggregation.total_amount);
-        let activeCategories = personalAggregation.category_totals;
+        let activeCategories: {
+          category: string;
+          total: string;
+          count: number;
+          platforms?: string[];
+          platform_shares?: { platform: string; total: string }[];
+        }[] = personalAggregation.category_totals;
         let activePlatforms = personalAggregation.monthly_platform_totals;
 
-        if (selectedTimeRange === "month") {
+        if (dashboardTimeRange === "month") {
           const monthData = personalAggregation.monthly_totals.find(m => m.month === currentMonthStr);
           expenseCount = monthData?.count ?? 0;
           rawTotal = Number(monthData?.total ?? 0);
 
           if (personalAggregation.monthly_category_totals) {
             const monthCats = personalAggregation.monthly_category_totals.filter(m => m.month === currentMonthStr);
-            activeCategories = monthCats.map(c => ({
-              category: c.category,
-              total: c.total,
-              count: c.count,
-              platforms: []
-            })).sort((a, b) => Number(b.total) - Number(a.total));
+            activeCategories = monthCats.map(c => {
+              const shares = c.platform_shares && c.platform_shares.length > 0
+                ? c.platform_shares.map(s => ({ platform: s.platform.trim().toLowerCase(), total: s.total }))
+                : undefined;
+              return {
+                category: c.category,
+                total: c.total,
+                count: c.count,
+                platforms: shares ? shares.map(s => s.platform) : (c.platforms && c.platforms.length > 0 ? c.platforms : ["others"]),
+                platform_shares: shares
+              };
+            }).sort((a, b) => Number(b.total) - Number(a.total));
           }
-        } else if (selectedTimeRange === "year") {
+        } else if (dashboardTimeRange === "year") {
           const yearMonths = personalAggregation.monthly_totals.filter(m => m.month.startsWith(currentYear));
           expenseCount = yearMonths.reduce((acc, m) => acc + m.count, 0);
           rawTotal = yearMonths.reduce((acc, m) => acc + Number(m.total), 0);
 
           if (personalAggregation.monthly_category_totals) {
             const yearCats = personalAggregation.monthly_category_totals.filter(m => m.month.startsWith(currentYear));
-            const catMap = new Map<string, { total: number; count: number }>();
+            const catMap = new Map<string, { total: number; count: number; platformMap: Map<string, number> }>();
             for (const c of yearCats) {
-              const prev = catMap.get(c.category) || { total: 0, count: 0 };
-              catMap.set(c.category, { total: prev.total + Number(c.total), count: prev.count + c.count });
+              const prev = catMap.get(c.category) || { total: 0, count: 0, platformMap: new Map<string, number>() };
+              prev.total += Number(c.total);
+              prev.count += c.count;
+              if (c.platform_shares) {
+                for (const ps of c.platform_shares) {
+                  const p = ps.platform.trim().toLowerCase();
+                  prev.platformMap.set(p, (prev.platformMap.get(p) || 0) + Number(ps.total));
+                }
+              }
+              catMap.set(c.category, prev);
             }
-            activeCategories = [...catMap.entries()].map(([category, d]) => ({
-              category,
-              total: d.total.toFixed(2),
-              count: d.count,
-              platforms: []
-            })).sort((a, b) => Number(b.total) - Number(a.total));
+            activeCategories = [...catMap.entries()].map(([category, d]) => {
+              const sortedPlats = [...d.platformMap.entries()].sort((a, b) => b[1] - a[1]);
+              const shares = sortedPlats.map(([p, amt]) => ({ platform: p, total: amt.toFixed(2) }));
+              return {
+                category,
+                total: d.total.toFixed(2),
+                count: d.count,
+                platforms: shares.length > 0 ? shares.map(s => s.platform) : ["others"],
+                platform_shares: shares
+              };
+            }).sort((a, b) => Number(b.total) - Number(a.total));
           }
-        } else if (/^\d{4}-\d{2}$/.test(selectedTimeRange)) {
-          const monthData = personalAggregation.monthly_totals.find(m => m.month === selectedTimeRange);
+        } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+          const monthData = personalAggregation.monthly_totals.find(m => m.month === dashboardTimeRange);
           expenseCount = monthData?.count ?? 0;
           rawTotal = Number(monthData?.total ?? 0);
 
           if (personalAggregation.monthly_category_totals) {
-            const monthCats = personalAggregation.monthly_category_totals.filter(m => m.month === selectedTimeRange);
-            activeCategories = monthCats.map(c => ({
-              category: c.category,
-              total: c.total,
-              count: c.count,
-              platforms: []
-            })).sort((a, b) => Number(b.total) - Number(a.total));
+            const monthCats = personalAggregation.monthly_category_totals.filter(m => m.month === dashboardTimeRange);
+            activeCategories = monthCats.map(c => {
+              const shares = c.platform_shares && c.platform_shares.length > 0
+                ? c.platform_shares.map(s => ({ platform: s.platform.trim().toLowerCase(), total: s.total }))
+                : undefined;
+              return {
+                category: c.category,
+                total: c.total,
+                count: c.count,
+                platforms: shares ? shares.map(s => s.platform) : (c.platforms && c.platforms.length > 0 ? c.platforms : ["others"]),
+                platform_shares: shares
+              };
+            }).sort((a, b) => Number(b.total) - Number(a.total));
+          }
+        } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+          const yearMonths = personalAggregation.monthly_totals.filter(m => m.month.startsWith(dashboardTimeRange));
+          expenseCount = yearMonths.reduce((acc, m) => acc + m.count, 0);
+          rawTotal = yearMonths.reduce((acc, m) => acc + Number(m.total), 0);
+
+          if (personalAggregation.monthly_category_totals) {
+            const yearCats = personalAggregation.monthly_category_totals.filter(m => m.month.startsWith(dashboardTimeRange));
+            const catMap = new Map<string, { total: number; count: number; platformMap: Map<string, number> }>();
+            for (const c of yearCats) {
+              const prev = catMap.get(c.category) || { total: 0, count: 0, platformMap: new Map<string, number>() };
+              prev.total += Number(c.total);
+              prev.count += c.count;
+              if (c.platform_shares) {
+                for (const ps of c.platform_shares) {
+                  const p = ps.platform.trim().toLowerCase();
+                  prev.platformMap.set(p, (prev.platformMap.get(p) || 0) + Number(ps.total));
+                }
+              }
+              catMap.set(c.category, prev);
+            }
+            activeCategories = [...catMap.entries()].map(([category, d]) => {
+              const sortedPlats = [...d.platformMap.entries()].sort((a, b) => b[1] - a[1]);
+              const shares = sortedPlats.map(([p, amt]) => ({ platform: p, total: amt.toFixed(2) }));
+              return {
+                category,
+                total: d.total.toFixed(2),
+                count: d.count,
+                platforms: shares.length > 0 ? shares.map(s => s.platform) : ["others"],
+                platform_shares: shares
+              };
+            }).sort((a, b) => Number(b.total) - Number(a.total));
           }
         }
 
         const average = expenseCount > 0 ? rawTotal / expenseCount : 0;
         const categoryBreakdown = activeCategories.map((c) => {
           const amount = Number(c.total);
+          let platformShares: { platform: string; amount: number }[] = [];
+          if (c.platform_shares && c.platform_shares.length > 0) {
+            platformShares = c.platform_shares.map(s => ({
+              platform: s.platform.trim().toLowerCase(),
+              amount: Number(s.total)
+            }));
+          } else {
+            const catExpenses = dashboardVisibleExpenses.filter(e => e.category.toLowerCase() === c.category.toLowerCase());
+            if (catExpenses.length > 0) {
+              const platMap = new Map<string, number>();
+              for (const e of catExpenses) {
+                const p = (e.platform || "others").trim().toLowerCase();
+                platMap.set(p, (platMap.get(p) || 0) + Number(e.amount));
+              }
+              platformShares = [...platMap.entries()].sort((a, b) => b[1] - a[1]).map(([p, amt]) => ({ platform: p, amount: amt }));
+            } else if (c.platforms && c.platforms.length > 0) {
+              const cPlats = c.platforms;
+              platformShares = cPlats.map(p => ({ platform: p.trim().toLowerCase(), amount: amount / cPlats.length }));
+            } else {
+              platformShares = [{ platform: "others", amount }];
+            }
+          }
+          const platforms = platformShares.map(s => s.platform);
           return {
             category: c.category,
             amount,
             formattedAmount: formatCurrency(amount.toFixed(2)),
             share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
-            platforms: c.platforms
+            platforms,
+            platformShares
           };
         });
 
@@ -1082,14 +1309,16 @@ export function AppRoutes() {
           formattedAmount: formatCurrency(personalAggregation.top_platform.amount.toFixed(2))
         } : null;
 
-        if (activePlatforms && selectedTimeRange !== "all") {
-          const filteredPlats = selectedTimeRange === "month"
+        if (activePlatforms && dashboardTimeRange !== "all") {
+          const filteredPlats = dashboardTimeRange === "month"
             ? activePlatforms.filter(p => p.month === currentMonthStr)
-            : selectedTimeRange === "year"
+            : dashboardTimeRange === "year"
               ? activePlatforms.filter(p => p.month.startsWith(currentYear))
-              : /^\d{4}-\d{2}$/.test(selectedTimeRange)
-                ? activePlatforms.filter(p => p.month === selectedTimeRange)
-                : activePlatforms;
+              : /^\d{4}-\d{2}$/.test(dashboardTimeRange)
+                ? activePlatforms.filter(p => p.month === dashboardTimeRange)
+                : /^\d{4}$/.test(dashboardTimeRange)
+                  ? activePlatforms.filter(p => p.month.startsWith(dashboardTimeRange))
+                  : activePlatforms;
 
           const platMap = new Map<string, number>();
           for (const p of filteredPlats) {
@@ -1124,22 +1353,29 @@ export function AppRoutes() {
         return accumulator;
       }, {});
 
+      const categoryPlatformMap = new Map<string, Map<string, number>>();
+      for (const e of dashboardVisibleExpenses) {
+        const catPlats = categoryPlatformMap.get(e.category) || new Map<string, number>();
+        const plat = (e.platform || "others").trim().toLowerCase();
+        catPlats.set(plat, (catPlats.get(plat) || 0) + Number(e.amount));
+        categoryPlatformMap.set(e.category, catPlats);
+      }
+
       const categoryBreakdown = Object.entries(categoryTotals)
         .sort((left, right) => right[1] - left[1])
         .map(([category, amount]) => {
-          const platforms = Array.from(
-            new Set(
-              dashboardVisibleExpenses
-                .filter((e) => e.category === category)
-                .map((e) => e.platform || "others")
-            )
-          );
+          const sharesMap = categoryPlatformMap.get(category);
+          const platformShares = sharesMap
+            ? [...sharesMap.entries()].sort((a, b) => b[1] - a[1]).map(([platform, amt]) => ({ platform, amount: amt }))
+            : [{ platform: "others", amount }];
+          const platforms = platformShares.map((s) => s.platform);
           return {
             category,
             amount,
             formattedAmount: formatCurrency(amount.toFixed(2)),
             share: rawTotal > 0 ? (amount / rawTotal) * 100 : 0,
-            platforms
+            platforms,
+            platformShares
           };
         });
 
@@ -1150,7 +1386,8 @@ export function AppRoutes() {
 
       const platformTotals = dashboardVisibleExpenses.reduce<Record<string, number>>((accumulator, expense) => {
         if (expense.platform) {
-          accumulator[expense.platform] = (accumulator[expense.platform] ?? 0) + Number(expense.amount);
+          const p = expense.platform.trim().toLowerCase();
+          accumulator[p] = (accumulator[p] ?? 0) + Number(expense.amount);
         }
         return accumulator;
       }, {});
@@ -1192,7 +1429,7 @@ export function AppRoutes() {
     const currentYear = today.getFullYear().toString();
     const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
-    if (selectedTimeRange === "month") {
+    if (dashboardTimeRange === "month") {
       const currentMonthExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentMonthStr));
       expenseCount = currentMonthExpenses.length;
       rawTotal = currentMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -1206,7 +1443,7 @@ export function AppRoutes() {
         total: amount.toFixed(2),
         count: 0
       })).sort((a, b) => Number(b.total) - Number(a.total));
-    } else if (selectedTimeRange === "year") {
+    } else if (dashboardTimeRange === "year") {
       const currentYearExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(currentYear));
       expenseCount = currentYearExpenses.length;
       rawTotal = currentYearExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -1220,12 +1457,40 @@ export function AppRoutes() {
         total: amount.toFixed(2),
         count: 0
       })).sort((a, b) => Number(b.total) - Number(a.total));
-    } else if (selectedTimeRange === "week") {
+    } else if (dashboardTimeRange === "week") {
       expenseCount = dashboardVisibleExpenses.length;
       rawTotal = dashboardVisibleExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
 
       const categoryTotals: Record<string, number> = {};
       for (const e of dashboardVisibleExpenses) {
+        categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
+      }
+      activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
+        category,
+        total: amount.toFixed(2),
+        count: 0
+      })).sort((a, b) => Number(b.total) - Number(a.total));
+    } else if (/^\d{4}-\d{2}$/.test(dashboardTimeRange)) {
+      const targetExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(dashboardTimeRange));
+      expenseCount = targetExpenses.length;
+      rawTotal = targetExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+      const categoryTotals: Record<string, number> = {};
+      for (const e of targetExpenses) {
+        categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
+      }
+      activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
+        category,
+        total: amount.toFixed(2),
+        count: 0
+      })).sort((a, b) => Number(b.total) - Number(a.total));
+    } else if (/^\d{4}$/.test(dashboardTimeRange)) {
+      const targetExpenses = dashboardWallet.expenses.filter(e => e.date.startsWith(dashboardTimeRange));
+      expenseCount = targetExpenses.length;
+      rawTotal = targetExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+      const categoryTotals: Record<string, number> = {};
+      for (const e of targetExpenses) {
         categoryTotals[e.category] = (categoryTotals[e.category] ?? 0) + Number(e.amount);
       }
       activeCategories = Object.entries(categoryTotals).map(([category, amount]) => ({
@@ -1239,18 +1504,17 @@ export function AppRoutes() {
 
     const categoryBreakdown = activeCategories.map((c) => {
       const amt = Number(c.total);
-      const platforms = c.platforms && c.platforms.length > 0
-        ? c.platforms
-        : Array.from(
-          new Set(
-            dashboardWallet.expenses
-              .filter((e) => e.category === c.category)
-              .map((e) => e.platform || "others")
-          )
-        );
-      const platformShares = c.platform_shares && c.platform_shares.length > 0
-        ? c.platform_shares.map(p => ({ platform: p.platform, amount: Number(p.total) }))
-        : undefined;
+      const catExpenses = dashboardWallet.expenses.filter((e) => e.category === c.category && isExpenseInTimeRange(e.date, dashboardTimeRange));
+      const platformMap = new Map<string, number>();
+      for (const e of catExpenses) {
+        const p = (e.platform || "others").trim().toLowerCase();
+        platformMap.set(p, (platformMap.get(p) || 0) + Number(e.amount));
+      }
+      const sortedPlats = [...platformMap.entries()].sort((a, b) => b[1] - a[1]);
+      const platformShares = sortedPlats.length > 0
+        ? sortedPlats.map(([platform, amount]) => ({ platform, amount }))
+        : [{ platform: "others", amount: amt }];
+      const platforms = platformShares.map((s) => s.platform);
       return {
         category: c.category,
         amount: amt,
@@ -1265,7 +1529,8 @@ export function AppRoutes() {
 
     const platformTotals = dashboardWallet.expenses.reduce<Record<string, number>>((accumulator, expense) => {
       if (expense.platform) {
-        accumulator[expense.platform] = (accumulator[expense.platform] ?? 0) + Number(expense.amount);
+        const p = expense.platform.trim().toLowerCase();
+        accumulator[p] = (accumulator[p] ?? 0) + Number(expense.amount);
       }
       return accumulator;
     }, {});
@@ -1285,7 +1550,7 @@ export function AppRoutes() {
       categoryBreakdown,
       topPlatform
     };
-  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, selectedTimeRange, formatCurrency]);
+  }, [dashboardViewMode, dashboardWallet, dashboardVisibleExpenses, dashboardTimeRange, dashboardCategory, dashboardPlatform, personalAggregation, formatCurrency]);
 
   const budgetSummaries = useMemo<BudgetSummary[]>(() => {
     return budgets
@@ -1379,7 +1644,7 @@ export function AppRoutes() {
   const dashboardInsights = useMemo<DashboardInsight[]>(() => {
     const insights: DashboardInsight[] = [];
     const previousMonth = getMonthValueWithOffset(currentBudgetMonth, -1);
-    const filteredExpenses = selectedCategory ? dashboardExpenses.filter((expense) => expense.category === selectedCategory) : dashboardExpenses;
+    const filteredExpenses = dashboardCategory ? dashboardExpenses.filter((expense) => expense.category.toLowerCase() === dashboardCategory.toLowerCase()) : dashboardExpenses;
     const currentMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === currentBudgetMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
     const previousMonthSpend = filteredExpenses.filter((expense) => getExpenseMonth(expense.date) === previousMonth).reduce((sum, expense) => sum + Number(expense.amount), 0);
 
@@ -1466,6 +1731,9 @@ export function AppRoutes() {
 
       if (/^\d{4}-\d{2}$/.test(timeRange)) {
         month = timeRange;
+      } else if (/^\d{4}$/.test(timeRange)) {
+        from_date = `${timeRange}-01-01`;
+        to_date = `${timeRange}-12-31`;
       } else if (timeRange === "week") {
         const today = new Date();
         const startOfWeek = new Date(today);
@@ -1511,6 +1779,15 @@ export function AppRoutes() {
       setPersonalAggregation(agg);
     } catch (error) {
       console.warn("Could not load personal aggregation:", error);
+    }
+  }
+
+  async function loadDashboardExpenses(user: User) {
+    try {
+      const res = await listExpenses(user, { limit: 100, sort: "date_desc" });
+      setDashboardPersonalExpenses(res.expenses);
+    } catch (error) {
+      console.warn("Could not load dashboard expenses:", error);
     }
   }
 
@@ -1692,6 +1969,7 @@ export function AppRoutes() {
 
     void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
     void loadPersonalAggregation(currentUser);
+    void loadDashboardExpenses(currentUser);
   }, [authLoading, currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
   useEffect(() => {
@@ -1699,6 +1977,7 @@ export function AppRoutes() {
     const handleExpenseAdded = () => {
       void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
+      void loadDashboardExpenses(currentUser);
     };
     window.addEventListener("expense-added", handleExpenseAdded);
     return () => window.removeEventListener("expense-added", handleExpenseAdded);
@@ -1984,6 +2263,7 @@ export function AppRoutes() {
         setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
         await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
         void loadPersonalAggregation(currentUser);
+        void loadDashboardExpenses(currentUser);
       }
 
       return {
@@ -3067,6 +3347,7 @@ export function AppRoutes() {
         setStatusMessage("Expense updated.");
         await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
         void loadPersonalAggregation(currentUser);
+        void loadDashboardExpenses(currentUser);
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Failed to update expense.");
       } finally {
@@ -3087,6 +3368,7 @@ export function AppRoutes() {
       setStatusMessage("Expense saved.");
       await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
+      void loadDashboardExpenses(currentUser);
       void runChecksAndReloadNotifications(currentUser);
     } catch (error) {
       if (error instanceof ApiError && !error.retryable) {
@@ -3373,14 +3655,15 @@ export function AppRoutes() {
               onDashboardViewModeChange={(mode) => {
                 if (mode === dashboardViewMode) return;
                 setIsDashboardLoading(true);
-                setSelectedCategory("");
-                setSelectedPlatform("");
+                setDashboardCategory("");
+                setDashboardPlatform("");
                 setDashboardViewMode(mode);
                 if (mode === "personal") {
                   setDashboardWalletId(null);
                   setDashboardWallet(null);
                   if (currentUser) {
                     void loadPersonalAggregation(currentUser);
+                    void loadDashboardExpenses(currentUser);
                   }
                   setTimeout(() => {
                     setIsDashboardLoading(false);
@@ -3409,10 +3692,11 @@ export function AppRoutes() {
               budgetHistoryGroups={dashboardBudgetHistoryGroups}
               budgetHistoryRange={budgetHistoryRange}
               chartDisplayType={chartDisplayType}
-              selectedCategory={selectedCategory}
-              selectedTimeRange={selectedTimeRange}
-              selectedPlatform={selectedPlatform}
-              onSelectedPlatformChange={setSelectedPlatform}
+              selectedCategory={dashboardCategory}
+              selectedTimeRange={dashboardTimeRange}
+              expenseMonthOptions={expenseMonthOptions}
+              selectedPlatform={dashboardPlatform}
+              onSelectedPlatformChange={setDashboardPlatform}
               chartGranularity={chartGranularity}
               total={total}
               dashboardStats={dashboardStats}
@@ -3435,8 +3719,8 @@ export function AppRoutes() {
               onBudgetHistoryRangeChange={setBudgetHistoryRange}
               onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
               onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}
-              onSelectedCategoryChange={setSelectedCategory}
-              onSelectedTimeRangeChange={setSelectedTimeRange}
+              onSelectedCategoryChange={setDashboardCategory}
+              onSelectedTimeRangeChange={setDashboardTimeRange}
               onChartDisplayTypeChange={setChartDisplayType}
               onChartGranularityChange={setChartGranularity}
             />

@@ -1654,6 +1654,38 @@ export function createPostgresExpenseStore(): ExpenseStore {
         ORDER BY total_minor DESC
       `;
 
+      const categoryPlatformRows = await sql<{
+        category: string;
+        platform: string;
+        total_minor: string | number;
+      }[]>`
+        SELECT
+          category,
+          LOWER(COALESCE(NULLIF(platform, ''), 'others')) AS platform,
+          COALESCE(SUM(amount_minor), 0) AS total_minor
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY category, LOWER(COALESCE(NULLIF(platform, ''), 'others'))
+        ORDER BY category, total_minor DESC
+      `;
+
+      const monthlyCategoryPlatformRows = await sql<{
+        month: string;
+        category: string;
+        platform: string;
+        total_minor: string | number;
+      }[]>`
+        SELECT
+          TO_CHAR(expense_date, 'YYYY-MM') AS month,
+          category,
+          LOWER(COALESCE(NULLIF(platform, ''), 'others')) AS platform,
+          COALESCE(SUM(amount_minor), 0) AS total_minor
+        FROM expenses
+        WHERE user_id = ${userId}
+        GROUP BY TO_CHAR(expense_date, 'YYYY-MM'), category, LOWER(COALESCE(NULLIF(platform, ''), 'others'))
+        ORDER BY month ASC, category, total_minor DESC
+      `;
+
       const platformRows = await sql<{
         platform: string;
         total_minor: string | number;
@@ -1719,6 +1751,27 @@ export function createPostgresExpenseStore(): ExpenseStore {
         ORDER BY month ASC, total_minor DESC
       `;
 
+      const catPlatformMap = new Map<string, { platform: string; total: string }[]>();
+      for (const row of categoryPlatformRows) {
+        const list = catPlatformMap.get(row.category) ?? [];
+        list.push({
+          platform: row.platform,
+          total: formatMinorUnits(Number(row.total_minor))
+        });
+        catPlatformMap.set(row.category, list);
+      }
+
+      const mcPlatformMap = new Map<string, { platform: string; total: string }[]>();
+      for (const row of monthlyCategoryPlatformRows) {
+        const key = `${row.month}:${row.category}`;
+        const list = mcPlatformMap.get(key) ?? [];
+        list.push({
+          platform: row.platform,
+          total: formatMinorUnits(Number(row.total_minor))
+        });
+        mcPlatformMap.set(key, list);
+      }
+
       const latestExpense = latestRows[0] ? mapExpense(latestRows[0]) : null;
 
       return {
@@ -1729,18 +1782,28 @@ export function createPostgresExpenseStore(): ExpenseStore {
           total: formatMinorUnits(Number(r.total_minor)),
           count: Number(r.expense_count)
         })),
-        category_totals: categoryRows.map((r) => ({
-          category: r.category,
-          total: formatMinorUnits(Number(r.total_minor)),
-          count: Number(r.expense_count),
-          platforms: r.platforms_str ? r.platforms_str.split(",") : []
-        })),
-        monthly_category_totals: monthlyCategoryRows.map((r) => ({
-          month: r.month,
-          category: r.category,
-          total: formatMinorUnits(Number(r.total_minor)),
-          count: Number(r.expense_count)
-        })),
+        category_totals: categoryRows.map((r) => {
+          const shares = catPlatformMap.get(r.category) ?? [];
+          return {
+            category: r.category,
+            total: formatMinorUnits(Number(r.total_minor)),
+            count: Number(r.expense_count),
+            platforms: shares.length > 0 ? shares.map(s => s.platform) : (r.platforms_str ? r.platforms_str.split(",").map(p => p.toLowerCase()) : ["others"]),
+            platform_shares: shares
+          };
+        }),
+        monthly_category_totals: monthlyCategoryRows.map((r) => {
+          const key = `${r.month}:${r.category}`;
+          const shares = mcPlatformMap.get(key) ?? [];
+          return {
+            month: r.month,
+            category: r.category,
+            total: formatMinorUnits(Number(r.total_minor)),
+            count: Number(r.expense_count),
+            platforms: shares.length > 0 ? shares.map(s => s.platform) : ["others"],
+            platform_shares: shares
+          };
+        }),
         monthly_platform_totals: monthlyPlatformRows.map((r) => ({
           month: r.month,
           platform: r.platform,

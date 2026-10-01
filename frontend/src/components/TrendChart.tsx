@@ -8,6 +8,21 @@ type TrendChartProps = {
   formatCurrency: (amount: string) => string;
 };
 
+function formatYAxisTick(value: number, formatCurrency: (amount: string) => string): string {
+  if (value === 0) return "0";
+  const abs = Math.abs(value);
+  const sample = formatCurrency("0");
+  const symbol = sample.replace(/[\d.,\s]/g, "") || "";
+
+  if (abs >= 1_000_000) {
+    return `${symbol}${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (abs >= 1_000) {
+    return `${symbol}${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  }
+  return `${symbol}${Math.round(value)}`;
+}
+
 export function TrendChart({
   points,
   displayType,
@@ -16,7 +31,7 @@ export function TrendChart({
   const chartData = points.map((point) => ({
     ...point,
     shortLabel: point.shortLabel,
-    formattedTotal: formatCurrency(point.total.toFixed(1))
+    formattedTotal: formatCurrency(point.total.toFixed(2))
   }));
 
   const chartConfig = {
@@ -26,7 +41,7 @@ export function TrendChart({
     }
   } satisfies ChartConfig;
 
-  const minWidth = Math.max(640, points.length * 56)
+  const minWidth = Math.max(640, points.length * 56);
 
   return (
     <div className="w-full space-y-4">
@@ -50,10 +65,13 @@ export function TrendChart({
               tickLine={false}
               axisLine={false}
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
-              width={60}
-              tickFormatter={(value) => formatCurrency(value.toFixed(2))}
+              width={40}
+              tickFormatter={(value) => formatYAxisTick(Number(value), formatCurrency)}
             />
-            <Tooltip content={<ChartTooltipContent />} cursor={{ fill: "rgba(38,122,30,0.28)" }} />
+            <Tooltip
+              content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value).toFixed(2))} />}
+              cursor={{ fill: "rgba(38,122,30,0.28)" }}
+            />
             <Area
               dataKey="total"
               type="monotone"
@@ -93,10 +111,13 @@ export function TrendChart({
               tickLine={false}
               axisLine={false}
               tick={{ fill: "var(--muted-foreground)", fontSize: 10 }}
-              width={60}
-              tickFormatter={(value) => formatCurrency(value.toFixed(1))}
+              width={40}
+              tickFormatter={(value) => formatYAxisTick(Number(value), formatCurrency)}
             />
-            <Tooltip content={<ChartTooltipContent />} cursor={{ fill: "rgba(38,122,30,0.28)" }} />
+            <Tooltip
+              content={<ChartTooltipContent formatter={(value) => formatCurrency(Number(value).toFixed(2))} />}
+              cursor={{ fill: "rgba(38,122,30,0.28)" }}
+            />
             <Bar
               dataKey="total"
               fill="url(#fillBar)"
@@ -104,8 +125,8 @@ export function TrendChart({
               label={{
                 position: "top",
                 fill: "var(--foreground)",
-                fontSize: 12,
-                formatter: (value: any) => formatCurrency((value as number).toFixed(1))
+                fontSize: 11,
+                formatter: (value: any) => formatCurrency(Number(value).toFixed(2))
               }}
             />
           </BarChart>

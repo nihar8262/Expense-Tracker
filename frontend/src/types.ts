@@ -35,11 +35,24 @@ export type PersonalAggregation = {
 	total_amount: string;
 	expense_count: number;
 	monthly_totals: Array<{ month: string; total: string; count: number }>;
-	category_totals: Array<{ category: string; total: string; count: number; platforms: string[] }>;
+	category_totals: Array<{
+		category: string;
+		total: string;
+		count: number;
+		platforms: string[];
+		platform_shares?: Array<{ platform: string; total: string }>;
+	}>;
 	budget_totals: Array<{ month: string; category: string | null; total: string }>;
 	top_platform: { platform: string; amount: number; formattedAmount: string } | null;
 	latest_expense: Expense | null;
-	monthly_category_totals?: Array<{ month: string; category: string; total: string; count: number }>;
+	monthly_category_totals?: Array<{
+		month: string;
+		category: string;
+		total: string;
+		count: number;
+		platforms?: string[];
+		platform_shares?: Array<{ platform: string; total: string }>;
+	}>;
 	monthly_platform_totals?: Array<{ month: string; platform: string; total: string; count: number }>;
 };
 

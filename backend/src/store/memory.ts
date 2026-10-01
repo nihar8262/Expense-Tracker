@@ -1066,9 +1066,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
 
     let totalMinor = 0;
     const monthlyMap = new Map<string, { totalMinor: number; count: number }>();
-    const categoryMap = new Map<string, { totalMinor: number; count: number; platforms: Set<string> }>();
+    const categoryMap = new Map<string, { totalMinor: number; count: number; platformMap: Map<string, number> }>();
     const platformMap = new Map<string, number>();
-    const monthlyCategoryMap = new Map<string, { totalMinor: number; count: number }>();
+    const monthlyCategoryMap = new Map<string, { totalMinor: number; count: number; platformMap: Map<string, number> }>();
     const monthlyPlatformMap = new Map<string, { totalMinor: number; count: number }>();
 
     for (const e of userExpenses) {
@@ -1080,19 +1080,21 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       mEntry.count += 1;
       monthlyMap.set(month, mEntry);
 
-      const cEntry = categoryMap.get(e.category) ?? { totalMinor: 0, count: 0, platforms: new Set<string>() };
+      const plat = (e.platform || "others").trim().toLowerCase();
+
+      const cEntry = categoryMap.get(e.category) ?? { totalMinor: 0, count: 0, platformMap: new Map<string, number>() };
       cEntry.totalMinor += e.amountMinor;
       cEntry.count += 1;
-      if (e.platform) cEntry.platforms.add(e.platform);
+      cEntry.platformMap.set(plat, (cEntry.platformMap.get(plat) ?? 0) + e.amountMinor);
       categoryMap.set(e.category, cEntry);
 
       const mcKey = `${month}:${e.category}`;
-      const mcEntry = monthlyCategoryMap.get(mcKey) ?? { totalMinor: 0, count: 0 };
+      const mcEntry = monthlyCategoryMap.get(mcKey) ?? { totalMinor: 0, count: 0, platformMap: new Map<string, number>() };
       mcEntry.totalMinor += e.amountMinor;
       mcEntry.count += 1;
+      mcEntry.platformMap.set(plat, (mcEntry.platformMap.get(plat) ?? 0) + e.amountMinor);
       monthlyCategoryMap.set(mcKey, mcEntry);
 
-      const plat = e.platform || "others";
       const mpKey = `${month}:${plat}`;
       const mpEntry = monthlyPlatformMap.get(mpKey) ?? { totalMinor: 0, count: 0 };
       mpEntry.totalMinor += e.amountMinor;
@@ -1100,7 +1102,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       monthlyPlatformMap.set(mpKey, mpEntry);
 
       if (e.platform) {
-        platformMap.set(e.platform, (platformMap.get(e.platform) ?? 0) + e.amountMinor);
+        platformMap.set(plat, (platformMap.get(plat) ?? 0) + e.amountMinor);
       }
     }
 
@@ -1114,21 +1116,34 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
 
     const categoryTotals: WalletAggregationCategoryRecord[] = [...categoryMap.entries()]
       .sort((a, b) => b[1].totalMinor - a[1].totalMinor)
-      .map(([category, data]) => ({
-        category,
-        total: formatMinorUnits(data.totalMinor),
-        count: data.count,
-        platforms: [...data.platforms]
-      }));
+      .map(([category, data]) => {
+        const sortedPlats = [...data.platformMap.entries()].sort((a, b) => b[1] - a[1]);
+        return {
+          category,
+          total: formatMinorUnits(data.totalMinor),
+          count: data.count,
+          platforms: sortedPlats.map(([p]) => p),
+          platform_shares: sortedPlats.map(([p, minor]) => ({
+            platform: p,
+            total: formatMinorUnits(minor)
+          }))
+        };
+      });
 
     const monthlyCategoryTotals = [...monthlyCategoryMap.entries()]
       .map(([key, data]) => {
         const [month, category] = key.split(":");
+        const sortedPlats = [...data.platformMap.entries()].sort((a, b) => b[1] - a[1]);
         return {
           month,
           category,
           total: formatMinorUnits(data.totalMinor),
-          count: data.count
+          count: data.count,
+          platforms: sortedPlats.map(([p]) => p),
+          platform_shares: sortedPlats.map(([p, minor]) => ({
+            platform: p,
+            total: formatMinorUnits(minor)
+          }))
         };
       })
       .sort((a, b) => a.month.localeCompare(b.month) || Number(b.total) - Number(a.total));
