@@ -26,6 +26,7 @@ import type {
   SplitRule,
   Wallet,
   WalletDetail,
+  WalletExpense,
   WalletBudget,
   WalletLoan,
   WalletLoanForm,
@@ -1804,10 +1805,11 @@ export function WalletsPage({
     }
   }
 
-  function handleStartExpenseEdit(walletExpenseId: string) {
-    const walletExpense = selectedWallet?.expenses.find(
-      (expense) => expense.id === walletExpenseId,
-    );
+  function handleStartExpenseEdit(walletExpenseId: string, directExpense?: WalletExpense) {
+    const walletExpense =
+      directExpense ||
+      selectedWallet?.expenses?.find((expense) => expense.id === walletExpenseId) ||
+      filteredExpenses?.find((expense) => expense.id === walletExpenseId);
 
     if (!walletExpense) {
       return;
@@ -3486,7 +3488,7 @@ export function WalletsPage({
                                 <ItemActionButtons
                                   description={expense.description}
                                   isDeleting={deletingExpenseIds.includes(expense.id)}
-                                  onEdit={() => handleStartExpenseEdit(expense.id)}
+                                  onEdit={() => handleStartExpenseEdit(expense.id, expense)}
                                   onDelete={() => void handleDeleteExpenseClick(expense.id)}
                                 />
                               </div>
@@ -3552,7 +3554,7 @@ export function WalletsPage({
                             <ItemActionButtons
                               description={expense.description}
                               isDeleting={deletingExpenseIds.includes(expense.id)}
-                              onEdit={() => handleStartExpenseEdit(expense.id)}
+                              onEdit={() => handleStartExpenseEdit(expense.id, expense)}
                               onDelete={() => void handleDeleteExpenseClick(expense.id)}
                             />
                           </div>
@@ -4044,7 +4046,7 @@ export function WalletsPage({
                                       description={expense.description}
                                       isDeleting={deletingExpenseIds.includes(expense.id)}
                                       onEdit={() => {
-                                        handleStartExpenseEdit(expense.id);
+                                        handleStartExpenseEdit(expense.id, expense);
                                         setIsExpenseModalOpen(false);
                                       }}
                                       onDelete={() => void handleDeleteExpenseClick(expense.id)}
@@ -4113,7 +4115,7 @@ export function WalletsPage({
                                   description={expense.description}
                                   isDeleting={deletingExpenseIds.includes(expense.id)}
                                   onEdit={() => {
-                                    handleStartExpenseEdit(expense.id);
+                                    handleStartExpenseEdit(expense.id, expense);
                                     setIsExpenseModalOpen(false);
                                   }}
                                   onDelete={() => void handleDeleteExpenseClick(expense.id)}

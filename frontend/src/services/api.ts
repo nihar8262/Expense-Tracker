@@ -685,7 +685,8 @@ export async function updateWalletReminderPreferences(
 export async function queryAssistant(
   messages: Array<{ role: string; content: string | null; tool_calls?: any[] }>,
   confirmedAction: { tool: string; args: any } | null,
-  user: User
+  user: User,
+  currency?: string
 ): Promise<{ answer: string; pendingAction?: { tool: string; args: any } }> {
   const endpoint = API_BASE_URL ? new URL("/api/assistant/query", API_BASE_URL).toString() : "/api/assistant/query";
   return apiRequest<{ answer: string; pendingAction?: { tool: string; args: any } }>(
@@ -693,7 +694,7 @@ export async function queryAssistant(
     {
       method: "POST",
       url: endpoint,
-      data: { messages, confirmedAction }
+      data: { messages, confirmedAction, currency: currency || "INR" }
     },
     "Failed to query assistant."
   );
@@ -704,7 +705,8 @@ export async function queryAssistantStream(
   confirmedAction: { tool: string; args: any } | null,
   user: User,
   onChunk: (chunk: string) => void,
-  onPendingAction?: (action: { tool: string; args: any }) => void
+  onPendingAction?: (action: { tool: string; args: any }) => void,
+  currency?: string
 ): Promise<void> {
   const endpoint = API_BASE_URL ? new URL("/api/assistant/stream", API_BASE_URL).toString() : "/api/assistant/stream";
   const headers = await buildAuthorizedHeaders(user, {
@@ -714,7 +716,7 @@ export async function queryAssistantStream(
   const response = await fetch(endpoint, {
     method: "POST",
     headers,
-    body: JSON.stringify({ messages, confirmedAction })
+    body: JSON.stringify({ messages, confirmedAction, currency: currency || "INR" })
   });
 
   if (!response.ok) {
@@ -746,21 +748,24 @@ export async function queryAssistantStream(
       const trimmed = line.trim();
       if (trimmed.startsWith("data: ")) {
         const payloadStr = trimmed.slice(6).trim();
+        let payload: any;
         try {
-          const payload = JSON.parse(payloadStr);
-          if (payload.type === "text" && payload.text) {
-            onChunk(payload.text);
-          } else if (payload.type === "action" && payload.pendingAction && onPendingAction) {
-            onPendingAction(payload.pendingAction);
-          } else if (payload.type === "error") {
-            throw new Error(payload.error || "Stream failed.");
-          } else if (payload.type === "done") {
-            return;
-          }
+          payload = JSON.parse(payloadStr);
         } catch (e: any) {
           if (e.message && e.message !== "Unexpected end of JSON input") {
             console.warn("Error parsing stream chunk:", e);
           }
+          continue;
+        }
+
+        if (payload.type === "text" && payload.text) {
+          onChunk(payload.text);
+        } else if (payload.type === "action" && payload.pendingAction && onPendingAction) {
+          onPendingAction(payload.pendingAction);
+        } else if (payload.type === "error") {
+          throw new Error(payload.error || "Stream failed.");
+        } else if (payload.type === "done") {
+          return;
         }
       }
     }

@@ -1,11 +1,12 @@
 import { useState, type ReactNode, RefObject } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import type { User } from "firebase/auth";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { AssistantPanel } from "../components/AssistantPanel";
-import { BellIcon, cn } from "../components/ui";
+import { cn } from "../components/ui";
+import { LayoutDashboard, Receipt, Wallet as WalletIcon, Bell } from "lucide-react";
 import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
 
 type SignedInLayoutProps = {
@@ -56,10 +57,10 @@ type SignedInLayoutProps = {
 };
 
 const mainNavItems = [
-  { to: "/dashboard", label: "Dashboard", icon: false },
-  { to: "/expenses", label: "Expenses", icon: false },
-  { to: "/wallets", label: "Wallets", icon: false },
-  { to: "/alerts", label: "Alerts", icon: false }
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/expenses", label: "Expenses", icon: Receipt },
+  { to: "/wallets", label: "Wallets", icon: WalletIcon },
+  { to: "/alerts", label: "Alerts", icon: Bell }
 ] as const;
 
 export function SignedInLayout({
@@ -99,7 +100,16 @@ export function SignedInLayout({
   onDeleteAccount,
   children
 }: SignedInLayoutProps) {
+  const location = useLocation();
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+
+  const activeIndex = mainNavItems.findIndex((item) => {
+    if (item.to === "/dashboard") {
+      return location.pathname === "/dashboard" || location.pathname === "/";
+    }
+    return location.pathname.startsWith(item.to);
+  });
+  const validActiveIndex = activeIndex >= 0 ? activeIndex : 0;
 
   const handleNavClick = () => {
     onCloseProfileMenu();
@@ -111,12 +121,22 @@ export function SignedInLayout({
     <main className="app-page">
       <header className="surface-card sticky top-4 z-50 px-4 py-3 sm:px-5 lg:px-6">
         <div className="flex items-center justify-between gap-3 lg:gap-6">
-          <div className="min-w-0">
-            <p className="section-eyebrow">Personal finance</p>
-            <NavLink to="/dashboard" className="block truncate font-display text-[2rem] leading-none tracking-[-0.04em] text-ink" onClick={handleNavClick}>
-              Expense Tracker
-            </NavLink>
-          </div>
+          <NavLink
+            to="/dashboard"
+            className="flex items-center gap-2.5 sm:gap-3 group shrink-0"
+            onClick={handleNavClick}
+            aria-label="Expense Tracker"
+          >
+            <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl overflow-hidden shrink-0 border border-slate-200/80 shadow-xs transition-transform group-hover:scale-105">
+              <img src="/expense-tracker.avif" alt="Expense Tracker Logo" className="h-full w-full object-cover" />
+            </div>
+            <div className="hidden sm:block min-w-0">
+              <p className="section-eyebrow leading-tight">Personal finance</p>
+              <span className="block truncate font-display text-[1.65rem] lg:text-[1.85rem] leading-none tracking-[-0.03em] text-ink">
+                Expense Tracker
+              </span>
+            </div>
+          </NavLink>
 
           <nav className="hidden flex-1 items-center justify-center gap-2 lg:flex" aria-label="Primary navigation">
             {mainNavItems.map((item) => (
@@ -188,22 +208,81 @@ export function SignedInLayout({
 
       </header>
 
-      <div className="mt-6 app-grid lg:mt-8">{children}</div>
+      <div className="mt-6 app-grid pb-24 lg:mt-8 lg:pb-0">{children}</div>
 
-      <nav className="fixed inset-x-4 bottom-4 z-50 rounded-[26px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(252,251,247,0.82))] p-2 shadow-[0_24px_80px_rgba(40,44,35,0.18)] backdrop-blur-xl lg:hidden" aria-label="Bottom navigation">
-        <div className="grid grid-cols-4 gap-2">
-          {mainNavItems.map((item) => (
-            <NavLink
-              key={`${item.to}-bottom`}
-              to={item.to}
-              onClick={handleNavClick}
-              className={({ isActive }) => cn("relative mobile-tab-pill", isActive && "mobile-tab-pill-active")}
-              aria-label={item.label}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-50 rounded-t-[22px] sm:rounded-t-[26px] border-t border-x border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,250,248,0.95))] px-1.5 pt-0 pb-[max(0.6rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(20,40,25,0.08)] backdrop-blur-2xl lg:hidden overflow-hidden"
+        aria-label="Bottom navigation"
+      >
+        <div className="relative grid grid-cols-4 items-center">
+          {/* Fluid Sliding Flat Green Dew Drop Notch Indicator */}
+          <div
+            className="absolute top-0 bottom-0 pointer-events-none transition-all duration-300 ease-[cubic-bezier(0.34,1.25,0.64,1)] flex items-start justify-center"
+            style={{
+              left: `${validActiveIndex * 25}%`,
+              width: "25%",
+              opacity: activeIndex >= 0 ? 1 : 0
+            }}
+          >
+            <svg
+              viewBox="0 0 100 62"
+              preserveAspectRatio="none"
+              className="w-full h-full max-h-[62px]"
+              aria-hidden="true"
             >
-              {item.icon ? <BellIcon className="h-[18px] w-[18px]" /> : item.label}
-              {item.to === "/alerts" && unreadNotificationCount > 0 ? <span className="absolute right-3 top-2.5 h-2.5 w-2.5 rounded-full bg-[#d63b3b] ring-2 ring-[rgba(255,255,255,0.85)]" aria-hidden="true" /> : null}
-            </NavLink>
-          ))}
+              {/* Smartphone-style natural flat green dewdrop notch dipping down from top edge */}
+              <path
+                d="M 8 0 C 18 0, 22 5, 24 14 C 26 25, 28 35, 31 43 C 35 53, 42 59, 50 59 C 58 59, 65 53, 69 43 C 72 35, 74 25, 76 14 C 78 5, 82 0, 92 0 Z"
+                fill="#1e7a53"
+              />
+            </svg>
+          </div>
+
+          {mainNavItems.map((item, idx) => {
+            const Icon = item.icon;
+            const isActive = activeIndex === idx;
+
+            return (
+              <NavLink
+                key={`${item.to}-bottom`}
+                to={item.to}
+                onClick={handleNavClick}
+                className={cn(
+                  "relative z-10 flex min-w-0 flex-1 flex-col items-center justify-center gap-1 pt-1.5 pb-2 px-1 transition-all duration-200 select-none",
+                  isActive
+                    ? "text-white font-bold"
+                    : "text-slate-500 hover:text-slate-800"
+                )}
+                aria-label={item.label}
+              >
+                {/* Text label placed ABOVE over the icon */}
+                <span className={cn(
+                  "truncate tracking-tight text-[10.5px] leading-tight transition-colors duration-200",
+                  isActive ? "text-white font-bold" : "text-slate-600 font-medium"
+                )}>
+                  {item.label}
+                </span>
+
+                {/* Icon placed DOWN */}
+                <div className="relative flex items-center justify-center transition-transform duration-200">
+                  <Icon className={cn("h-5 w-5 transition-transform duration-200", isActive && "scale-105 stroke-[2.3]")} />
+                  {item.to === "/alerts" && unreadNotificationCount > 0 ? (
+                    <span
+                      className={cn(
+                        "absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2 transition-colors",
+                        isActive
+                          ? "bg-white text-emerald-800 ring-emerald-700 shadow-xs"
+                          : "bg-rose-500 text-white ring-white"
+                      )}
+                      aria-hidden="true"
+                    >
+                      {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
+                    </span>
+                  ) : null}
+                </div>
+              </NavLink>
+            );
+          })}
         </div>
       </nav>
 
@@ -220,6 +299,7 @@ export function SignedInLayout({
 
       <AssistantPanel
         currentUser={currentUser}
+        currency={reminderPreferences?.default_currency || "INR"}
         isOpen={isAssistantOpen}
         onToggle={() => setIsAssistantOpen(!isAssistantOpen)}
         onClose={() => setIsAssistantOpen(false)}

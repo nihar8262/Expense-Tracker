@@ -47,6 +47,60 @@ export function PlatformLogo({
   );
 }
 
+export function findPlatform(value: string | null | undefined) {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none") return null;
+
+  const rawLower = trimmed.toLowerCase();
+  const normalized = rawLower.replace(/[\s_-]+/g, "");
+
+  // 1. Exact match on id
+  const exactId = PLATFORMS.find((p) => p.id === trimmed);
+  if (exactId) return exactId;
+
+  // 2. Case-insensitive match on id
+  const lowerId = PLATFORMS.find((p) => p.id.toLowerCase() === rawLower);
+  if (lowerId) return lowerId;
+
+  // 3. Case-insensitive match on name
+  const lowerName = PLATFORMS.find((p) => p.name.toLowerCase() === rawLower);
+  if (lowerName) return lowerName;
+
+  // 4. Normalized match (ignoring spaces, underscores, hyphens)
+  const normMatch = PLATFORMS.find(
+    (p) =>
+      p.id.toLowerCase().replace(/[\s_-]+/g, "") === normalized ||
+      p.name.toLowerCase().replace(/[\s_-]+/g, "") === normalized
+  );
+  if (normMatch) return normMatch;
+
+  // 5. Special aliases
+  if (normalized.includes("amazon")) {
+    const amazon = PLATFORMS.find((p) => p.id === "amazon_now");
+    if (amazon) return amazon;
+  }
+  if (normalized.includes("flipkart")) {
+    const flipkart = PLATFORMS.find((p) => p.id === "flipkart_minutes");
+    if (flipkart) return flipkart;
+  }
+  if (normalized.includes("bookmy") || normalized.includes("bms")) {
+    const bms = PLATFORMS.find((p) => p.id === "bookmyshow");
+    if (bms) return bms;
+  }
+  if (normalized.includes("bigbasket") || normalized.includes("bbnow")) {
+    const bb = PLATFORMS.find((p) => p.id === "bigbasket");
+    if (bb) return bb;
+  }
+
+  // 6. Fallback platform for custom platforms so it still renders name initial and never disappears
+  return {
+    id: trimmed,
+    name: trimmed,
+    logo: ""
+  };
+}
+
 interface PlatformPickerProps {
   value: string | null;
   onChange?: ((id: string | null) => void) | null;
@@ -70,7 +124,7 @@ export function PlatformPicker({
   const isInteractive = Boolean(onChange) && !disabled;
 
   // Find selected platform details
-  const selectedPlatform = PLATFORMS.find((p) => p.id === value);
+  const selectedPlatform = findPlatform(value);
 
   // Animate on open
   useEffect(() => {
@@ -268,13 +322,13 @@ export function PlatformPicker({
                 type="button"
                 onClick={() => handleSelect(null)}
                 onKeyDown={(e) => handleOptionKeyDown(e, 0)}
-                aria-pressed={value === null}
+                aria-pressed={!selectedPlatform}
                 className="flex flex-col items-center gap-1.5 focus-visible:outline-none group"
               >
                 <div
                   className={cn(
                     "w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 transition-all",
-                    value === null ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
+                    !selectedPlatform ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
                   )}
                 >
                   <svg
@@ -292,7 +346,7 @@ export function PlatformPicker({
 
               {/* Platform cells */}
               {PLATFORMS.map((platform, idx) => {
-                const isSelected = value === platform.id;
+                const isSelected = selectedPlatform?.id === platform.id || (Boolean(value) && value?.trim().toLowerCase() === platform.id.toLowerCase());
                 return (
                   <button
                     key={platform.id}
@@ -345,13 +399,13 @@ export function PlatformPicker({
               type="button"
               onClick={() => handleSelect(null)}
               onKeyDown={(e) => handleOptionKeyDown(e, 0)}
-              aria-pressed={value === null}
+              aria-pressed={!selectedPlatform}
               className="flex flex-col items-center gap-1.5 focus-visible:outline-none group"
             >
               <div
                 className={cn(
                   "w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 transition-all",
-                  value === null ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
+                  !selectedPlatform ? "ring-2 ring-primary border-primary" : "group-hover:border-zinc-300 dark:group-hover:border-zinc-600"
                 )}
               >
                 <svg
@@ -369,7 +423,7 @@ export function PlatformPicker({
 
             {/* Platform cells */}
             {PLATFORMS.map((platform, idx) => {
-              const isSelected = value === platform.id;
+              const isSelected = selectedPlatform?.id === platform.id || (Boolean(value) && value?.trim().toLowerCase() === platform.id.toLowerCase());
               return (
                 <button
                   key={platform.id}

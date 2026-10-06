@@ -22,6 +22,7 @@ type PendingAction = {
 
 type AssistantPanelProps = {
   currentUser: User;
+  currency?: string;
   isOpen: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -34,7 +35,7 @@ const SUGGESTIONS = [
   "Log an expense of 15.00 for lunch today"
 ];
 
-export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: AssistantPanelProps) {
+export function AssistantPanel({ currentUser, currency = "INR", isOpen, onToggle, onClose }: AssistantPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -99,8 +100,13 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
         },
         (action: { tool: string; args: any }) => {
           setPendingAction(action as PendingAction);
-        }
+        },
+        currency
       );
+
+      if (!hasStreamed && !pendingAction) {
+        throw new Error("Stream produced no content");
+      }
 
       if (confirmedAction && confirmedAction.tool === "create_expense") {
         window.dispatchEvent(new CustomEvent("expense-added"));
@@ -113,7 +119,8 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
           const result = await queryAssistant(
             updatedMessages.slice(0, assistantIndex),
             confirmedAction,
-            currentUser
+            currentUser,
+            currency
           );
 
           setMessages((prev) => {
@@ -121,7 +128,7 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
             if (next[assistantIndex]) {
               next[assistantIndex] = {
                 role: "assistant",
-                content: result.answer
+                content: result.answer || "I received your query but didn't get any details. Please try rephrasing."
               };
             }
             return next;
@@ -136,13 +143,13 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
           }
         } catch (error: any) {
           let friendlyMessage = "Sorry, I am currently having trouble connecting to my AI service. Please try again in a moment!";
-          const errMsg = String(error.message || "").toLowerCase();
+          const errMsg = String(error?.message || streamError?.message || "").toLowerCase();
 
-          if (errMsg.includes("degraded") || errMsg.includes("invoked") || errMsg.includes("llm api error") || errMsg.includes("400") || errMsg.includes("500")) {
+          if (errMsg.includes("degraded") || errMsg.includes("invoked") || errMsg.includes("llm api error") || errMsg.includes("400") || errMsg.includes("500") || errMsg.includes("410") || errMsg.includes("not set")) {
             friendlyMessage = "Sorry, my AI service is currently down or undergoing maintenance. Please try again in a short while!";
           } else if (errMsg.includes("network") || errMsg.includes("failed to fetch") || errMsg.includes("timeout") || errMsg.includes("network error")) {
             friendlyMessage = "Sorry, I had trouble connecting to the server. Please check your network connection and try again!";
-          } else if (error.message && error.message.length < 100) {
+          } else if (error?.message && error.message.length < 100) {
             friendlyMessage = `Sorry, I ran into an error: ${error.message}`;
           }
 
@@ -234,19 +241,24 @@ export function AssistantPanel({ currentUser, isOpen, onToggle, onClose }: Assis
                 return null;
               }
 
+              // Hide empty assistant bubble while thinking / waiting for first chunk
+              if (!isUser && !msg.content?.trim() && isLoading) {
+                return null;
+              }
+
               return (
                 <div
                   key={idx}
                   className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`p-3.5 max-w-[85%] text-[13.5px] leading-relaxed shadow-sm ${
+                    className={`p-3.5 max-w-[85%] text-[13.5px] leading-relaxed shadow-sm whitespace-pre-wrap ${
                       isUser
                         ? "bg-primary text-white rounded-[20px_20px_4px_20px] font-medium"
                         : "bg-slate-100/90 text-ink border border-slate-200/30 rounded-[20px_20px_20px_4px]"
                     }`}
                   >
-                    {msg.content}
+                    {msg.content?.trim() || "I'm having trouble retrieving a response right now. Please try again."}
                   </div>
                 </div>
               );

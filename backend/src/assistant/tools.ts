@@ -9,7 +9,7 @@ export interface ToolDefinition {
   handler: (args: any, userId: string) => Promise<any>;
 }
 
-export function getTools(store: ExpenseStore): ToolDefinition[] {
+export function getTools(store: ExpenseStore, currencyCode: string = "INR", currencySymbol: string = "₹"): ToolDefinition[] {
   return [
     {
       name: "list_expenses",
@@ -36,15 +36,15 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
           category: args.category,
           from_date: args.startDate,
           to_date: args.endDate,
-          limit: 100
+          limit: 500
         });
         const filtered = res?.expenses || [];
-        return { expenses: filtered };
+        return { expenses: filtered, currency: currencyCode, currencySymbol };
       }
     },
     {
       name: "get_expense_summary",
-      description: "Retrieve aggregated personal spending statistics (total spent, category breakdown, count) for a given date range and/or category.",
+      description: "Retrieve aggregated personal spending statistics (total spent, category breakdown with percentages, count) for a given date range (startDate/endDate) and/or category. ALWAYS use this tool when the user asks for spending analysis, monthly overviews, category breakdowns, or advice on what categories to cut back on.",
       parameters: {
         type: "object",
         properties: {
@@ -67,7 +67,7 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
           category: args.category,
           from_date: args.startDate,
           to_date: args.endDate,
-          limit: 100
+          limit: 500
         });
         const filtered = res?.expenses || [];
 
@@ -85,15 +85,47 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
         }
 
         const total = (totalCents / 100).toFixed(2);
+        const sortedCategories = Object.entries(categoryBreakdown)
+          .map(([category, amount]) => ({
+            category,
+            amount,
+            percentage: totalCents > 0 ? ((parseFloat(amount) * 10000) / totalCents).toFixed(1) + "%" : "0%"
+          }))
+          .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
 
         return {
           total,
+          currency: currencyCode,
+          currencySymbol,
           count: filtered.length,
           categoryBreakdown,
+          topCategories: sortedCategories,
           period: {
             startDate: args.startDate || "all time",
             endDate: args.endDate || "present"
           }
+        };
+      }
+    },
+    {
+      name: "list_budgets",
+      description: "Retrieve all active personal budgets set by the user, including overall monthly budgets and category-specific budget limits. Always use this when the user asks about budgets, spending limits, or whether they are under or over budget.",
+      parameters: {
+        type: "object",
+        properties: {}
+      },
+      handler: async (_args: any, userId: string) => {
+        const budgets = await store.listBudgets(userId);
+        return {
+          currency: currencyCode,
+          currencySymbol,
+          budgets: (budgets || []).map(b => ({
+            id: b.id,
+            amount: b.amount,
+            scope: b.scope,
+            category: b.category,
+            month: b.month
+          }))
         };
       }
     },
@@ -327,7 +359,7 @@ export function getTools(store: ExpenseStore): ToolDefinition[] {
     },
     {
       name: "search_expenses_semantic",
-      description: "Search across all user expenses (both personal and shared-wallet) semantically. Use this when the user asks questions that require matching meanings rather than exact words, e.g., 'find my coffee purchases', 'where did I spend money on cabs', or similar conceptual searches.",
+      description: "Search across user expenses semantically for specific individual items, purchases, or merchants (e.g., 'find my coffee purchases', 'where did I spend money on cabs', 'groceries at Costco'). DO NOT use this tool for monthly spending summaries, category totals, or general budgeting advice — use get_expense_summary or list_budgets instead.",
       parameters: {
         type: "object",
         properties: {

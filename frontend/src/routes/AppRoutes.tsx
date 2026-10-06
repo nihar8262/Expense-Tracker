@@ -86,7 +86,8 @@ function createInitialFormState(baseDate = new Date()): ExpenseForm {
     amount: "",
     category: "",
     description: "",
-    date: getTodayIsoDate(baseDate)
+    date: getTodayIsoDate(baseDate),
+    platform: null
   };
 }
 
@@ -2226,7 +2227,8 @@ export function AppRoutes() {
       amount: expense.amount,
       category: expense.category,
       description: expense.description,
-      date: expense.date
+      date: expense.date,
+      platform: expense.platform ?? null
     });
     setStatusMessage("");
     setErrorMessage("");
@@ -2580,7 +2582,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleCreateWalletExpense(inputWalletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) {
+  async function handleCreateWalletExpense(inputWalletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to add a shared expense.");
       return false;
@@ -2604,7 +2606,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleUpdateWalletExpense(inputWalletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }> }) {
+  async function handleUpdateWalletExpense(inputWalletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to update a shared expense.");
       return false;
