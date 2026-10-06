@@ -150,6 +150,19 @@ export function DashboardPage({
   const [isSmallScreen, setIsSmallScreen] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 640 : false));
   const trendSectionRef = useRef<HTMLElement | null>(null);
 
+  const [visibleTrendCount, setVisibleTrendCount] = useState(12);
+
+  // Reset to 12 visible cards whenever filters or dataset change
+  useEffect(() => {
+    setVisibleTrendCount(12);
+  }, [selectedCategory, selectedTimeRange, chartGranularity, selectedPlatform, dashboardViewMode, dashboardWalletId]);
+
+  const visibleSpendTrend = useMemo(() => {
+    return spendTrend.slice(0, visibleTrendCount);
+  }, [spendTrend, visibleTrendCount]);
+
+  const hasMoreTrend = spendTrend.length > visibleTrendCount;
+
   const expenseYearOptions = useMemo(() => {
     const years = (expenseMonthOptions ?? []).map((m) => m.slice(0, 4));
     const currentYear = new Date().getFullYear().toString();
@@ -816,7 +829,7 @@ export function DashboardPage({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {spendTrend.map((point, index) => (
+                {visibleSpendTrend.map((point, index) => (
                   <div
                     key={point.key}
                     className="relative"
@@ -868,7 +881,7 @@ export function DashboardPage({
                       <div
                         className={cn(
                           "pointer-events-auto absolute bottom-[calc(100%+8px)] z-20 hidden w-[min(20rem,calc(100vw-2rem))] max-h-[220px] flex-col rounded-[20px] border border-[color:var(--border)] bg-[#faf8f1]/98 p-3 shadow-[0_18px_40px_rgba(40,44,35,0.14)] backdrop-blur-md sm:flex",
-                          getTrendTooltipAlignment(index, spendTrend.length)
+                          getTrendTooltipAlignment(index, visibleSpendTrend.length)
                         )}
                         onMouseEnter={() => {
                           if (trendHoverTimeoutRef.current) {
@@ -896,6 +909,21 @@ export function DashboardPage({
                   </div>
                 ))}
               </div>
+
+              {hasMoreTrend && (
+                <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleTrendCount((prev) => prev + 12)}
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[color:var(--border)] bg-white px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-ink shadow-xs transition hover:bg-slate-50 hover:border-primary/40 active:scale-95"
+                  >
+                    <span>Load more</span>
+                    <span className="text-[11px] font-normal text-muted lowercase">
+                      ({visibleSpendTrend.length} of {spendTrend.length})
+                    </span>
+                  </button>
+                </div>
+              )}
             </>
           )}
         

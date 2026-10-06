@@ -25,11 +25,14 @@ const tools = [
       }
     },
     handler: async (args, userId) => {
+      const fromDate = args.startDate && /^\d{4}-\d{2}-\d{2}$/.test(args.startDate) ? args.startDate : undefined;
+      const toDate = args.endDate && /^\d{4}-\d{2}-\d{2}$/.test(args.endDate) ? args.endDate : undefined;
+      const category = typeof args.category === "string" && args.category.trim() ? args.category.trim() : undefined;
       const result = await listExpenses({
-        category: args.category,
-        from_date: args.startDate,
-        to_date: args.endDate,
-        limit: 500
+        category,
+        from_date: fromDate,
+        to_date: toDate,
+        limit: 100
       }, userId);
       if (result.status !== 200) {
         throw new Error(result.body?.error || "Failed to list expenses.");
@@ -58,11 +61,14 @@ const tools = [
       }
     },
     handler: async (args, userId) => {
+      const fromDate = args.startDate && /^\d{4}-\d{2}-\d{2}$/.test(args.startDate) ? args.startDate : undefined;
+      const toDate = args.endDate && /^\d{4}-\d{2}-\d{2}$/.test(args.endDate) ? args.endDate : undefined;
+      const category = typeof args.category === "string" && args.category.trim() ? args.category.trim() : undefined;
       const result = await listExpenses({
-        category: args.category,
-        from_date: args.startDate,
-        to_date: args.endDate,
-        limit: 500
+        category,
+        from_date: fromDate,
+        to_date: toDate,
+        limit: 100
       }, userId);
       if (result.status !== 200) {
         throw new Error(result.body?.error || "Failed to retrieve expenses for summary.");

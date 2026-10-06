@@ -230,9 +230,9 @@ export function SignedInLayout({
               className="w-full h-full max-h-[62px]"
               aria-hidden="true"
             >
-              {/* Smartphone-style natural flat green dewdrop notch dipping down from top edge */}
+              {/* Smartphone-style natural flat green dewdrop notch dipping down from top edge - expanded at top */}
               <path
-                d="M 8 0 C 18 0, 22 5, 24 14 C 26 25, 28 35, 31 43 C 35 53, 42 59, 50 59 C 58 59, 65 53, 69 43 C 72 35, 74 25, 76 14 C 78 5, 82 0, 92 0 Z"
+                d="M 0 0 C 10 0, 14 3, 16 12 C 19 22, 22 32, 25 39 C 29 52, 38 60, 50 60 C 62 60, 71 52, 75 39 C 78 32, 81 22, 84 12 C 86 3, 90 0, 100 0 Z"
                 fill="#1e7a53"
               />
             </svg>

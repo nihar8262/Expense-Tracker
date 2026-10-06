@@ -32,11 +32,14 @@ export function getTools(store: ExpenseStore, currencyCode: string = "INR", curr
         }
       },
       handler: async (args: any, userId: string) => {
+        const fromDate = args.startDate && /^\d{4}-\d{2}-\d{2}$/.test(args.startDate) ? args.startDate : undefined;
+        const toDate = args.endDate && /^\d{4}-\d{2}-\d{2}$/.test(args.endDate) ? args.endDate : undefined;
+        const category = typeof args.category === "string" && args.category.trim() ? args.category.trim() : undefined;
         const res = await store.listExpenses(userId, {
-          category: args.category,
-          from_date: args.startDate,
-          to_date: args.endDate,
-          limit: 500
+          category,
+          from_date: fromDate,
+          to_date: toDate,
+          limit: 100
         });
         const filtered = res?.expenses || [];
         return { expenses: filtered, currency: currencyCode, currencySymbol };
@@ -63,11 +66,14 @@ export function getTools(store: ExpenseStore, currencyCode: string = "INR", curr
         }
       },
       handler: async (args: any, userId: string) => {
+        const fromDate = args.startDate && /^\d{4}-\d{2}-\d{2}$/.test(args.startDate) ? args.startDate : undefined;
+        const toDate = args.endDate && /^\d{4}-\d{2}-\d{2}$/.test(args.endDate) ? args.endDate : undefined;
+        const category = typeof args.category === "string" && args.category.trim() ? args.category.trim() : undefined;
         const res = await store.listExpenses(userId, {
-          category: args.category,
-          from_date: args.startDate,
-          to_date: args.endDate,
-          limit: 500
+          category,
+          from_date: fromDate,
+          to_date: toDate,
+          limit: 100
         });
         const filtered = res?.expenses || [];
 
