@@ -1,4 +1,4 @@
-import { useState, type ReactNode, RefObject } from "react";
+import { useMemo, useState, type ReactNode, RefObject } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import type { User } from "firebase/auth";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -6,7 +6,7 @@ import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { AssistantPanel } from "../components/AssistantPanel";
 import { cn } from "../components/ui";
-import { LayoutDashboard, Receipt, Wallet as WalletIcon, Bell } from "lucide-react";
+import { LayoutDashboard, Receipt, ReceiptIndianRupee, Wallet as WalletIcon, Bell } from "lucide-react";
 import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
 
 type SignedInLayoutProps = {
@@ -56,13 +56,6 @@ type SignedInLayoutProps = {
   children: ReactNode;
 };
 
-const mainNavItems = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/expenses", label: "Expenses", icon: Receipt },
-  { to: "/wallets", label: "Wallets", icon: WalletIcon },
-  { to: "/alerts", label: "Alerts", icon: Bell }
-] as const;
-
 export function SignedInLayout({
   currentUser,
   isProfileMenuOpen,
@@ -103,6 +96,19 @@ export function SignedInLayout({
   const location = useLocation();
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
+  const isIndianRupee = (reminderPreferences?.default_currency || "INR").toUpperCase() === "INR";
+  const ExpenseIcon = isIndianRupee ? ReceiptIndianRupee : Receipt;
+
+  const mainNavItems = useMemo(
+    () => [
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { to: "/expenses", label: "Expenses", icon: ExpenseIcon },
+      { to: "/wallets", label: "Wallets", icon: WalletIcon },
+      { to: "/alerts", label: "Alerts", icon: Bell }
+    ],
+    [ExpenseIcon]
+  );
+
   const activeIndex = mainNavItems.findIndex((item) => {
     if (item.to === "/dashboard") {
       return location.pathname === "/dashboard" || location.pathname === "/";
@@ -119,20 +125,20 @@ export function SignedInLayout({
 
   return (
     <main className="app-page">
-      <header className="surface-card sticky top-4 z-50 px-4 py-3 sm:px-5 lg:px-6">
-        <div className="flex items-center justify-between gap-3 lg:gap-6">
+      <header className="surface-card sticky top-4 z-50 px-3 py-2.5 sm:px-5 sm:py-3 lg:px-6">
+        <div className="flex items-center justify-between gap-2.5 sm:gap-3 lg:gap-6">
           <NavLink
             to="/dashboard"
-            className="flex items-center gap-2.5 sm:gap-3 group shrink-0"
+            className="flex items-center gap-2 sm:gap-3 group shrink-0"
             onClick={handleNavClick}
             aria-label="Expense Tracker"
           >
-            <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl overflow-hidden shrink-0 border border-slate-200/80 shadow-xs transition-transform group-hover:scale-105">
+            <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-slate-200/80 shadow-xs transition-transform group-hover:scale-105">
               <img src="/expense-tracker.avif" alt="Expense Tracker Logo" className="h-full w-full object-cover" />
             </div>
-            <div className="hidden sm:block min-w-0">
-              <p className="section-eyebrow leading-tight">Personal finance</p>
-              <span className="block truncate font-display text-[1.65rem] lg:text-[1.85rem] leading-none tracking-[-0.03em] text-ink">
+            <div className="min-w-0">
+              <p className="hidden sm:block section-eyebrow leading-tight">Personal finance</p>
+              <span className="block truncate font-display text-[13.5px] sm:text-[1.65rem] lg:text-[1.85rem] font-bold sm:font-normal leading-tight sm:leading-none tracking-tight sm:tracking-[-0.03em] text-ink">
                 Expense Tracker
               </span>
             </div>

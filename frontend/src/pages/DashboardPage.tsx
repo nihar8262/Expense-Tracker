@@ -910,18 +910,32 @@ export function DashboardPage({
                 ))}
               </div>
 
-              {hasMoreTrend && (
-                <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setVisibleTrendCount((prev) => prev + 12)}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[color:var(--border)] bg-white px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-ink shadow-xs transition hover:bg-slate-50 hover:border-primary/40 active:scale-95"
-                  >
-                    <span>Load more</span>
-                    <span className="text-[11px] font-normal text-muted lowercase">
-                      ({visibleSpendTrend.length} of {spendTrend.length})
-                    </span>
-                  </button>
+              {(hasMoreTrend || visibleTrendCount > 12) && (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  {hasMoreTrend && (
+                    <button
+                      type="button"
+                      onClick={() => setVisibleTrendCount((prev) => prev + 12)}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[color:var(--border)] bg-white px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-ink shadow-xs transition hover:bg-slate-50 hover:border-primary/40 active:scale-95"
+                    >
+                      <span>Load more</span>
+                      <span className="text-[11px] font-normal text-muted lowercase">
+                        ({visibleSpendTrend.length} of {spendTrend.length})
+                      </span>
+                    </button>
+                  )}
+                  {visibleTrendCount > 12 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVisibleTrendCount(12);
+                        trendSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200/90 bg-white/80 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-700 shadow-xs transition hover:bg-slate-100 hover:text-ink active:scale-95"
+                    >
+                      <span>Show less</span>
+                    </button>
+                  )}
                 </div>
               )}
             </>
