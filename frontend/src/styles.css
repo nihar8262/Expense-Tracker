@@ -278,22 +278,22 @@
      pill-toggle that matches the rest of the control row.
   ───────────────────────────────────────────────────────────── */
   .source-toggle {
-    @apply flex w-full sm:w-auto sm:inline-flex rounded-full border border-[color:var(--border)] bg-white/60 p-0.5 gap-0.5;
+    @apply flex w-full sm:w-auto sm:inline-flex rounded-xl border border-[color:var(--border)] bg-zinc-100/90 dark:bg-zinc-800/90 p-1 gap-1 h-[38px] items-center;
   }
 
   .source-toggle-btn {
-    @apply inline-flex flex-1 sm:flex-initial min-h-9 items-center justify-center gap-1.5 rounded-full
-           px-3.5 py-1.5 text-sm font-semibold
+    @apply inline-flex flex-1 sm:flex-initial h-full items-center justify-center gap-1.5 rounded-lg
+           px-3.5 py-1 text-xs font-semibold
            transition duration-200 ease-out
-           text-secondary hover:text-ink;
+           text-secondary hover:text-ink cursor-pointer;
   }
 
   .source-toggle-btn[aria-pressed="true"] {
-    @apply bg-white text-ink shadow-sm;
+    @apply bg-white dark:bg-zinc-700 text-ink shadow-2xs;
   }
 
   .source-toggle-btn:disabled {
-    @apply cursor-not-allowed opacity-40;
+    @apply cursor-not-allowed opacity-50;
   }
 
   /* Issue #4: compact 3-up grid for the Data view filter row.

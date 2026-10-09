@@ -1,11 +1,24 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { User } from "firebase/auth";
-import type { ReminderPreferences } from "../types";
+import type { ReminderPreferences, BankAccount, FeedbackRecord } from "../types";
 import { SurfaceCard, StatusNotice, PageHero, cn } from "../components/ui";
-import { listTokens, createToken, revokeToken, type Token } from "../services/api";
+import {
+  listTokens,
+  createToken,
+  revokeToken,
+  type Token,
+  listBankAccounts,
+  deleteBankAccount,
+  updateBankAccount,
+  listUserFeedbacks,
+  deleteFeedback
+} from "../services/api";
 import { TokenRevealModal } from "../components/TokenRevealModal";
 import { McpIntegrationGuideModal } from "../components/McpIntegrationGuideModal";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { AddBankAccountModal } from "../components/AddBankAccountModal";
+import { FeedbackModal } from "../components/FeedbackModal";
+import { BankLogo, BankCardBadge } from "../components/BankPicker";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -207,6 +220,94 @@ export function ProfilePage({
   const [revealToken, setRevealToken] = useState<string | null>(null);
   const [revealTokenLabel, setRevealTokenLabel] = useState("");
   const [guideModalOpen, setGuideModalOpen] = useState(false);
+
+  // Bank Accounts Management
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [isLoadingBanks, setIsLoadingBanks] = useState(false);
+  const [bankError, setBankError] = useState<string | null>(null);
+  const [bankModalOpen, setBankModalOpen] = useState(false);
+  const [editingBankAccount, setEditingBankAccount] = useState<BankAccount | null>(null);
+
+  // User Feedback Modal & Recent Feedbacks (within 24h)
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<FeedbackRecord[]>([]);
+  const [editingFeedback, setEditingFeedback] = useState<FeedbackRecord | null>(null);
+  const [isLoadingFeedbacks, setIsLoadingFeedbacks] = useState(false);
+  const [deletingFeedbackId, setDeletingFeedbackId] = useState<string | null>(null);
+
+  const loadFeedbacks = useCallback(async () => {
+    if (!currentUser) return;
+    setIsLoadingFeedbacks(true);
+    try {
+      const data = await listUserFeedbacks(currentUser);
+      setFeedbacks(data);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingFeedbacks(false);
+    }
+  }, [currentUser]);
+
+  async function handleDeleteFeedback(id: string) {
+    if (!currentUser) return;
+    if (!window.confirm("Are you sure you want to delete this feedback?")) return;
+    setDeletingFeedbackId(id);
+    try {
+      await deleteFeedback(id, currentUser);
+      setFeedbacks((prev) => prev.filter((f) => f.id !== id));
+      window.showToast?.("Feedback deleted successfully.", "success");
+    } catch (err: unknown) {
+      window.showToast?.(err instanceof Error ? err.message : "Failed to delete feedback.", "error");
+    } finally {
+      setDeletingFeedbackId(null);
+    }
+  }
+
+  const loadBankAccounts = async () => {
+    setIsLoadingBanks(true);
+    setBankError(null);
+    try {
+      const data = await listBankAccounts(currentUser);
+      setBankAccounts(data);
+    } catch (err: any) {
+      console.error(err);
+      setBankError(err.message || "Failed to load bank accounts.");
+    } finally {
+      setIsLoadingBanks(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBankAccounts();
+    void loadFeedbacks();
+  }, [currentUser, loadFeedbacks]);
+
+  const handleSetDefaultBank = async (account: BankAccount) => {
+    try {
+      await updateBankAccount(account.id, { isDefault: true }, currentUser);
+      await loadBankAccounts();
+    } catch (err: any) {
+      setBankError(err.message || "Failed to set default account.");
+    }
+  };
+
+  const handleDeleteBankAccount = (account: BankAccount) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Remove Bank / Card",
+      description: `Are you sure you want to remove "${account.account_label || account.bank_name}"? Existing expenses linked to this bank will retain historical records.`,
+      confirmLabel: "Remove",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        try {
+          await deleteBankAccount(account.id, currentUser);
+          await loadBankAccounts();
+        } catch (err: any) {
+          setBankError(err.message || "Failed to remove bank account.");
+        }
+      }
+    });
+  };
 
   const loadTokens = async () => {
     setIsLoadingTokens(true);
@@ -410,7 +511,7 @@ export function ProfilePage({
               <div className="flex flex-col items-center gap-3 p-3 border border-[color:var(--border)] bg-white/40 rounded-2xl">
                 <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-primary/20 shadow-sm flex items-center justify-center bg-primary/5">
                   {customPhotoUrl ? (
-                    <img src={customPhotoUrl} alt="Avatar Preview" className="h-full w-full object-cover" />
+                    <img src={customPhotoUrl} alt="Avatar Preview" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                   ) : (
                     <span className="text-2xl font-bold text-primary/70">{avatarFallback}</span>
                   )}
@@ -593,6 +694,244 @@ export function ProfilePage({
           )}
         </SurfaceCard>
       </div>
+
+      {/* Bank Accounts & Cards Management */}
+      <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Linked Bank Accounts & Cards</h2>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                {bankAccounts.length}
+              </span>
+            </div>
+            <p className="text-xs text-secondary mt-0.5">
+              Add your debit, credit, or RuPay credit cards to seamlessly categorize expenses and track spends by bank.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingBankAccount(null);
+              setBankModalOpen(true);
+            }}
+            className="ui-button-primary text-xs px-3.5 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-sm"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Bank / Card
+          </button>
+        </div>
+
+        {bankError && (
+          <StatusNotice tone="error">{bankError}</StatusNotice>
+        )}
+
+        {isLoadingBanks ? (
+          <div className="py-6 text-center text-xs text-muted animate-pulse">Loading linked accounts...</div>
+        ) : bankAccounts.length === 0 ? (
+          <div className="text-center py-8 border border-dashed border-[color:var(--border)] rounded-2xl bg-white/30 space-y-2">
+            <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15A2.25 2.25 0 0 0 2.25 6.75v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+              </svg>
+            </div>
+            <p className="text-xs font-semibold text-ink">No bank accounts linked yet</p>
+            <p className="text-[11px] text-muted max-w-sm mx-auto">
+              Link your credit cards, debit cards, or bank accounts to quickly select them in expense forms and visualize your bank distribution.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingBankAccount(null);
+                setBankModalOpen(true);
+              }}
+              className="ui-button-secondary text-xs px-3 py-1.5 mt-2"
+            >
+              + Link Your First Card / Bank
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {bankAccounts.map((account) => (
+              <div
+                key={account.id}
+                className={cn(
+                  "relative rounded-2xl border bg-white/80 p-4 shadow-sm transition-all hover:shadow-md flex flex-col justify-between space-y-3",
+                  account.is_default
+                    ? "border-primary/40 ring-1 ring-primary/20 bg-gradient-to-br from-white via-white to-primary/5"
+                    : "border-[color:var(--border)]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <BankLogo bankName={account.bank_name} size="md" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <strong className="text-sm text-ink font-semibold truncate block">
+                          {account.bank_name}
+                        </strong>
+                        {account.is_default && (
+                          <span className="rounded-full bg-emerald-600/10 text-emerald-700 text-[10px] font-bold px-1.5 py-0.2">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      {account.account_label ? (
+                        <p className="text-xs text-secondary truncate">{account.account_label}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-[color:var(--border)]/60 text-xs">
+                  <div className="flex items-center gap-2">
+                    <BankCardBadge type={account.account_type} />
+                    {account.last_four_digits ? (
+                      <span className="font-mono text-muted text-[11px] font-medium tracking-wider">
+                        •••• {account.last_four_digits}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {!account.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => void handleSetDefaultBank(account)}
+                        className="text-[11px] text-primary hover:underline font-medium px-1"
+                        title="Set as default payment method"
+                      >
+                        Set Default
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingBankAccount(account);
+                        setBankModalOpen(true);
+                      }}
+                      className="text-[11px] text-secondary hover:text-ink font-medium px-1"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteBankAccount(account)}
+                      className="text-[11px] text-rose-600 hover:text-rose-700 font-medium px-1"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SurfaceCard>
+
+      {/* User Feedback & Suggestions Section */}
+      <SurfaceCard className="relative z-10 p-4 sm:p-5 bg-gradient-to-r from-emerald-50/70 via-white to-amber-50/50 border border-emerald-500/20 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">💬</span>
+              <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Feedback & Suggestions</h2>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                {feedbacks.length}/5 daily submissions
+              </span>
+            </div>
+            <p className="text-xs text-secondary max-w-xl leading-relaxed">
+              Have an idea for a feature, spotted an issue, or love using the app? Share your suggestions directly with our development team. You can edit your submissions within 24 hours.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFeedback(null);
+              setFeedbackModalOpen(true);
+            }}
+            disabled={feedbacks.length >= 5}
+            className="ui-button-primary text-xs px-4 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-sm disabled:opacity-50"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+            </svg>
+            {feedbacks.length >= 5 ? "Daily Limit Reached (5/5)" : "Give Feedback"}
+          </button>
+        </div>
+
+        {/* Recent feedbacks submitted within 24h (editable) */}
+        {isLoadingFeedbacks && feedbacks.length === 0 ? (
+          <div className="pt-2 text-[11px] text-muted animate-pulse">Checking recent feedback...</div>
+        ) : feedbacks.length > 0 ? (
+          <div className="pt-3 border-t border-[color:var(--border)]/60 space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span className="font-semibold text-ink text-[11px] uppercase tracking-wider">
+                Your Recent Submissions (Editable for 24h)
+              </span>
+              <span className="text-[11px]">
+                {feedbacks.length} active
+              </span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {feedbacks.map((fb) => {
+                const createdTime = new Date(fb.created_at).getTime();
+                const hoursRemaining = Math.max(0, Math.round((24 * 60 * 60 * 1000 - (Date.now() - createdTime)) / (60 * 60 * 1000)));
+                return (
+                  <div
+                    key={fb.id}
+                    className="p-3 rounded-xl border border-[color:var(--border)] bg-white/70 shadow-2xs flex flex-col justify-between gap-2"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700">
+                          {fb.category === "feature" ? "Feature Idea" : fb.category === "bug" ? "Bug Report" : "General Feedback"}
+                        </span>
+                        {fb.rating && (
+                          <span className="text-xs text-amber-500 font-semibold">
+                            {fb.rating}★
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-ink mt-1.5 line-clamp-2 leading-relaxed">
+                        {fb.message}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 text-[10px] text-muted border-t border-[color:var(--border)]/40">
+                      <span>{hoursRemaining > 0 ? `Editable for ~${hoursRemaining}h` : "Submitted"}</span>
+                      <div className="flex items-center gap-2.5">
+                        {hoursRemaining > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFeedback(fb);
+                              setFeedbackModalOpen(true);
+                            }}
+                            className="text-primary hover:underline font-semibold cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteFeedback(fb.id)}
+                          disabled={deletingFeedbackId === fb.id}
+                          className="text-rose-600 dark:text-rose-400 hover:underline font-semibold cursor-pointer disabled:opacity-50"
+                        >
+                          {deletingFeedbackId === fb.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </SurfaceCard>
 
       {/* AI Tools Access (MCP) Section */}
       <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
@@ -797,6 +1136,38 @@ export function ProfilePage({
         cancelLabel="Cancel"
         onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
         onConfirm={confirmModal.onConfirm}
+      />
+
+      <AddBankAccountModal
+        isOpen={bankModalOpen}
+        onClose={() => {
+          setBankModalOpen(false);
+          setEditingBankAccount(null);
+        }}
+        currentUser={currentUser}
+        onAccountSaved={() => {
+          void loadBankAccounts();
+          setBankModalOpen(false);
+          setEditingBankAccount(null);
+        }}
+        editingAccount={editingBankAccount}
+      />
+
+      <FeedbackModal
+        isOpen={feedbackModalOpen}
+        onClose={() => {
+          setFeedbackModalOpen(false);
+          setEditingFeedback(null);
+        }}
+        currentUser={currentUser}
+        userName={username}
+        initialFeedback={editingFeedback}
+        todayCount={feedbacks.length}
+        onFeedbackSaved={() => {
+          void loadFeedbacks();
+          setFeedbackModalOpen(false);
+          setEditingFeedback(null);
+        }}
       />
     </div>
   );

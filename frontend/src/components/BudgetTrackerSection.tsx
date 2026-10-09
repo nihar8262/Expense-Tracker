@@ -1,9 +1,20 @@
-import { useMemo, useState } from "react";
-import type { BudgetForm, BudgetHistoryGroup, BudgetHistoryRange, BudgetSummary, CategoryOption } from "../types";
+import { useMemo, useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import type {
+  BankAccount,
+  BudgetForm,
+  BudgetHistoryGroup,
+  BudgetHistoryRange,
+  BudgetSummary,
+  CategoryOption
+} from "../types";
 import { ModalFrame, SectionHeader, StatusNotice, SurfaceCard, cn } from "./ui";
 import { FilterDropdown } from "./FilterDropdown";
 import { CategoryIcon } from "./CategoryIcon";
-import { History } from "lucide-react";
+import { BankPicker, BankLogo } from "./BankPicker";
+import { useAuth } from "../hooks/useAuth";
+import { listBankAccounts } from "../services/api";
+import { History, Landmark } from "lucide-react";
 
 type BudgetTrackerSectionProps = {
   sectionTitle: string;
@@ -42,6 +53,8 @@ type BudgetTrackerSectionProps = {
   onOpenBudgetHistory: () => void;
   onCloseBudgetHistory: () => void;
   currencySymbol?: string;
+  userAccounts?: BankAccount[];
+  bankSpends?: Array<{ bankName: string; bankAccountId?: string | null; amount: number }>;
 };
 
 function getBudgetTitle(budget: BudgetSummary): string {
@@ -134,10 +147,115 @@ export function BudgetTrackerSection({
   onBudgetHistoryRangeChange,
   onOpenBudgetHistory,
   onCloseBudgetHistory,
-  currencySymbol = "₹"
+  currencySymbol = "₹",
+  userAccounts,
+  bankSpends
 }: BudgetTrackerSectionProps) {
   const [showBudgetValidation, setShowBudgetValidation] = useState(false);
   const [isMobileEditOpen, setIsMobileEditOpen] = useState(false);
+  const [isAllotmentModalOpen, setIsAllotmentModalOpen] = useState(false);
+  const [isBudgetFormOpen, setIsBudgetFormOpen] = useState(false);
+
+  useEffect(() => {
+    if (editingBudgetId) {
+      setIsBudgetFormOpen(true);
+    }
+  }, [editingBudgetId]);
+
+  // Bank Allotments state
+  const { currentUser } = useAuth();
+  const [fetchedAccounts, setFetchedAccounts] = useState<BankAccount[]>([]);
+  const [bankAllotments, setBankAllotments] = useState<Array<{
+    bankName: string;
+    bankAccountId?: string;
+    bankId?: string;
+    accountLabel?: string;
+    amount: number;
+  }>>(() => {
+    try {
+      const stored = localStorage.getItem(`bank_allotments_${budgetForm.month}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAddingBankAllotment, setIsAddingBankAllotment] = useState(false);
+  const [selectedBankAccountIdForBudget, setSelectedBankAccountIdForBudget] = useState<string | null>(null);
+  const [selectedBankNameForBudget, setSelectedBankNameForBudget] = useState<string>("");
+  const [allotmentAmountInput, setAllotmentAmountInput] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!userAccounts && currentUser) {
+      listBankAccounts(currentUser)
+        .then((accounts) => {
+          if (isMounted) setFetchedAccounts(accounts);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [userAccounts, currentUser]);
+
+  const activeAccounts: BankAccount[] = userAccounts || fetchedAccounts;
+
+  const saveBankAllotments = (updated: Array<{
+    bankName: string;
+    bankAccountId?: string;
+    bankId?: string;
+    accountLabel?: string;
+    amount: number;
+  }>) => {
+    setBankAllotments(updated);
+    try {
+      localStorage.setItem(`bank_allotments_${budgetForm.month}`, JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAddBankAllotment = () => {
+    const val = parseFloat(allotmentAmountInput);
+    if (!val || val <= 0 || !selectedBankNameForBudget) return;
+
+    const matchedAccount = activeAccounts.find(
+      (a: BankAccount) =>
+        (selectedBankAccountIdForBudget && a.id === selectedBankAccountIdForBudget) ||
+        a.bank_name.toLowerCase() === selectedBankNameForBudget.toLowerCase()
+    );
+
+    const existingIndex = bankAllotments.findIndex(
+      (b) =>
+        (b.bankAccountId && selectedBankAccountIdForBudget && b.bankAccountId === selectedBankAccountIdForBudget) ||
+        b.bankName.toLowerCase() === selectedBankNameForBudget.toLowerCase()
+    );
+
+    const newEntry = {
+      bankName: selectedBankNameForBudget,
+      bankAccountId: selectedBankAccountIdForBudget || undefined,
+      bankId: matchedAccount?.bank_id,
+      accountLabel: matchedAccount?.account_label || undefined,
+      amount: val
+    };
+
+    let nextList = [...bankAllotments];
+    if (existingIndex >= 0) {
+      nextList[existingIndex] = newEntry;
+    } else {
+      nextList.push(newEntry);
+    }
+    saveBankAllotments(nextList);
+    setAllotmentAmountInput("");
+    setSelectedBankAccountIdForBudget(null);
+    setSelectedBankNameForBudget("");
+    setIsAddingBankAllotment(false);
+  };
+
+  const handleDeleteBankAllotment = (bName: string) => {
+    saveBankAllotments(bankAllotments.filter((b) => b.bankName !== bName));
+  };
 
   const budgetErrors = useMemo(
     () => ({
@@ -245,36 +363,213 @@ export function BudgetTrackerSection({
 
   return (
     <>
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+      <section className="w-full">
         <SurfaceCard className="space-y-5 p-5 sm:p-6">
           <SectionHeader
             title={sectionTitle}
             description={sectionDescription}
             actions={
-              <button
-                type="button"
-                className="ui-button-secondary shrink-0 whitespace-nowrap text-xs"
-                onClick={onOpenBudgetHistory}
-              >
-                <History className="size-3.5 mr-1" />
-                {historyTriggerLabel}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "text-xs px-3 py-1.5 flex items-center gap-1.5 font-medium rounded-lg transition",
+                    isBudgetFormOpen ? "ui-button-secondary" : "ui-button-primary"
+                  )}
+                  onClick={() => setIsBudgetFormOpen(!isBudgetFormOpen)}
+                >
+                  <span>{isBudgetFormOpen ? "✕ Close Form" : "+ Set / Edit Budget"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="ui-button-secondary shrink-0 whitespace-nowrap text-xs px-2.5 py-1.5 flex items-center gap-1"
+                  onClick={onOpenBudgetHistory}
+                >
+                  <History className="size-3.5" />
+                  <span>{historyTriggerLabel}</span>
+                </button>
+              </div>
             }
           />
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-              <p className="section-eyebrow">Budgeted</p>
-              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalBudget}</strong>
+          {(isBudgetFormOpen || editingBudgetId) && (
+            <div className="rounded-[22px] border border-primary/20 bg-primary/[0.03] p-4 sm:p-5 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2.5">
+                <div>
+                  <h3 className="text-sm font-semibold text-ink">
+                    {editingBudgetId ? "Edit budget" : "Set a new budget limit"}
+                  </h3>
+                  <p className="text-xs text-muted">
+                    {formDescription}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBudgetFormOpen(false);
+                    if (editingBudgetId) handleValidatedBudgetEditCancel();
+                  }}
+                  className="text-xs text-muted hover:text-ink px-2 py-1"
+                >
+                  ✕ Close
+                </button>
+              </div>
+              {renderBudgetForm()}
+              {budgetStatusMessage ? <StatusNotice tone="success">{budgetStatusMessage}</StatusNotice> : null}
+              {budgetErrorMessage ? <StatusNotice tone="error">{budgetErrorMessage}</StatusNotice> : null}
             </div>
-            <div className="rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 shadow-sm">
-              <p className="section-eyebrow">Spent</p>
-              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalSpent}</strong>
+          )}
+
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <div className="rounded-xl sm:rounded-[22px] border border-[color:var(--border)] bg-white/80 p-2.5 sm:p-4 shadow-sm text-center sm:text-left">
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-muted truncate">Budgeted</p>
+              <strong className="mt-1 sm:mt-2 block text-sm sm:text-xl font-bold text-ink truncate">{currentMonthBudgetOverview.totalBudget}</strong>
             </div>
-            <div className={cn("rounded-[22px] border p-4 shadow-sm", getOverviewRemainingStyle(currentMonthBudgetOverview.isOverspent, currentMonthBudgetSummaries))}>
-              <p className="section-eyebrow">Remaining</p>
-              <strong className="mt-2 block text-xl text-ink">{currentMonthBudgetOverview.totalRemaining}</strong>
+            <div className="rounded-xl sm:rounded-[22px] border border-[color:var(--border)] bg-white/80 p-2.5 sm:p-4 shadow-sm text-center sm:text-left">
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-muted truncate">Spent</p>
+              <strong className="mt-1 sm:mt-2 block text-sm sm:text-xl font-bold text-ink truncate">{currentMonthBudgetOverview.totalSpent}</strong>
             </div>
+            <div className={cn("rounded-xl sm:rounded-[22px] border p-2.5 sm:p-4 shadow-sm text-center sm:text-left", getOverviewRemainingStyle(currentMonthBudgetOverview.isOverspent, currentMonthBudgetSummaries))}>
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-muted truncate">Remaining</p>
+              <strong className="mt-1 sm:mt-2 block text-sm sm:text-xl font-bold text-ink truncate">{currentMonthBudgetOverview.totalRemaining}</strong>
+            </div>
+          </div>
+
+          {/* Bank Budget Allotments Under Total Budget */}
+          <div className="rounded-[22px] border border-[color:var(--border)] bg-gradient-to-br from-white/95 to-slate-50/70 p-4 shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-bold tracking-tight text-ink flex items-center gap-1.5">
+                  <Landmark className="size-3.5 text-primary" /> Bank Budget Allotments
+                </span>
+                <p className="text-[11px] text-muted">
+                  Designate individual monthly spending caps for your banks under the overall budget.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {bankAllotments.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAllotmentModalOpen(true)}
+                    className="ui-button-secondary text-xs px-2.5 py-1 flex items-center gap-1"
+                    title="View detailed bank allotment breakdown"
+                  >
+                    <span>📊 Breakdown</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsAddingBankAllotment(!isAddingBankAllotment)}
+                  className="ui-button-secondary text-xs px-2.5 py-1 flex items-center gap-1"
+                >
+                  <span>{isAddingBankAllotment ? "✕ Cancel" : "+ Add Bank Allotment"}</span>
+                </button>
+              </div>
+            </div>
+
+            {isAddingBankAllotment && (
+              activeAccounts.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-4 text-center space-y-2">
+                  <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    No saved bank accounts found
+                  </p>
+                  <p className="text-[11px] text-muted max-w-sm mx-auto">
+                    Please add your bank accounts or cards in your profile first before allotting monthly budget caps.
+                  </p>
+                  <Link
+                    to="/profile"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 transition shadow-xs"
+                  >
+                    Go to Profile to Add Bank →
+                  </Link>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2 items-start">
+                    <div className="space-y-1">
+                      <span className="text-xs font-semibold text-secondary">Select Saved Account / Card</span>
+                      <BankPicker
+                        userAccounts={activeAccounts}
+                        selectedBankAccountId={selectedBankAccountIdForBudget}
+                        selectedBankName={selectedBankNameForBudget}
+                        onChange={(id, name) => {
+                          setSelectedBankAccountIdForBudget(id);
+                          setSelectedBankNameForBudget(name || "");
+                        }}
+                        label=""
+                      />
+                    </div>
+                    <label className="grid gap-1 text-xs font-semibold text-secondary">
+                      <span>Monthly Allotment Amount ({currencySymbol})</span>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        placeholder="e.g. 25000"
+                        className="h-[42px] rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                        value={allotmentAmountInput}
+                        onChange={(e) => setAllotmentAmountInput(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingBankAllotment(false);
+                        setSelectedBankAccountIdForBudget(null);
+                        setSelectedBankNameForBudget("");
+                        setAllotmentAmountInput("");
+                      }}
+                      className="ui-button-secondary text-xs px-3 py-1.5"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddBankAllotment}
+                      className="ui-button-primary text-xs px-3 py-1.5"
+                      disabled={!selectedBankNameForBudget || !parseFloat(allotmentAmountInput)}
+                    >
+                      Save Allotment
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
+
+            {bankAllotments.length === 0 ? (
+              <p className="text-[11px] text-muted text-center py-2 italic">
+                No bank allotments set for this month yet. Click "+ Add Bank Allotment" to allocate your budget.
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-800/50 px-4 py-2.5 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className="flex -space-x-1.5 overflow-hidden">
+                    {bankAllotments.slice(0, 4).map((a, idx) => (
+                      <div key={idx} className="inline-block ring-2 ring-white dark:ring-zinc-800 rounded-full shadow-2xs">
+                        <BankLogo bankId={a.bankId} bankName={a.bankName} size="xs" />
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-ink">
+                      {bankAllotments.length} {bankAllotments.length === 1 ? "Bank / Card Allotment Active" : "Banks / Cards Allotted"}
+                    </span>
+                    <p className="text-[11px] text-muted">
+                      Total Allocated: <strong className="text-ink font-semibold">{currencySymbol}{bankAllotments.reduce((sum, a) => sum + a.amount, 0).toLocaleString()}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAllotmentModalOpen(true)}
+                  className="ui-button-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 font-medium"
+                >
+                  <span>📊 View Breakdown</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {isBudgetLoading ? <StatusNotice tone="neutral">Loading budgets...</StatusNotice> : null}
@@ -330,15 +625,6 @@ export function BudgetTrackerSection({
               ))}
             </div>
           ) : null}
-        </SurfaceCard>
-
-        <SurfaceCard className="space-y-5 p-5 sm:p-6">
-          <SectionHeader title={editingBudgetId ? "Edit budget" : "Set a budget"} description={formDescription} />
-
-          {renderBudgetForm()}
-
-          {budgetStatusMessage ? <StatusNotice tone="success">{budgetStatusMessage}</StatusNotice> : null}
-          {budgetErrorMessage ? <StatusNotice tone="error">{budgetErrorMessage}</StatusNotice> : null}
         </SurfaceCard>
       </section>
 
@@ -442,6 +728,171 @@ export function BudgetTrackerSection({
             {renderBudgetForm()}
             {budgetStatusMessage ? <StatusNotice tone="success">{budgetStatusMessage}</StatusNotice> : null}
             {budgetErrorMessage ? <StatusNotice tone="error">{budgetErrorMessage}</StatusNotice> : null}
+          </div>
+        </ModalFrame>
+      ) : null}
+      {isAllotmentModalOpen ? (
+        <ModalFrame onClose={() => setIsAllotmentModalOpen(false)} className="flex max-h-[92vh] max-w-2xl flex-col p-0">
+          <div className="border-b border-[color:var(--border)] px-5 py-5 sm:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-2xl leading-none tracking-[-0.03em] text-ink">
+                  Bank Budget Breakdown
+                </h2>
+                <p className="mt-1 text-xs text-muted">
+                  Overview of spending limits and current utilization per bank / card for this month.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ui-button-secondary shrink-0"
+                onClick={() => setIsAllotmentModalOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto px-5 py-5 sm:px-6 space-y-5">
+            {/* Summary metrics */}
+            {(() => {
+              const totalAllotted = bankAllotments.reduce((sum, a) => sum + a.amount, 0);
+              const totalSpent = bankAllotments.reduce((sum, a) => {
+                const item = bankSpends?.find(
+                  (s) =>
+                    (a.bankAccountId && s.bankAccountId === a.bankAccountId) ||
+                    s.bankName.toLowerCase() === a.bankName.toLowerCase() ||
+                    (a.accountLabel && s.bankName.toLowerCase() === a.accountLabel.toLowerCase())
+                );
+                return sum + (item?.amount ?? 0);
+              }, 0);
+              const isOver = totalSpent > totalAllotted;
+              const overallPercent = totalAllotted > 0 ? (totalSpent / totalAllotted) * 100 : 0;
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl border border-[color:var(--border)] bg-surface p-3.5 shadow-2xs">
+                    <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">Total Allotted</span>
+                    <p className="text-lg font-bold text-ink mt-1">{currencySymbol}{totalAllotted.toLocaleString()}</p>
+                    <span className="text-[10px] text-muted">{bankAllotments.length} accounts configured</span>
+                  </div>
+                  <div className="rounded-2xl border border-[color:var(--border)] bg-surface p-3.5 shadow-2xs">
+                    <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">Total Spent</span>
+                    <p className="text-lg font-bold text-ink mt-1">{currencySymbol}{totalSpent.toLocaleString()}</p>
+                    <span className="text-[10px] text-muted">{overallPercent.toFixed(0)}% of total allotment</span>
+                  </div>
+                  <div className={cn(
+                    "rounded-2xl border p-3.5 shadow-2xs",
+                    isOver ? "border-rose-500/30 bg-rose-500/5 text-rose-600" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-600"
+                  )}>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider opacity-90">
+                      {isOver ? "Over Budget" : "Remaining"}
+                    </span>
+                    <p className="text-lg font-bold mt-1">
+                      {currencySymbol}{Math.abs(totalAllotted - totalSpent).toLocaleString()}
+                    </p>
+                    <span className="text-[10px] opacity-80">
+                      {isOver ? "Limit exceeded across cards" : "Available to spend"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* List of cards */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">Card & Account Details</h3>
+              {bankAllotments.length === 0 ? (
+                <p className="text-xs text-muted italic">No bank budget allotments configured for this month.</p>
+              ) : (
+                <div className="grid gap-3">
+                  {bankAllotments.map((allotment) => {
+                    const spendItem = bankSpends?.find(
+                      (s) =>
+                        (allotment.bankAccountId && s.bankAccountId === allotment.bankAccountId) ||
+                        s.bankName.toLowerCase() === allotment.bankName.toLowerCase() ||
+                        (allotment.accountLabel && s.bankName.toLowerCase() === allotment.accountLabel.toLowerCase())
+                    );
+                    const spent = spendItem?.amount ?? 0;
+                    const total = allotment.amount;
+                    const percent = total > 0 ? (spent / total) * 100 : 0;
+                    const isOver = spent > total;
+                    const progressColor = getBudgetProgressColor(percent);
+
+                    return (
+                      <div
+                        key={allotment.bankAccountId || allotment.bankName}
+                        className="rounded-2xl border border-[color:var(--border)] bg-surface p-4 space-y-3 shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <BankLogo bankId={allotment.bankId} bankName={allotment.bankName} size="md" />
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-semibold text-ink truncate">
+                                {allotment.accountLabel || allotment.bankName}
+                              </h4>
+                              {allotment.accountLabel && allotment.accountLabel !== allotment.bankName && (
+                                <p className="text-xs text-muted truncate">{allotment.bankName}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2.5 shrink-0">
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-ink">
+                                {currencySymbol}{total.toLocaleString()}
+                              </p>
+                              <span className={cn(
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full inline-block mt-0.5",
+                                isOver
+                                  ? "bg-rose-500/10 text-rose-600"
+                                  : percent >= 80
+                                  ? "bg-amber-500/10 text-amber-600"
+                                  : "bg-emerald-500/10 text-emerald-600"
+                              )}>
+                                {isOver ? `Over by ${currencySymbol}${(spent - total).toLocaleString()}` : `${percent.toFixed(0)}% used`}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBankAllotment(allotment.bankName)}
+                              className="text-xs text-rose-500 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                              title="Delete allotment"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Thin progress bar */}
+                        <div className="space-y-1.5">
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.08]">
+                            <div
+                              className="h-full rounded-full transition-all duration-300"
+                              style={{
+                                width: `${Math.min(100, Math.max(spent > 0 ? 3 : 0, percent))}%`,
+                                backgroundColor: progressColor,
+                              }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-muted">
+                            <span>
+                              Spent: <strong className="font-semibold text-ink">{currencySymbol}{spent.toLocaleString()}</strong>
+                            </span>
+                            <span>
+                              {isOver ? (
+                                <span className="text-rose-500 font-semibold">Exceeded limit</span>
+                              ) : (
+                                <span>Remaining: <strong className="font-semibold text-ink">{currencySymbol}{(total - spent).toLocaleString()}</strong></span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </ModalFrame>
       ) : null}

@@ -2,7 +2,9 @@ const {
   createBillReminderForUser,
   deleteBillReminderForUser,
   listBillRemindersForUser,
-  updateBillReminderForUser
+  updateBillReminderForUser,
+  getReminderPreferencesForUser,
+  updateReminderPreferencesForUser
 } = require("./_lib/finance");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
@@ -11,6 +13,20 @@ module.exports = async function handler(request, response) {
 
   if (!user) {
     return undefined;
+  }
+
+  if (request.query.preferences === "true") {
+    if (request.method === "GET") {
+      const result = await getReminderPreferencesForUser(user.id);
+      return sendResult(response, result);
+    }
+
+    if (request.method === "PUT") {
+      const result = await updateReminderPreferencesForUser(user.id, request.body);
+      return sendResult(response, result);
+    }
+
+    return methodNotAllowed(response, "GET, PUT");
   }
 
   const segments = getRoutedSegments(request);

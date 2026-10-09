@@ -12,3 +12,4 @@ backend/scripts/test-mcp-search.ts
 strix_runs
 security-audit
 *.tsbuildinfo
+readme/

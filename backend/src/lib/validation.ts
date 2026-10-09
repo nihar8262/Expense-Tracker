@@ -52,7 +52,9 @@ export const createExpenseSchema = z.object({
   category: z.string().trim().min(1, "Category is required.").max(64, "Category is too long."),
   description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
   date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
-  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
+  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional(),
+  bankAccountId: z.string().trim().max(128).nullable().optional(),
+  bankName: z.string().trim().max(120).nullable().optional()
 });
 
 export const expensesQuerySchema = z.object({
@@ -150,7 +152,9 @@ export const createWalletExpenseSchema = z
     date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
     splitRule: z.enum(["equal", "fixed", "percentage"]),
     splits: z.array(walletSplitSchema).min(1, "At least one split member is required."),
-    platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
+    platform: z.string().trim().max(50, "Platform is too long.").nullable().optional(),
+    bankAccountId: z.string().trim().max(128).nullable().optional(),
+    bankName: z.string().trim().max(120).nullable().optional()
   })
   .transform((value, context) => {
     const normalizedSplits = value.splits.map((split, index) => {
@@ -363,7 +367,9 @@ export const createWalletLoanSchema = z
     interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
     notes: z.string().trim().max(280, "Notes is too long.").nullable().optional(),
     creatorName: z.string().trim().max(120).nullable().optional(),
-    creatorEmail: z.string().trim().max(320).nullable().optional()
+    creatorEmail: z.string().trim().max(320).nullable().optional(),
+    bankAccountId: z.string().trim().max(128).nullable().optional(),
+    bankName: z.string().trim().max(120).nullable().optional()
   })
   .superRefine((value, context) => {
     if (!value.borrowerMemberId && !value.borrowerName) {
@@ -419,7 +425,9 @@ export const updateWalletLoanSchema = z.object({
   dueDate: z.string().trim().refine(isValidIsoDate, "Due date must be a valid YYYY-MM-DD value.").nullable().optional(),
   interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
   notes: z.string().trim().max(280, "Notes is too long.").nullable().optional(),
-  status: z.enum(["active", "settled", "cancelled"]).optional()
+  status: z.enum(["active", "settled", "cancelled"]).optional(),
+  bankAccountId: z.string().trim().max(128).nullable().optional(),
+  bankName: z.string().trim().max(120).nullable().optional()
 });
 
 export const createWalletLoanRepaymentSchema = z.object({
@@ -461,6 +469,47 @@ export const walletInviteResponseSchema = z.object({
   action: z.enum(["accept", "decline"])
 });
 
+export const createBankAccountSchema = z.object({
+  bankId: z.string().trim().min(1, "Bank ID is required.").max(64),
+  bankName: z.string().trim().min(1, "Bank name is required.").max(120),
+  accountType: z.enum(["debit", "credit", "rupay_credit", "cash"]),
+  accountLabel: z.string().trim().max(64).nullable().optional(),
+  lastFourDigits: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, "Last 4 digits must be exactly 4 numbers.")
+    .nullable()
+    .optional()
+    .or(z.literal("")),
+  isDefault: z.boolean().optional().default(false)
+});
+
+export const updateBankAccountSchema = z.object({
+  accountLabel: z.string().trim().max(64).nullable().optional(),
+  lastFourDigits: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, "Last 4 digits must be exactly 4 numbers.")
+    .nullable()
+    .optional()
+    .or(z.literal("")),
+  isDefault: z.boolean().optional()
+});
+
+export const createFeedbackSchema = z.object({
+  category: z.enum(["bug", "feature", "feedback"]).default("feedback"),
+  message: z.string().trim().min(1, "Message is required.").max(2000, "Message is too long."),
+  rating: z.coerce.number().int().min(1).max(5).optional(),
+  userName: z.string().trim().max(128).optional()
+});
+
+export const updateFeedbackSchema = z.object({
+  category: z.enum(["bug", "feature", "feedback"]).optional(),
+  message: z.string().trim().min(1, "Message is required.").max(2000, "Message is too long.").optional(),
+  rating: z.coerce.number().int().min(1).max(5).optional(),
+  userName: z.string().trim().max(128).optional()
+});
+
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
 export type ExpensesQueryInput = z.infer<typeof expensesQuerySchema>;
 export type CreateBudgetInput = z.infer<typeof createBudgetSchema>;
@@ -476,3 +525,7 @@ export type CreateWalletLoanInput = z.infer<typeof createWalletLoanSchema>;
 export type UpdateWalletLoanInput = z.infer<typeof updateWalletLoanSchema>;
 export type CreateWalletLoanRepaymentInput = z.infer<typeof createWalletLoanRepaymentSchema>;
 export type UpdateWalletLoanRepaymentInput = z.infer<typeof updateWalletLoanRepaymentSchema>;
+export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>;
+export type UpdateBankAccountInput = z.infer<typeof updateBankAccountSchema>;
+export type CreateFeedbackInput = z.infer<typeof createFeedbackSchema>;
+export type UpdateFeedbackInput = z.infer<typeof updateFeedbackSchema>;

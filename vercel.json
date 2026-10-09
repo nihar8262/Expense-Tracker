@@ -43,6 +43,18 @@
       "destination": "/api/assistant?route=:route*"
     },
     {
+      "source": "/api/profile/:route*",
+      "destination": "/api/profile?route=:route*"
+    },
+    {
+      "source": "/api/feedback/:id",
+      "destination": "/api/feedback?id=:id"
+    },
+    {
+      "source": "/api/feedback",
+      "destination": "/api/feedback"
+    },
+    {
       "source": "/api/receipts",
       "destination": "/api/expenses?receipts=true"
     },
@@ -69,6 +81,22 @@
     {
       "source": "/api/wallets/:route*",
       "destination": "/api/wallets?route=:route*"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/internal?health=true"
+    },
+    {
+      "source": "/api/reminder-preferences",
+      "destination": "/api/bill-reminders?preferences=true"
+    },
+    {
+      "source": "/api/reminder-preferences/:route*",
+      "destination": "/api/bill-reminders?preferences=true"
+    },
+    {
+      "source": "/api/bill-reminders",
+      "destination": "/api/bill-reminders"
     },
     {
       "source": "/api/bill-reminders/:route*",

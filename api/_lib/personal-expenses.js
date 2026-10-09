@@ -59,7 +59,9 @@ const createExpenseSchema = z.object({
   category: z.string().trim().min(1, "Category is required.").max(64, "Category is too long."),
   description: z.string().trim().min(1, "Description is required.").max(280, "Description is too long."),
   date: z.string().trim().refine(isValidIsoDate, "Date must be a valid YYYY-MM-DD value."),
-  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional()
+  platform: z.string().trim().max(50, "Platform is too long.").nullable().optional(),
+  bankAccountId: z.string().trim().max(128).nullable().optional(),
+  bankName: z.string().trim().max(120).nullable().optional()
 });
 
 const expensesQuerySchema = z.object({
@@ -82,7 +84,9 @@ function createExpenseRequestHash(input) {
         category: input.category.trim(),
         description: input.description.trim(),
         date: input.date,
-        platform: input.platform ?? null
+        platform: input.platform ?? null,
+        bankAccountId: input.bankAccountId ?? null,
+        bankName: input.bankName ?? null
       })
     )
     .digest("hex");
@@ -104,7 +108,9 @@ function mapExpense(row) {
     description: row.description,
     date: asIsoDate(row.expense_date),
     created_at: asIsoTimestamp(row.created_at),
-    platform: row.platform ?? null
+    platform: row.platform ?? null,
+    bank_account_id: row.bank_account_id ?? null,
+    bank_name: row.bank_name ?? null
   };
 }
 
@@ -165,7 +171,7 @@ async function getExistingExpense(tx, idempotencyKey, requestHash) {
   }
 
   const expenses = await tx`
-    SELECT id, amount_minor, category, description, expense_date, created_at, platform
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
     FROM expenses
     WHERE id = ${existingRequest.expense_id}
   `;
@@ -209,7 +215,7 @@ async function listExpenses(rawQuery, userId) {
   const searchPattern = search?.trim() ? `%${search.trim()}%` : null;
 
   const rows = await sql`
-    SELECT id, amount_minor, category, description, expense_date, created_at, platform
+    SELECT id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
     FROM expenses
     WHERE user_id = ${userId}
       ${category ? sql`AND category = ${category}` : sql``}
@@ -413,9 +419,9 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
       const createdAt = new Date().toISOString();
 
       const insertedExpenses = await tx`
-        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform)
-        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt}, ${result.data.platform ?? null})
-        RETURNING id, amount_minor, category, description, expense_date, created_at, platform
+        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name)
+        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt}, ${result.data.platform ?? null}, ${result.data.bankAccountId ?? null}, ${result.data.bankName ?? null})
+        RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
       `;
 
       await tx`
@@ -474,9 +480,11 @@ async function updateExpense(rawBody, expenseId, userId) {
         category = ${result.data.category.trim()},
         description = ${result.data.description.trim()},
         expense_date = ${result.data.date},
-        platform = ${result.data.platform ?? null}
+        platform = ${result.data.platform ?? null},
+        bank_account_id = COALESCE(${result.data.bankAccountId !== undefined ? result.data.bankAccountId : null}, bank_account_id),
+        bank_name = COALESCE(${result.data.bankName !== undefined ? result.data.bankName : null}, bank_name)
     WHERE id = ${expenseId} AND user_id = ${userId}
-    RETURNING id, amount_minor, category, description, expense_date, created_at, platform
+    RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
   `;
 
   if (!rows[0]) {

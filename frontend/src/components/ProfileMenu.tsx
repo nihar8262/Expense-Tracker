@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { User, LogOut } from "lucide-react";
 import type { ProfileMenuProps } from "../types";
@@ -6,7 +7,12 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
   const resolvedDisplayName = displayName || currentUser.displayName || currentUser.email || "Your profile";
   const avatarAlt = resolvedDisplayName;
   const avatarFallback = resolvedDisplayName.slice(0, 1).toUpperCase();
-  const resolvedPhotoUrl = photoUrl || currentUser.photoURL;
+  const resolvedPhotoUrl = photoUrl || currentUser.photoURL || currentUser.providerData?.find(p => p.photoURL)?.photoURL || null;
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [resolvedPhotoUrl]);
 
   return (
     <div className="relative" ref={profileMenuRef}>
@@ -17,8 +23,14 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
         aria-haspopup="menu"
         aria-expanded={isOpen}
       >
-        {resolvedPhotoUrl ? (
-          <img className="h-10 w-10 rounded-full object-cover ring-2 ring-primary/20" src={resolvedPhotoUrl} alt={avatarAlt} />
+        {resolvedPhotoUrl && !imgError ? (
+          <img
+            className="h-10 w-10 rounded-full object-cover ring-2 ring-primary/20"
+            src={resolvedPhotoUrl}
+            alt={avatarAlt}
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
         ) : (
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-sm font-bold text-white shadow-sm">
             {avatarFallback}
@@ -38,8 +50,14 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
           {/* User info header card */}
           <div className="rounded-[20px] border border-primary/15 bg-[linear-gradient(135deg,rgba(30,122,83,0.07),rgba(212,168,87,0.07))] p-3.5 shadow-sm">
             <div className="flex items-center gap-3">
-              {resolvedPhotoUrl ? (
-                <img className="h-11 w-11 rounded-full object-cover ring-2 ring-primary/30 shadow-sm" src={resolvedPhotoUrl} alt={avatarAlt} />
+              {resolvedPhotoUrl && !imgError ? (
+                <img
+                  className="h-11 w-11 rounded-full object-cover ring-2 ring-primary/30 shadow-sm"
+                  src={resolvedPhotoUrl}
+                  alt={avatarAlt}
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgError(true)}
+                />
               ) : (
                 <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-base font-bold text-white shadow-sm">
                   {avatarFallback}
@@ -47,7 +65,7 @@ export function ProfileMenu({ currentUser, isOpen, profileMenuRef, onToggle, onS
               )}
               <div className="min-w-0 flex-1">
                 <strong className="block truncate text-sm font-bold text-ink">{resolvedDisplayName}</strong>
-                <span className="block truncate text-xs text-secondary">{currentUser.email ?? currentUser.uid}</span>
+                <span className="block truncate text-xs text-secondary">{currentUser.email || resolvedDisplayName}</span>
                 <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                   Active Account

@@ -469,7 +469,9 @@ function mapWalletLoan(row, repayments = [], viewingUserId) {
     repayments,
     is_owner: isOwner,
     creator_name: creatorName,
-    creator_email: creatorEmail
+    creator_email: creatorEmail,
+    bank_account_id: row.bank_account_id ?? null,
+    bank_name: row.bank_name ?? null
   };
 }
 
@@ -842,7 +844,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
   const members = await sql`SELECT id, wallet_id, user_id, display_name, email, member_role, invite_status, joined_at FROM wallet_members WHERE wallet_id = ${walletId} ORDER BY joined_at ASC`;
   const expenseCountRows = await sql`SELECT COUNT(*)::int AS total FROM wallet_expenses WHERE wallet_id = ${walletId}`;
   const expenseRows = await sql`
-    SELECT wallet_expenses.id, wallet_expenses.wallet_id, wallet_expenses.paid_by_member_id, payer.display_name AS paid_by_member_name, wallet_expenses.amount_minor, wallet_expenses.category, wallet_expenses.description, wallet_expenses.expense_date, wallet_expenses.split_rule, wallet_expenses.created_at, wallet_expenses.platform
+    SELECT wallet_expenses.id, wallet_expenses.wallet_id, wallet_expenses.paid_by_member_id, payer.display_name AS paid_by_member_name, wallet_expenses.amount_minor, wallet_expenses.category, wallet_expenses.description, wallet_expenses.expense_date, wallet_expenses.split_rule, wallet_expenses.created_at, wallet_expenses.platform, wallet_expenses.bank_account_id, wallet_expenses.bank_name
     FROM wallet_expenses
     INNER JOIN wallet_members AS payer ON payer.id = wallet_expenses.paid_by_member_id
     WHERE wallet_expenses.wallet_id = ${walletId}
@@ -1023,6 +1025,8 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
            wallet_loans.notes,
            wallet_loans.status,
            wallet_loans.loan_type,
+           wallet_loans.bank_account_id,
+           wallet_loans.bank_name,
            wallet_loans.created_at
     FROM wallet_loans
     LEFT JOIN wallet_members AS lender_member ON lender_member.id = wallet_loans.lender_member_id
@@ -1054,7 +1058,7 @@ async function loadWalletDetail(sql, walletId, pagination = parseWalletHistoryPa
     wallet: mapWallet(walletRows[0]),
     members: members.map(mapWalletMember),
     budgets: walletBudgetRows.map((budget) => ({ id: budget.id, wallet_id: budget.wallet_id, amount: formatMinorUnits(Number(budget.amount_minor)), scope: budget.budget_scope, category: budget.category, month: budget.budget_month, created_at: asIsoTimestamp(budget.created_at) })),
-    expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), platform: expense.platform ?? null, splits: splitMap.get(expense.id) ?? [] })),
+    expenses: expenseRows.map((expense) => ({ id: expense.id, wallet_id: expense.wallet_id, paid_by_member_id: expense.paid_by_member_id, paid_by_member_name: expense.paid_by_member_name, amount: formatMinorUnits(Number(expense.amount_minor)), category: expense.category, description: expense.description, date: asIsoDate(expense.expense_date), split_rule: expense.split_rule, created_at: asIsoTimestamp(expense.created_at), platform: expense.platform ?? null, bank_account_id: expense.bank_account_id ?? null, bank_name: expense.bank_name ?? null, splits: splitMap.get(expense.id) ?? [] })),
     balances: balanceRows.map((balance) => ({ member_id: balance.member_id, member_name: balance.member_name, net_amount: formatMinorUnits(Number(balance.net_amount_minor)) })),
     settlements: settlementRows.map((settlement) => ({ id: settlement.id, wallet_id: settlement.wallet_id, from_member_id: settlement.from_member_id, from_member_name: settlement.from_member_name, to_member_id: settlement.to_member_id, to_member_name: settlement.to_member_name, amount: formatMinorUnits(Number(settlement.amount_minor)), date: asIsoDate(settlement.settlement_date), note: settlement.note, created_at: asIsoTimestamp(settlement.created_at) })),
     loans,
@@ -3087,6 +3091,9 @@ async function deleteUserData(userId) {
     }
     if (hasTable("wallet_loans")) {
       await tx`DELETE FROM wallet_loans WHERE owner_user_id = ${userId}`;
+    }
+    if (hasTable("user_bank_accounts")) {
+      await tx`DELETE FROM user_bank_accounts WHERE user_id = ${userId}`;
     }
   });
 }

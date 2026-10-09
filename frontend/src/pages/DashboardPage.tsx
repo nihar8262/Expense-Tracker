@@ -1,15 +1,32 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
-import { EmptyState, PageHero, SectionHeader, SurfaceCard, ModalFrame, cn } from "../components/ui";
+import { EmptyState, SectionHeader, SurfaceCard, ModalFrame, cn } from "../components/ui";
 import { TrendChart } from "../components/TrendChart";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { useNavigate } from "react-router-dom";
 import { PLATFORMS } from "../lib/platforms";
 import { PlatformLogo } from "../components/PlatformPicker";
+import { BankLogo, BankCardBadge } from "../components/BankPicker";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import { formatBudgetMonth } from "../utils/format";
+import { useAuth } from "../hooks/useAuth";
+import { listBankAccounts } from "../services/api";
+import {
+  User as UserIcon,
+  Wallet as WalletIcon,
+  TrendingUp,
+  Plus,
+  CreditCard,
+  Receipt,
+  BarChart3,
+  Tag,
+  Store,
+  Lightbulb
+} from "lucide-react";
 import type {
+  BankAccount,
+  BankAccountType,
   BudgetForm,
   BudgetHistoryGroup,
   BudgetHistoryRange,
@@ -151,6 +168,22 @@ export function DashboardPage({
   const trendSectionRef = useRef<HTMLElement | null>(null);
 
   const [visibleTrendCount, setVisibleTrendCount] = useState(12);
+  const { currentUser } = useAuth();
+  const [userAccounts, setUserAccounts] = useState<BankAccount[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (currentUser) {
+      listBankAccounts(currentUser)
+        .then((accs) => {
+          if (isMounted) setUserAccounts(accs);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   // Reset to 12 visible cards whenever filters or dataset change
   useEffect(() => {
@@ -275,6 +308,113 @@ export function DashboardPage({
     return data.sort((a, b) => b.value - a.value);
   }, [activeExpenses, selectedCategoryBreakdown, dashboardStats.categoryBreakdown]);
 
+  const { bankSpendsData, cardTypeData } = useMemo(() => {
+    const bankMap = new Map<string, {
+      key: string;
+      bankId?: string;
+      bankName: string;
+      bankAccountId?: string | null;
+      accountLabel?: string | null;
+      accountType?: BankAccountType | null;
+      lastFourDigits?: string | null;
+      amount: number;
+      count: number;
+    }>();
+
+    const typeMap = new Map<string, { type: string; label: string; amount: number; count: number }>();
+
+    let totalSpent = 0;
+
+    for (const exp of activeExpenses) {
+      const amt = parseFloat(exp.amount) || 0;
+      totalSpent += amt;
+      const bAccountId = (exp as any).bank_account_id || (exp as any).bankAccountId || null;
+      const rawBankName = exp.bank_name?.trim() || "";
+
+      // Match against the user's saved bank accounts
+      const matchedAccount = bAccountId
+        ? userAccounts.find((a) => a.id === bAccountId)
+        : userAccounts.find((a) => a.bank_name.toLowerCase() === rawBankName.toLowerCase());
+
+      const finalBankName = matchedAccount?.bank_name || rawBankName || "Cash / Other";
+      const finalBankId = matchedAccount?.bank_id;
+      const finalAccountLabel = matchedAccount?.account_label;
+      const finalAccountType = matchedAccount?.account_type;
+      const finalLastFour = matchedAccount?.last_four_digits;
+
+      // Group key: distinct per bank account (or per bank name / cash)
+      const key = bAccountId || (matchedAccount ? matchedAccount.id : finalBankName);
+      const existing = bankMap.get(key) || {
+        key,
+        bankId: finalBankId,
+        bankName: finalBankName,
+        bankAccountId: bAccountId || matchedAccount?.id || null,
+        accountLabel: finalAccountLabel,
+        accountType: finalAccountType,
+        lastFourDigits: finalLastFour,
+        amount: 0,
+        count: 0
+      };
+      existing.amount += amt;
+      existing.count += 1;
+      bankMap.set(key, existing);
+
+      // Determine Payment Instrument Type:
+      let cardType: string = "cash";
+      let cardLabel: string = "Cash / Unassigned";
+
+      if (finalAccountType) {
+        cardType = finalAccountType;
+        if (cardType === "credit") cardLabel = "Credit Card";
+        else if (cardType === "debit") cardLabel = "Debit Card";
+        else if (cardType === "rupay_credit") cardLabel = "RuPay Credit";
+        else if (cardType === "cash") cardLabel = "Cash";
+      } else {
+        // Fallback heuristics when unlinked to a registered account
+        const bLower = finalBankName.toLowerCase();
+        if (bLower.includes("rupay")) {
+          cardType = "rupay_credit";
+          cardLabel = "RuPay Credit";
+        } else if (bLower.includes("credit")) {
+          cardType = "credit";
+          cardLabel = "Credit Card";
+        } else if (bLower.includes("debit") || bLower.includes("savings") || bLower.includes("salary")) {
+          cardType = "debit";
+          cardLabel = "Debit Card";
+        } else if (finalBankName !== "Cash / Other" && finalBankName !== "Cash" && finalBankName !== "") {
+          cardType = "debit";
+          cardLabel = "Debit Card";
+        } else {
+          cardType = "cash";
+          cardLabel = "Cash / Unassigned";
+        }
+      }
+
+      const existingType = typeMap.get(cardType) || { type: cardType, label: cardLabel, amount: 0, count: 0 };
+      existingType.amount += amt;
+      existingType.count += 1;
+      typeMap.set(cardType, existingType);
+    }
+
+    const banks = Array.from(bankMap.values())
+      .map((item) => ({
+        ...item,
+        share: totalSpent > 0 ? (item.amount / totalSpent) * 100 : 0,
+        formattedAmount: formatCurrency(item.amount.toFixed(2), activeCurrency)
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const cardTypes = Array.from(typeMap.values())
+      .map((item) => ({
+        ...item,
+        share: totalSpent > 0 ? (item.amount / totalSpent) * 100 : 0,
+        formattedAmount: formatCurrency(item.amount.toFixed(2), activeCurrency)
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return { bankSpendsData: banks, cardTypeData: cardTypes };
+  }, [activeExpenses, userAccounts, formatCurrency, activeCurrency]);
+
   const pieChartColors = ["#1e7a53", "#d4a857", "#2e9a6e", "#e2b86c", "#41b585", "#5ca890", "#829085"];
 
   const platformColorMap: Record<string, string> = {
@@ -337,186 +477,243 @@ export function DashboardPage({
   const enableTrendTap = isTrendDetailEnabled && isSmallScreen;
 
   return (
-    <>
-      <PageHero
-        eyebrow="Dashboard"
-        title="Your spending picture, without the clutter."
-        description="Read totals, category pressure, budget room, and recent movement inside one calm analytics surface that adapts cleanly from mobile to large desktop."
-        actions={
-          <>
-            <button
-              type="button"
-              className="ui-button-secondary w-full justify-center sm:w-auto"
-              onClick={() => trendSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            >
-              View report
-            </button>
-            {/* Issue #9 – primary CTA is larger & has an icon for extra weight */}
-            <button
-              type="button"
-              className="ui-button-primary w-full justify-center sm:w-auto"
-              onClick={() => void navigate("/expenses")}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" /></svg>
-              Add expense
-            </button>
-          </>
-        }
-      />
-
-      <SurfaceCard className="relative z-20 space-y-4 p-5 sm:p-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <SectionHeader title="Data view" description="Refine the dashboard by source, category, and time range without leaving the overview." />
-          {isDashboardLoading && !showFullLoadingScreen && (
-            <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-full shrink-0 self-start sm:self-auto animate-in fade-in duration-150">
-              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-              Updating data...
-            </div>
-          )}
+    <div className="space-y-4">
+      {/* Sleek Compact Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-ink">
+              Dashboard
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+              <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+              {dashboardViewMode === "wallet" ? (
+                <>
+                  <WalletIcon className="size-3" />
+                  <span>{targetWallet?.name || "Shared Wallet"}</span>
+                </>
+              ) : (
+                <>
+                  <UserIcon className="size-3" />
+                  <span>Personal</span>
+                </>
+              )}
+            </span>
+            {isDashboardLoading && !showFullLoadingScreen && (
+              <span className="text-[11px] font-medium text-muted flex items-center gap-1 animate-pulse">
+                • Updating...
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted mt-0.5">
+            Overview of spending velocity, category limits, instruments, and budgets.
+          </p>
         </div>
 
-        {/* Scope Row: Source toggle + Active Wallet */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3 pb-3 border-b border-[color:var(--border)]">
-          <div className="grid gap-1.5 text-sm font-medium text-secondary w-full sm:w-auto">
-            <span>Source</span>
-            <div className="source-toggle">
-              <button
-                type="button"
-                className="source-toggle-btn"
-                aria-pressed={dashboardViewMode === "personal"}
-                onClick={() => onDashboardViewModeChange("personal")}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true"><path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" /></svg>
-                Personal
-              </button>
-              <button
-                type="button"
-                className="source-toggle-btn"
-                aria-pressed={dashboardViewMode === "wallet"}
-                onClick={() => onDashboardViewModeChange("wallet")}
-                disabled={wallets.length === 0}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true"><path fillRule="evenodd" d="M1 4.75C1 3.784 1.784 3 2.75 3h14.5c.966 0 1.75.784 1.75 1.75v10.515a1.75 1.75 0 0 1-1.75 1.75h-1.5c-.078 0-.155-.005-.23-.015H2.75A1.75 1.75 0 0 1 1 15.25V4.75Zm16.5 7.385V11.5a1.252 1.252 0 0 1-.355-.14l-.004-.002A1.25 1.25 0 0 1 16.5 10.5V8.25a1.25 1.25 0 0 1 0-2.5V4.75a.25.25 0 0 0-.25-.25H2.75a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h14.5a.25.25 0 0 0 .25-.25v-3.115ZM14 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z" clipRule="evenodd" /></svg>
-                Wallet
-              </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            className="ui-button-secondary text-xs px-3 py-1.5 flex items-center gap-1.5"
+            onClick={() => trendSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            <TrendingUp className="size-3.5 text-primary" />
+            <span>Spend Trends</span>
+          </button>
+          <button
+            type="button"
+            className="ui-button-primary text-xs px-3.5 py-1.5 flex items-center gap-1.5 shadow-sm"
+            onClick={() => void navigate("/expenses")}
+          >
+            <Plus className="size-3.5" />
+            <span>Add expense</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Compact Filter Toolbar */}
+      <SurfaceCard className="p-3 sm:p-3.5 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+          {/* Source switch */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="w-full sm:w-auto">
+              <span className="block text-xs font-semibold text-secondary mb-1.5">
+                View mode
+              </span>
+              <div className="source-toggle">
+                <button
+                  type="button"
+                  className="source-toggle-btn flex items-center gap-1.5"
+                  aria-pressed={dashboardViewMode === "personal"}
+                  onClick={() => onDashboardViewModeChange("personal")}
+                >
+                  <UserIcon className="size-3.5" />
+                  <span>Personal</span>
+                </button>
+                <button
+                  type="button"
+                  className="source-toggle-btn flex items-center gap-1.5"
+                  aria-pressed={dashboardViewMode === "wallet"}
+                  onClick={() => {
+                    if (wallets.length === 0) {
+                      navigate("/wallets");
+                    } else {
+                      onDashboardViewModeChange("wallet");
+                    }
+                  }}
+                  title={wallets.length === 0 ? "Click to set up a shared wallet" : "Switch to wallet view"}
+                >
+                  <WalletIcon className="size-3.5" />
+                  <span>Wallet</span>
+                </button>
+              </div>
             </div>
+
+            {dashboardViewMode === "wallet" && (
+              <div className="w-36 sm:w-44">
+                {wallets.length > 0 ? (
+                  <FilterDropdown
+                    label="Wallet"
+                    value={dashboardWalletId ?? ""}
+                    placeholder="Select wallet"
+                    onChange={(val) => onDashboardWalletIdChange(val)}
+                    options={wallets.map((w) => ({ value: w.id, label: w.name }))}
+                  />
+                ) : (
+                  <div>
+                    <span className="block text-xs font-semibold text-secondary mb-1.5">Wallet</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/wallets")}
+                      className="inline-flex items-center justify-center gap-1.5 w-full h-[38px] rounded-xl border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10 transition cursor-pointer"
+                    >
+                      <Plus className="size-3.5" />
+                      <span>Create wallet</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {dashboardViewMode === "wallet" && wallets.length > 0 ? (
-            <div className="w-full sm:max-w-xs animate-in fade-in duration-200">
+          {/* Filters: Category, Platform, Range */}
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto sm:flex-wrap sm:justify-end">
+            <div className="w-full sm:w-36">
               <FilterDropdown
-                label="Active Wallet"
-                value={dashboardWalletId ?? ""}
-                placeholder="Select wallet"
-                onChange={(val) => onDashboardWalletIdChange(val)}
-                options={wallets.map((w) => ({
-                  value: w.id,
-                  label: w.name,
-                }))}
+                label="Category"
+                value={selectedCategory}
+                placeholder="All categories"
+                searchable
+                onChange={(val) => onSelectedCategoryChange(val)}
+                options={[
+                  { value: "", label: "All categories" },
+                  ...categories.map((cat) => {
+                    const match = budgetCategoryOptions.find(
+                      (opt) => opt.label.toLowerCase() === cat.toLowerCase()
+                    );
+                    return {
+                      value: cat,
+                      label: cat,
+                      icon: match ? <CategoryIcon iconId={match.icon} /> : undefined,
+                    };
+                  }),
+                ]}
               />
             </div>
-          ) : null}
-        </div>
 
-        {/* Filter Row: Category, Platform, Range (with nested Month/Year selector) */}
-        <div className={cn("grid grid-cols-1 gap-3", (primaryRange === "select_month" || primaryRange === "select_year") ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3")}>
-          {/* Category */}
-          <FilterDropdown
-            label="Category"
-            value={selectedCategory}
-            placeholder="All categories"
-            searchable
-            onChange={(val) => onSelectedCategoryChange(val)}
-            options={[
-              { value: "", label: "All categories" },
-              ...categories.map((cat) => {
-                const match = budgetCategoryOptions.find(
-                  (opt) => opt.label.toLowerCase() === cat.toLowerCase()
-                );
-                return {
-                  value: cat,
-                  label: cat,
-                  icon: match ? <CategoryIcon iconId={match.icon} /> : undefined,
-                };
-              }),
-            ]}
-          />
+            <div className="w-full sm:w-36">
+              <FilterDropdown
+                label="Platform"
+                value={selectedPlatform}
+                placeholder="All platforms"
+                onChange={(val) => onSelectedPlatformChange(val)}
+                options={[
+                  { value: "", label: "All platforms" },
+                  { value: "none", label: "No platform" },
+                  ...PLATFORMS.filter((p) => p.id !== "others").map((p) => ({
+                    value: p.id,
+                    label: p.name,
+                    icon: <img src={p.logo} alt="" className="h-3.5 w-3.5 rounded-full object-cover shrink-0" />,
+                  })),
+                  { value: "others", label: "Others" },
+                ]}
+              />
+            </div>
 
-          {/* Platform */}
-          <FilterDropdown
-            label="Platform"
-            value={selectedPlatform}
-            placeholder="All platforms"
-            onChange={(val) => onSelectedPlatformChange(val)}
-            options={[
-              { value: "", label: "All platforms" },
-              { value: "none", label: "No platform" },
-              ...PLATFORMS.filter((p) => p.id !== "others").map((p) => ({
-                value: p.id,
-                label: p.name,
-                icon: <img src={p.logo} alt="" className="h-4 w-4 rounded-full object-cover shrink-0" />,
-              })),
-              { value: "others", label: "Others" },
-            ]}
-          />
+            <div className={cn("w-full sm:w-36", (primaryRange === "select_month" || primaryRange === "select_year") ? "col-span-1" : "col-span-2 sm:col-span-1")}>
+              <FilterDropdown
+                label="Range"
+                value={primaryRange}
+                placeholder="All time"
+                onChange={(val) => {
+                  if (val === "select_month") {
+                    const defaultMonth = expenseMonthOptions[0] || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+                    onSelectedTimeRangeChange(defaultMonth as TimeRangeFilter);
+                  } else if (val === "select_year") {
+                    const defaultYear = expenseYearOptions[0] || new Date().getFullYear().toString();
+                    onSelectedTimeRangeChange(defaultYear as TimeRangeFilter);
+                  } else {
+                    onSelectedTimeRangeChange(val as TimeRangeFilter);
+                  }
+                }}
+                align="right"
+                options={[
+                  { value: "all", label: "All time" },
+                  { value: "week", label: "This week" },
+                  { value: "month", label: "This month" },
+                  { value: "year", label: "This year" },
+                  { value: "select_month", label: "Select month" },
+                  { value: "select_year", label: "Select year" },
+                ]}
+              />
+            </div>
 
-          {/* Time range */}
-          <FilterDropdown
-            label="Range"
-            value={primaryRange}
-            placeholder="All time"
-            onChange={(val) => {
-              if (val === "select_month") {
-                const defaultMonth = expenseMonthOptions[0] || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-                onSelectedTimeRangeChange(defaultMonth as TimeRangeFilter);
-              } else if (val === "select_year") {
-                const defaultYear = expenseYearOptions[0] || new Date().getFullYear().toString();
-                onSelectedTimeRangeChange(defaultYear as TimeRangeFilter);
-              } else {
-                onSelectedTimeRangeChange(val as TimeRangeFilter);
-              }
-            }}
-            align="right"
-            options={[
-              { value: "all", label: "All time" },
-              { value: "week", label: "This week" },
-              { value: "month", label: "This month" },
-              { value: "year", label: "This year" },
-              { value: "select_month", label: "Select month" },
-              { value: "select_year", label: "Select year" },
-            ]}
-          />
+            {primaryRange === "select_month" && (
+              <div className="w-full sm:w-38 col-span-1">
+                <FilterDropdown
+                  label="Month"
+                  value={selectedTimeRange}
+                  placeholder="Pick a month"
+                  onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+                  align="right"
+                  searchable={expenseMonthOptions.length > 6}
+                  options={expenseMonthOptions.map((m) => ({
+                    value: m,
+                    label: formatBudgetMonth(m),
+                  }))}
+                />
+              </div>
+            )}
 
-          {/* Nested Month Filter */}
-          {primaryRange === "select_month" && (
-            <FilterDropdown
-              label="Month"
-              value={selectedTimeRange}
-              placeholder="Pick a month"
-              onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
-              align="right"
-              searchable={expenseMonthOptions.length > 6}
-              options={expenseMonthOptions.map((m) => ({
-                value: m,
-                label: formatBudgetMonth(m),
-              }))}
-            />
-          )}
+            {primaryRange === "select_year" && (
+              <div className="w-full sm:w-32 col-span-1">
+                <FilterDropdown
+                  label="Year"
+                  value={selectedTimeRange}
+                  placeholder="Pick a year"
+                  onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
+                  align="right"
+                  options={expenseYearOptions.map((y) => ({
+                    value: y,
+                    label: y,
+                  }))}
+                />
+              </div>
+            )}
 
-          {/* Nested Year Filter */}
-          {primaryRange === "select_year" && (
-            <FilterDropdown
-              label="Year"
-              value={selectedTimeRange}
-              placeholder="Pick a year"
-              onChange={(val) => onSelectedTimeRangeChange(val as TimeRangeFilter)}
-              align="right"
-              options={expenseYearOptions.map((y) => ({
-                value: y,
-                label: y,
-              }))}
-            />
-          )}
+            {(selectedCategory || selectedPlatform || selectedTimeRange !== "all") && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectedCategoryChange("");
+                  onSelectedPlatformChange("");
+                  onSelectedTimeRangeChange("all");
+                }}
+                className="col-span-2 sm:col-span-1 text-xs text-muted hover:text-ink px-1.5 py-1 transition underline text-center sm:text-left self-center shrink-0"
+              >
+                Reset filters
+              </button>
+            )}
+          </div>
         </div>
       </SurfaceCard>
 
@@ -525,8 +722,8 @@ export function DashboardPage({
           <SurfaceCard className="relative overflow-hidden border-primary/20 p-8 sm:p-12 text-center flex flex-col items-center justify-center min-h-[340px] shadow-sm bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.85))] dark:bg-zinc-900/90">
             <div className="relative flex items-center justify-center mb-4">
               <div className="h-14 w-14 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-              <span className="absolute text-xl">
-                {dashboardViewMode === "wallet" ? "👛" : "👤"}
+              <span className="absolute flex items-center justify-center text-primary">
+                {dashboardViewMode === "wallet" ? <WalletIcon className="size-6" /> : <UserIcon className="size-6" />}
               </span>
             </div>
             <h3 className="text-xl font-bold font-display text-ink tracking-tight">
@@ -546,26 +743,18 @@ export function DashboardPage({
           </SurfaceCard>
 
           {/* Stat Cards Skeleton */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-2.5 sm:gap-3 grid-cols-2 lg:grid-cols-5">
             {[1, 2, 3, 4, 5].map((i) => (
-              <SurfaceCard key={i} className="p-5 sm:p-6 space-y-3 animate-pulse border-[color:var(--border)]">
-                <div className="h-3.5 w-24 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
-                <div className="h-8 w-32 bg-zinc-200 dark:bg-zinc-700 rounded-md mt-2" />
-                <div className="h-3 w-36 bg-zinc-100 dark:bg-zinc-800 rounded-md mt-2" />
+              <SurfaceCard key={i} className={cn("p-4 sm:p-5 space-y-3 animate-pulse border-[color:var(--border)]", i === 1 ? "col-span-2 lg:col-span-1" : "col-span-1")}>
+                <div className="h-3.5 w-20 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
+                <div className="h-7 w-28 bg-zinc-200 dark:bg-zinc-700 rounded-md mt-2" />
+                <div className="h-3 w-32 bg-zinc-100 dark:bg-zinc-800 rounded-md mt-2" />
               </SurfaceCard>
             ))}
           </div>
 
           {/* Insights Skeleton */}
-          <div className="grid gap-4 lg:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <SurfaceCard key={i} className="p-5 sm:p-6 space-y-3 animate-pulse border-[color:var(--border)]">
-                <div className="h-3.5 w-16 bg-zinc-200 dark:bg-zinc-700 rounded-md" />
-                <div className="h-5 w-44 bg-zinc-200 dark:bg-zinc-700 rounded-md mt-2" />
-                <div className="h-10 w-full bg-zinc-100 dark:bg-zinc-800 rounded-md mt-2" />
-              </SurfaceCard>
-            ))}
-          </div>
+          <div className="h-10 w-full bg-zinc-100 dark:bg-zinc-800 rounded-2xl animate-pulse border border-[color:var(--border)]" />
 
           {/* Spending Breakdown & Distribution Skeleton */}
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -588,79 +777,129 @@ export function DashboardPage({
         </div>
       ) : (
         <div className={cn("space-y-6 transition-opacity duration-200", isDashboardLoading ? "opacity-60 pointer-events-none" : "opacity-100")}>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <SurfaceCard className="bg-[linear-gradient(135deg,var(--primary),var(--gold))] p-6 text-white shadow-[0_24px_70px_rgba(30,122,83,0.24)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/80">{statMeta[0].label}</p>
-          <strong className="mt-4 block text-4xl font-semibold tracking-[-0.04em]">{total}</strong>
-          <p className="mt-3 text-sm leading-6 text-white/80">{statMeta[0].description}</p>
-        </SurfaceCard>
-
-        <SurfaceCard className="p-5 sm:p-6">
-          <p className="section-eyebrow">{statMeta[1].label}</p>
-          <strong className="mt-4 block text-3xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.expenseCount}</strong>
-          <p className="mt-3 text-sm leading-6 text-secondary">{dashboardStats.expenseCount === 1 ? "1 expense in view" : `${dashboardStats.expenseCount} expenses in view`}</p>
-        </SurfaceCard>
-
-        <SurfaceCard className="p-5 sm:p-6">
-          <p className="section-eyebrow">{statMeta[2].label}</p>
-          <strong className="mt-4 block text-3xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.average}</strong>
-          <p className="mt-3 text-sm leading-6 text-secondary">{statMeta[2].description}</p>
-        </SurfaceCard>
-
-        <SurfaceCard className="p-5 sm:p-6">
-          <p className="section-eyebrow">{statMeta[3].label}</p>
-          <strong className="mt-4 block text-2xl font-semibold tracking-[-0.03em] text-ink">{dashboardStats.topCategory?.category ?? "No data"}</strong>
-          <p className="mt-3 text-sm leading-6 text-secondary">{dashboardStats.topCategory ? dashboardStats.topCategory.formattedAmount : "Add expenses to reveal category leaders."}</p>
-        </SurfaceCard>
-
-        <SurfaceCard className="p-5 sm:p-6 flex flex-col justify-between">
-          <div>
-            <p className="section-eyebrow">Top Platform</p>
-            {dashboardStats.topPlatform ? (
-              <div className="flex items-center gap-3 mt-4">
-                <PlatformLogo
-                  logo={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.logo}
-                  name={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
-                  className="w-10 h-10 ring-2 ring-primary/10"
-                />
-                <div>
-                  <strong className="block text-xl font-semibold tracking-[-0.03em] text-ink">
-                    {PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
-                  </strong>
-                  <p className="text-sm text-secondary mt-0.5">
-                    {dashboardStats.topPlatform.formattedAmount} spent
-                  </p>
-                </div>
+          <section className="grid gap-2.5 sm:gap-3 grid-cols-2 lg:grid-cols-5">
+            <SurfaceCard className="col-span-2 lg:col-span-1 relative overflow-hidden bg-[linear-gradient(135deg,var(--primary),var(--gold))] p-4 sm:p-5 text-white shadow-[0_12px_36px_rgba(30,122,83,0.2)] flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-white/80">{statMeta[0].label}</p>
+                <CreditCard className="size-4 opacity-80" />
               </div>
-            ) : (
-              <p className="mt-4 text-sm text-muted">No platforms used yet.</p>
-            )}
-          </div>
-          <p className="mt-3 text-sm leading-6 text-secondary">
-            {dashboardStats.topPlatform ? "Highest spending platform in view." : "Add platform expenses to reveal."}
-          </p>
-        </SurfaceCard>
-      </section>
+              <div className="mt-2 sm:mt-2.5">
+                <strong className="block text-2xl sm:text-3xl font-extrabold tracking-tight">{total}</strong>
+                <p className="mt-1 text-xs text-white/80 font-medium truncate">{statMeta[0].description}</p>
+              </div>
+            </SurfaceCard>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        {dashboardInsights.map((insight) => (
-          <SurfaceCard
-            key={insight.id}
-            className={cn(
-              "p-5 sm:p-6",
-              insight.tone === "positive"
-                ? "bg-[linear-gradient(180deg,rgba(230,243,236,0.92),rgba(255,255,255,0.8))]"
-                : insight.tone === "warning"
-                  ? "bg-[linear-gradient(180deg,rgba(248,235,203,0.96),rgba(255,255,255,0.84))]"
-                  : "bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(255,255,255,0.65))]"
-            )}
-          >
-            <p className="section-eyebrow">Insight</p>
-            <strong className="mt-4 block text-xl font-semibold tracking-[-0.02em] text-ink">{insight.title}</strong>
-            <p className="mt-3 text-sm leading-7 text-secondary">{insight.body}</p>
-          </SurfaceCard>
-        ))}
-      </section>
+            <SurfaceCard className="col-span-1 p-3.5 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="section-eyebrow text-[10px] sm:text-[11px] truncate">{statMeta[1].label}</p>
+                <Receipt className="size-3.5 sm:size-4 text-primary shrink-0" />
+              </div>
+              <div className="mt-1.5 sm:mt-2.5">
+                <strong className="block text-xl sm:text-3xl font-bold tracking-tight text-ink">{dashboardStats.expenseCount}</strong>
+                <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-secondary font-medium truncate">
+                  {dashboardStats.expenseCount === 1 ? "1 expense" : `${dashboardStats.expenseCount} in view`}
+                </p>
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="col-span-1 p-3.5 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="section-eyebrow text-[10px] sm:text-[11px] truncate">{statMeta[2].label}</p>
+                <BarChart3 className="size-3.5 sm:size-4 text-primary shrink-0" />
+              </div>
+              <div className="mt-1.5 sm:mt-2.5">
+                <strong className="block text-xl sm:text-3xl font-bold tracking-tight text-ink truncate">{dashboardStats.average}</strong>
+                <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-secondary font-medium truncate">Per transaction</p>
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="col-span-1 p-3.5 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="section-eyebrow text-[10px] sm:text-[11px] truncate">{statMeta[3].label}</p>
+                <Tag className="size-3.5 sm:size-4 text-primary shrink-0" />
+              </div>
+              <div className="mt-1.5 sm:mt-2.5">
+                <strong className="block text-base sm:text-2xl font-bold tracking-tight text-ink truncate">
+                  {dashboardStats.topCategory?.category ?? "No data"}
+                </strong>
+                <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-secondary font-medium truncate">
+                  {dashboardStats.topCategory ? dashboardStats.topCategory.formattedAmount : "No expenses"}
+                </p>
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="col-span-1 p-3.5 sm:p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <p className="section-eyebrow text-[10px] sm:text-[11px] truncate">Top Platform</p>
+                <Store className="size-3.5 sm:size-4 text-primary shrink-0" />
+              </div>
+              <div className="mt-1.5 sm:mt-2.5">
+                {dashboardStats.topPlatform ? (
+                  <div className="flex items-center gap-2">
+                    <PlatformLogo
+                      logo={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.logo}
+                      name={PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
+                      className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg ring-1 ring-primary/20 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <strong className="block text-xs sm:text-base font-bold tracking-tight text-ink truncate">
+                        {PLATFORMS.find((p) => p.id === dashboardStats.topPlatform?.platform)?.name ?? dashboardStats.topPlatform?.platform}
+                      </strong>
+                      <p className="text-[10px] sm:text-xs text-secondary font-medium truncate">
+                        {dashboardStats.topPlatform.formattedAmount}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <strong className="block text-base sm:text-2xl font-bold tracking-tight text-ink">None</strong>
+                    <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-secondary font-medium truncate">No platform used</p>
+                  </div>
+                )}
+              </div>
+            </SurfaceCard>
+          </section>
+
+          {dashboardInsights.length > 0 && (
+            <div className="p-3 sm:px-4 sm:py-2.5 rounded-2xl bg-white/70 dark:bg-zinc-800/60 border border-[color:var(--border)] shadow-2xs backdrop-blur-sm space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-2.5 sm:flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-primary shrink-0 pl-0.5">
+                <Lightbulb className="size-3.5" />
+                <span className="uppercase tracking-wider text-[11px]">Key Insights</span>
+              </div>
+              <div className="h-3.5 w-px bg-[color:var(--border)] hidden sm:block shrink-0" />
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2 flex-1 min-w-0">
+                {dashboardInsights.map((insight) => (
+                  <div
+                    key={insight.id}
+                    className={cn(
+                      "flex items-start sm:items-center gap-2 px-3 py-2 sm:py-1 rounded-xl text-xs transition border font-normal",
+                      insight.tone === "positive"
+                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300"
+                        : insight.tone === "warning"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-800 dark:text-amber-300"
+                          : "bg-zinc-100/90 dark:bg-zinc-800/90 border-zinc-200 dark:border-zinc-750 text-zinc-700 dark:text-zinc-300"
+                    )}
+                  >
+                    <span
+                      className="size-1.5 rounded-full mt-1 sm:mt-0 shrink-0"
+                      style={{
+                        backgroundColor:
+                          insight.tone === "positive"
+                            ? "#10b981"
+                            : insight.tone === "warning"
+                              ? "#f59e0b"
+                              : "#94a3b8"
+                      }}
+                    />
+                    <div className="flex-1 min-w-0 sm:flex sm:items-center sm:gap-1.5 leading-relaxed">
+                      <strong className="font-semibold text-ink block sm:inline">{insight.title}:</strong>{" "}
+                      <span className="text-secondary block sm:inline">{insight.body}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
       <BudgetTrackerSection
         sectionTitle="Budget tracking"
@@ -694,6 +933,8 @@ export function DashboardPage({
         onBudgetHistoryRangeChange={onBudgetHistoryRangeChange}
         onOpenBudgetHistory={onOpenBudgetHistory}
         onCloseBudgetHistory={onCloseBudgetHistory}
+        bankSpends={bankSpendsData}
+        userAccounts={userAccounts}
       />
 
       <section className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -752,33 +993,200 @@ export function DashboardPage({
           )}
         </SurfaceCard>
 
-        {/* Issue #9: h-full stretches the card to match Spending breakdown height */}
-        <SurfaceCard className="flex h-full min-w-0 max-w-full flex-col overflow-hidden space-y-4 p-4 sm:p-5 sm:p-6">
-          <SectionHeader title="Latest activity" description="The most recent expense in your current dashboard view." />
-          {dashboardStats.latestExpense ? (
-            <div className="rounded-[22px] min-w-0 max-w-full overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,243,232,0.84))] p-3.5 sm:p-4">
-              <div className="flex items-center justify-between gap-3 min-w-0">
-                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 overflow-hidden">
-                  <PlatformLogo
-                    logo={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.logo || "/platforms/others.jpg"}
-                    name={PLATFORMS.find((p) => p.id === dashboardStats.latestExpense?.platform)?.name ?? (dashboardStats.latestExpense?.platform || "Others")}
-                    className="w-9 h-9 ring-2 ring-primary/10 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1 overflow-hidden">
-                    <strong className="block truncate text-sm sm:text-base font-semibold tracking-tight text-ink" title={dashboardStats.latestExpense.description}>
-                      {dashboardStats.latestExpense.description}
-                    </strong>
-                    <p className="text-xs text-muted truncate">{dashboardStats.latestExpense.category}</p>
+        {/* Balanced Recent Activity Card */}
+        <SurfaceCard className="flex h-full min-w-0 max-w-full flex-col overflow-hidden space-y-3.5 p-4 sm:p-5">
+          <SectionHeader
+            title="Recent activity"
+            description="Latest transactions recorded in your current view."
+            actions={
+              <button
+                type="button"
+                onClick={() => navigate("/expenses")}
+                className="text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1 shrink-0"
+              >
+                View all &rarr;
+              </button>
+            }
+          />
+          {activeExpenses && activeExpenses.length > 0 ? (
+            <div className="space-y-2.5 my-auto">
+              {activeExpenses.slice(0, 5).map((expense) => {
+                const norm = (expense.platform || "others").trim().toLowerCase();
+                const platform = PLATFORMS.find((p) => p.id === norm || p.name.toLowerCase() === norm);
+                return (
+                  <div
+                    key={expense.id}
+                    className="flex items-center justify-between gap-3 p-2 rounded-xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-800/40 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <PlatformLogo
+                        logo={platform?.logo || "/platforms/others.jpg"}
+                        name={platform?.name || (norm === "others" ? "Others" : expense.platform || "Others")}
+                        className="w-8 h-8 rounded-xl ring-1 ring-black/5 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <strong className="block truncate text-xs sm:text-sm font-semibold text-ink" title={expense.description}>
+                          {expense.description}
+                        </strong>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted truncate mt-0.5">
+                          <span>{expense.category}</span>
+                          <span>•</span>
+                          <span>{expense.date}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="block text-xs sm:text-sm font-bold text-ink">
+                        {formatCurrency(expense.amount, activeCurrency)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <strong className="block text-lg sm:text-xl font-semibold tracking-tight text-ink">{formatCurrency(dashboardStats.latestExpense.amount, activeCurrency)}</strong>
-                  <span className="text-xs text-muted">{dashboardStats.latestExpense.date}</span>
-                </div>
-              </div>
+                );
+              })}
             </div>
           ) : (
             <EmptyState title="No recent activity yet" description="Your next expense will appear here with its amount, category, and date." />
+          )}
+        </SurfaceCard>
+      </section>
+
+      {/* Bank & Payment Method Spends Section */}
+      <section className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+        <SurfaceCard className="min-w-0 overflow-hidden space-y-4 p-4 sm:p-5">
+          <SectionHeader
+            title="Bank & card spends"
+            description="Spending aggregated by bank account and card across your active view."
+          />
+          {bankSpendsData.length === 0 ? (
+            <EmptyState
+              title="No bank spends yet"
+              description="Assign bank accounts or cards to expenses to unlock bank-level spend breakdown."
+            />
+          ) : (
+            <div className="space-y-3.5">
+              {bankSpendsData.map((item) => (
+                <div
+                  key={item.key}
+                  className="space-y-1.5 py-1.5 px-2 -mx-2 rounded-xl transition hover:bg-black/[0.02]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <BankLogo bankId={item.bankId} bankName={item.bankName} size="sm" />
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-ink truncate block">
+                          {item.accountLabel || item.bankName}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted flex-wrap">
+                          {item.accountType && (
+                            <BankCardBadge type={item.accountType} className="scale-90 origin-left py-0" />
+                          )}
+                          {item.accountLabel && item.accountLabel !== item.bankName && (
+                            <span className="truncate">{item.bankName}</span>
+                          )}
+                          {item.lastFourDigits && (
+                            <span>•••• {item.lastFourDigits}</span>
+                          )}
+                          <span>({item.count} {item.count === 1 ? "expense" : "expenses"})</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-baseline gap-1.5 shrink-0">
+                      <span className="text-sm font-semibold text-ink">{item.formattedAmount}</span>
+                      <span className="text-[10px] font-medium text-muted">({item.share.toFixed(0)}%)</span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.04]">
+                    <div
+                      className="h-full rounded-full bg-[linear-gradient(90deg,#0ea5e9,var(--primary))]"
+                      style={{ width: `${Math.max(item.share, 4)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SurfaceCard>
+
+        {/* Card Type Distribution */}
+        <SurfaceCard className="flex h-full min-w-0 max-w-full flex-col overflow-hidden space-y-4 p-4 sm:p-5 sm:p-6">
+          <SectionHeader
+            title="Payment type ratio"
+            description="Debit cards vs Credit cards vs RuPay vs Cash."
+          />
+          {cardTypeData.length === 0 ? (
+            <EmptyState
+              title="No card data yet"
+              description="Add expenses with bank cards to view your payment instruments split."
+            />
+          ) : (
+            <div className="space-y-4 my-auto">
+              {/* Pie / Donut Chart */}
+              <div className="h-44 w-full flex items-center justify-center relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={cardTypeData}
+                      dataKey="amount"
+                      nameKey="label"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={42}
+                      outerRadius={68}
+                      paddingAngle={3}
+                      stroke="none"
+                    >
+                      {cardTypeData.map((item) => {
+                        const color =
+                          item.type === "debit"
+                            ? "#3b82f6"
+                            : item.type === "credit"
+                            ? "#a855f7"
+                            : item.type === "rupay_credit"
+                            ? "#f97316"
+                            : item.type === "cash"
+                            ? "#10b981"
+                            : "#64748b";
+                        return <Cell key={item.type} fill={color} />;
+                      })}
+                    </Pie>
+                    <RechartsTooltip
+                      formatter={(val: any, name: any) => [
+                        formatCurrency(Number(val).toFixed(2), activeCurrency),
+                        name
+                      ]}
+                      contentStyle={{
+                        backgroundColor: "rgba(15, 23, 42, 0.9)",
+                        borderColor: "rgba(255, 255, 255, 0.1)",
+                        borderRadius: "12px",
+                        fontSize: "12px",
+                        color: "#fff",
+                        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)"
+                      }}
+                      itemStyle={{ color: "#fff" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Payment Type Breakdown Cards */}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {cardTypeData.map((item) => (
+                  <div key={item.type} className="rounded-xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-800/50 p-2.5 space-y-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <BankCardBadge type={item.type === "rupay_credit" ? "rupay_credit" : item.type === "credit" ? "credit" : item.type === "debit" ? "debit" : "other"} />
+                        <span className="text-xs font-semibold text-ink truncate">{item.label}</span>
+                      </div>
+                      <span className="text-xs font-bold text-ink shrink-0">{item.formattedAmount}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-muted">
+                      <span>{item.count} {item.count === 1 ? "transaction" : "transactions"}</span>
+                      <span className="font-semibold text-primary">{item.share.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </SurfaceCard>
       </section>
@@ -828,7 +1236,7 @@ export function DashboardPage({
                 />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
                 {visibleSpendTrend.map((point, index) => (
                   <div
                     key={point.key}
@@ -857,8 +1265,8 @@ export function DashboardPage({
                     <button
                       type="button"
                       className={cn(
-                        "w-full cursor-pointer rounded-[22px] border border-[color:var(--border)] bg-white/80 p-4 text-left shadow-sm transition duration-200",
-                        activeTrendDetailKey === point.key && "border-primary/25 ring-2 ring-primary/10"
+                        "w-full cursor-pointer rounded-2xl border border-[color:var(--border)] bg-white/80 p-3 sm:p-3.5 text-left shadow-2xs transition duration-200 hover:border-primary/30",
+                        activeTrendDetailKey === point.key && "border-primary/30 ring-2 ring-primary/10"
                       )}
                       onFocus={enableTrendHover ? () => setActiveTrendDetailKey(point.key) : undefined}
                       onBlur={
@@ -872,9 +1280,9 @@ export function DashboardPage({
                       }
                       onClick={enableTrendTap ? () => setActiveTrendDetailKey((current) => (current === point.key ? null : point.key)) : undefined}
                     >
-                      <strong className="block text-xl text-ink">{formatCurrency(point.total.toFixed(2), activeCurrency)}</strong>
-                      <span className="mt-2 block text-sm font-medium text-secondary">{point.label}</span>
-                      <small className="mt-1 block text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
+                      <strong className="block text-base sm:text-lg font-bold text-ink">{formatCurrency(point.total.toFixed(2), activeCurrency)}</strong>
+                      <span className="mt-1 block text-xs font-medium text-secondary truncate">{point.label}</span>
+                      <small className="mt-0.5 block text-[10px] text-muted">{point.count === 1 ? "1 expense" : `${point.count} expenses`}</small>
                     </button>
 
                     {enableTrendHover && activeTrendDetailKey === point.key && trendDetailLookup[point.key]?.length ? (
@@ -1069,6 +1477,6 @@ export function DashboardPage({
           </div>
         </ModalFrame>
       )}
-    </>
+    </div>
   );
 }

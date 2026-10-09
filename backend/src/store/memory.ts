@@ -14,7 +14,11 @@ import type {
   UpdateWalletLoanInput,
   CreateWalletLoanRepaymentInput,
   UpdateWalletLoanRepaymentInput,
-  ExpensesQueryInput
+  ExpensesQueryInput,
+  CreateBankAccountInput,
+  UpdateBankAccountInput,
+  CreateFeedbackInput,
+  UpdateFeedbackInput
 } from "../lib/validation.js";
 import {
   type BillReminderRecord,
@@ -52,7 +56,13 @@ import {
   WalletValidationError,
   type WalletAggregationCategoryRecord,
   type WalletAggregationMonthlyRecord,
-  type WalletHistoryPagination
+  type WalletHistoryPagination,
+  type BankAccountRecord,
+  type FeedbackRecord,
+  BankAccountNotFoundError,
+  FeedbackLimitExceededError,
+  FeedbackNotFoundError,
+  FeedbackWindowExpiredError
 } from "./types.js";
 
 type StoredExpense = {
@@ -64,6 +74,8 @@ type StoredExpense = {
   date: string;
   createdAt: string;
   platform: string | null;
+  bankAccountId?: string | null;
+  bankName?: string | null;
 };
 
 type StoredIdempotency = {
@@ -126,6 +138,8 @@ type StoredWalletExpense = {
   splitRule: "equal" | "fixed" | "percentage";
   createdAt: string;
   platform: string | null;
+  bankAccountId?: string | null;
+  bankName?: string | null;
 };
 
 type StoredWalletExpenseSplit = {
@@ -176,6 +190,8 @@ type StoredWalletLoan = {
   createdAt: string;
   creatorName?: string | null;
   creatorEmail?: string | null;
+  bankAccountId?: string | null;
+  bankName?: string | null;
 };
 
 export type StoredNotification = {
@@ -236,7 +252,9 @@ function mapExpense(expense: StoredExpense): ExpenseRecord {
     description: expense.description,
     date: expense.date,
     created_at: expense.createdAt,
-    platform: expense.platform
+    platform: expense.platform,
+    bank_account_id: expense.bankAccountId ?? null,
+    bank_name: expense.bankName ?? null
   };
 }
 
@@ -500,6 +518,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   const notifications = new Map<string, StoredNotification>();
   const reminderPreferences = new Map<string, StoredReminderPreferences>();
   const billReminders = new Map<string, StoredBillReminder>();
+  const bankAccounts = new Map<string, BankAccountRecord>();
+  const feedbacks = new Map<string, FeedbackRecord>();
 
   function listWalletMembers(walletId: string): StoredWalletMember[] {
     return [...walletMembers.values()]
@@ -601,7 +621,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       repayments,
       is_owner: isOwner,
       creator_name: creatorName,
-      creator_email: creatorEmail
+      creator_email: creatorEmail,
+      bank_account_id: loan.bankAccountId ?? null,
+      bank_name: loan.bankName ?? null
     };
   }
 
@@ -654,6 +676,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
         split_rule: expense.splitRule,
         created_at: expense.createdAt,
         platform: expense.platform ?? null,
+        bank_account_id: expense.bankAccountId ?? null,
+        bank_name: expense.bankName ?? null,
         splits
       };
     });
@@ -994,7 +1018,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       description: input.description.trim(),
       date: input.date,
       createdAt: new Date().toISOString(),
-      platform: input.platform ?? null
+      platform: input.platform ?? null,
+      bankAccountId: input.bankAccountId ?? null,
+      bankName: input.bankName ?? null
     };
 
     expenses.set(nextExpense.id, nextExpense);
@@ -1195,7 +1221,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       category: input.category.trim(),
       description: input.description.trim(),
       date: input.date,
-      platform: input.platform ?? null
+      platform: input.platform ?? null,
+      bankAccountId: input.bankAccountId !== undefined ? input.bankAccountId : existingExpense.bankAccountId,
+      bankName: input.bankName !== undefined ? input.bankName : existingExpense.bankName
     };
 
     expenses.set(expenseId, updatedExpense);
@@ -1827,7 +1855,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       date: input.date,
       splitRule: input.splitRule,
       createdAt,
-      platform: input.platform ?? null
+      platform: input.platform ?? null,
+      bankAccountId: input.bankAccountId ?? null,
+      bankName: input.bankName ?? null
     };
 
     const normalizedSplits =
@@ -1874,7 +1904,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       description: input.description.trim(),
       date: input.date,
       splitRule: input.splitRule,
-      platform: input.platform ?? null
+      platform: input.platform ?? null,
+      bankAccountId: input.bankAccountId !== undefined ? input.bankAccountId : existingExpense.bankAccountId,
+      bankName: input.bankName !== undefined ? input.bankName : existingExpense.bankName
     });
 
     const normalizedSplits =
@@ -2010,6 +2042,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       notes: input.notes?.trim() || null,
       status: "active",
       loanType: input.loanType ?? "lent",
+      bankAccountId: input.bankAccountId ?? null,
+      bankName: input.bankName ?? null,
       createdAt: new Date().toISOString()
     };
 
@@ -2092,7 +2126,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       dueDate: input.dueDate !== undefined ? input.dueDate : existingLoan.dueDate,
       interestStartDate: input.interestStartDate !== undefined ? input.interestStartDate : existingLoan.interestStartDate,
       notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingLoan.notes,
-      status: input.status ?? existingLoan.status
+      status: input.status ?? existingLoan.status,
+      bankAccountId: input.bankAccountId !== undefined ? input.bankAccountId : existingLoan.bankAccountId,
+      bankName: input.bankName !== undefined ? input.bankName : existingLoan.bankName
     });
 
     return buildWalletDetail(walletId);
@@ -2253,6 +2289,8 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       notes: input.notes?.trim() || null,
       status: "active",
       loanType: input.loanType ?? "lent",
+      bankAccountId: input.bankAccountId ?? null,
+      bankName: input.bankName ?? null,
       createdAt: new Date().toISOString(),
       creatorName: resolvedCreatorName,
       creatorEmail: resolvedCreatorEmail
@@ -2316,7 +2354,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       interestStartDate: input.interestStartDate !== undefined ? input.interestStartDate : existingLoan.interestStartDate,
       notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingLoan.notes,
       status: input.status ?? existingLoan.status,
-      loanType: input.loanType ?? existingLoan.loanType ?? "lent"
+      loanType: input.loanType ?? existingLoan.loanType ?? "lent",
+      bankAccountId: input.bankAccountId !== undefined ? input.bankAccountId : existingLoan.bankAccountId,
+      bankName: input.bankName !== undefined ? input.bankName : existingLoan.bankName
     };
 
     walletLoans.set(loanId, updated);
@@ -3004,6 +3044,149 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
         }
       }
     }
+
+    for (const [bankAccountId, bankAccount] of bankAccounts.entries()) {
+      if (bankAccount.user_id === userId) {
+        bankAccounts.delete(bankAccountId);
+      }
+    }
+  }
+
+  async function listBankAccounts(userId: string): Promise<BankAccountRecord[]> {
+    return [...bankAccounts.values()]
+      .filter((acc) => acc.user_id === userId)
+      .sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.bank_name.localeCompare(b.bank_name));
+  }
+
+  async function createBankAccount(userId: string, input: CreateBankAccountInput): Promise<BankAccountRecord> {
+    const id = randomUUID();
+    const existing = [...bankAccounts.values()].filter((acc) => acc.user_id === userId);
+    const isDefault = input.isDefault ?? existing.length === 0;
+
+    if (isDefault) {
+      for (const acc of existing) {
+        acc.is_default = false;
+      }
+    }
+
+    const record: BankAccountRecord = {
+      id,
+      user_id: userId,
+      bank_id: input.bankId.trim(),
+      bank_name: input.bankName.trim(),
+      account_type: input.accountType,
+      account_label: input.accountLabel?.trim() || null,
+      last_four_digits: input.lastFourDigits?.trim() || null,
+      is_default: isDefault,
+      created_at: new Date().toISOString()
+    };
+
+    bankAccounts.set(id, record);
+    return record;
+  }
+
+  async function updateBankAccount(userId: string, bankAccountId: string, input: UpdateBankAccountInput): Promise<BankAccountRecord> {
+    const existing = bankAccounts.get(bankAccountId);
+    if (!existing || existing.user_id !== userId) {
+      throw new BankAccountNotFoundError();
+    }
+
+    if (input.isDefault) {
+      for (const acc of bankAccounts.values()) {
+        if (acc.user_id === userId) {
+          acc.is_default = false;
+        }
+      }
+    }
+
+    const updated: BankAccountRecord = {
+      ...existing,
+      account_label: input.accountLabel !== undefined ? (input.accountLabel?.trim() || null) : existing.account_label,
+      last_four_digits: input.lastFourDigits !== undefined ? (input.lastFourDigits?.trim() || null) : existing.last_four_digits,
+      is_default: input.isDefault !== undefined ? input.isDefault : existing.is_default
+    };
+
+    bankAccounts.set(bankAccountId, updated);
+    return updated;
+  }
+
+  async function deleteBankAccount(userId: string, bankAccountId: string): Promise<void> {
+    const existing = bankAccounts.get(bankAccountId);
+    if (!existing || existing.user_id !== userId) {
+      throw new BankAccountNotFoundError();
+    }
+    bankAccounts.delete(bankAccountId);
+  }
+
+  async function createFeedback(userId: string, userEmail: string | undefined | null, input: CreateFeedbackInput): Promise<FeedbackRecord> {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    let recentCount = 0;
+    for (const fb of feedbacks.values()) {
+      if (fb.user_id === userId && new Date(fb.created_at).getTime() >= oneDayAgo) {
+        recentCount++;
+      }
+    }
+    if (recentCount >= 5) {
+      throw new FeedbackLimitExceededError();
+    }
+
+    const id = randomUUID();
+    const nowIso = new Date().toISOString();
+    const record: FeedbackRecord = {
+      id,
+      user_id: userId,
+      user_email: userEmail ?? null,
+      user_name: input.userName?.trim() ?? null,
+      category: input.category,
+      message: input.message,
+      rating: input.rating ?? null,
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    feedbacks.set(id, record);
+    return record;
+  }
+
+  async function listUserFeedbacks(userId: string): Promise<FeedbackRecord[]> {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const userList: FeedbackRecord[] = [];
+    for (const fb of feedbacks.values()) {
+      if (fb.user_id === userId && new Date(fb.created_at).getTime() >= oneDayAgo) {
+        userList.push(fb);
+      }
+    }
+    return userList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  async function updateFeedback(userId: string, feedbackId: string, input: UpdateFeedbackInput): Promise<FeedbackRecord> {
+    const existing = feedbacks.get(feedbackId);
+    if (!existing || existing.user_id !== userId) {
+      throw new FeedbackNotFoundError();
+    }
+
+    const createdAt = new Date(existing.created_at).getTime();
+    if (Date.now() - createdAt > 24 * 60 * 60 * 1000) {
+      throw new FeedbackWindowExpiredError();
+    }
+
+    const updated: FeedbackRecord = {
+      ...existing,
+      category: input.category ?? existing.category,
+      message: input.message !== undefined ? input.message.trim() : existing.message,
+      rating: input.rating !== undefined ? input.rating : existing.rating,
+      user_name: input.userName !== undefined ? input.userName.trim() : existing.user_name,
+      updated_at: new Date().toISOString()
+    };
+    feedbacks.set(feedbackId, updated);
+    return updated;
+  }
+
+  async function deleteFeedback(userId: string, feedbackId: string): Promise<void> {
+    const existing = feedbacks.get(feedbackId);
+    if (!existing || existing.user_id !== userId) {
+      throw new FeedbackNotFoundError();
+    }
+    feedbacks.delete(feedbackId);
   }
 
   async function searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]> {
@@ -3067,6 +3250,14 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     runNotificationChecks,
     deleteUserData,
     searchExpensesSemantic,
+    listBankAccounts,
+    createBankAccount,
+    updateBankAccount,
+    deleteBankAccount,
+    createFeedback,
+    listUserFeedbacks,
+    updateFeedback,
+    deleteFeedback,
     getNotificationsMap: () => notifications,
     pruneExpiredBudgetNotifications
   };

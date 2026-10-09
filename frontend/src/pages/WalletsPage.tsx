@@ -3,18 +3,19 @@ import type { FormEvent } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
+import { BankPicker, BankLogo } from "../components/BankPicker";
 import { PLATFORMS } from "../lib/platforms";
 import { FilterDropdown } from "../components/FilterDropdown";
 import {
   EmptyState,
   ItemActionButtons,
   ModalFrame,
-  PageHero,
   SectionHeader,
   StatusNotice,
   SurfaceCard,
   cn,
 } from "../components/ui";
+import { Users, CreditCard, Plus, X, ArrowUpRight, ArrowDownLeft, FileText, Clock, CheckCircle2, AlertCircle, TrendingUp, TrendingDown, Scale } from "lucide-react";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { BorrowerMiniStatementModal } from "../components/BorrowerMiniStatementModal";
 import { compressGroupImage } from "../utils/imageCompressor";
@@ -171,6 +172,8 @@ type WalletsPageProps = {
       splitRule: SplitRule;
       splits: Array<{ memberId: string; value?: string }>;
       platform?: string | null;
+      bankAccountId?: string | null;
+      bankName?: string | null;
     },
   ) => Promise<boolean>;
   onUpdateWalletExpense: (
@@ -185,6 +188,8 @@ type WalletsPageProps = {
       splitRule: SplitRule;
       splits: Array<{ memberId: string; value?: string }>;
       platform?: string | null;
+      bankAccountId?: string | null;
+      bankName?: string | null;
     },
   ) => Promise<boolean>;
   onDeleteWalletExpenses: (
@@ -499,6 +504,8 @@ export function WalletsPage({
     string | null
   >(null);
   const [expensePlatform, setExpensePlatform] = useState<string | null>(null);
+  const [expenseBankAccountId, setExpenseBankAccountId] = useState<string | null>(null);
+  const [expenseBankName, setExpenseBankName] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     type: "single" | "selected";
     expenseId?: string;
@@ -561,6 +568,21 @@ export function WalletsPage({
   const [settlementFilterMonth, setSettlementFilterMonth] = useState("all");
   const [settlementFilterAmount, setSettlementFilterAmount] = useState("all");
 
+  const [isGroupExpenseFormOpen, setIsGroupExpenseFormOpen] = useState(false);
+  const [isGroupPaybackFormOpen, setIsGroupPaybackFormOpen] = useState(false);
+
+  useEffect(() => {
+    if (editingWalletExpenseId) {
+      setIsGroupExpenseFormOpen(true);
+    }
+  }, [editingWalletExpenseId]);
+
+  useEffect(() => {
+    if (editingSettlementId) {
+      setIsGroupPaybackFormOpen(true);
+    }
+  }, [editingSettlementId]);
+
   // View Mode: Shared Wallets vs Peer Loans
   const [viewMode, setViewMode] = useState<"wallets" | "loans">("wallets");
 
@@ -601,6 +623,8 @@ export function WalletsPage({
   const [loanInterestStartDate, setLoanInterestStartDate] = useState("");
   const [loanDueDate, setLoanDueDate] = useState("");
   const [loanNotes, setLoanNotes] = useState("");
+  const [loanBankAccountId, setLoanBankAccountId] = useState<string | null>(null);
+  const [loanBankName, setLoanBankName] = useState<string | null>(null);
   const [showLoanValidation, setShowLoanValidation] = useState(false);
 
   // Repayment Form State
@@ -1598,6 +1622,8 @@ export function WalletsPage({
       splitRule: expenseSplitRule,
       splits,
       platform: expensePlatform,
+      bankAccountId: expenseBankAccountId,
+      bankName: expenseBankName,
     };
 
     const created = editingWalletExpenseId
@@ -1652,8 +1678,11 @@ export function WalletsPage({
       setAlreadySettledMemberIds([]);
       setEditingWalletExpenseId(null);
       setExpensePlatform(null);
+      setExpenseBankAccountId(null);
+      setExpenseBankName(null);
       setShowExpenseValidation(false);
       setIsMobileExpenseModalOpen(false);
+      setIsGroupExpenseFormOpen(false);
     }
   }
 
@@ -1699,6 +1728,7 @@ export function WalletsPage({
       setEditingSettlementId(null);
       setShowSettlementValidation(false);
       setIsMobileSettlementModalOpen(false);
+      setIsGroupPaybackFormOpen(false);
     }
   }
 
@@ -1837,6 +1867,8 @@ export function WalletsPage({
     );
     setAlreadySettledMemberIds([]);
     setExpensePlatform(walletExpense.platform ?? null);
+    setExpenseBankAccountId(walletExpense.bank_account_id ?? null);
+    setExpenseBankName(walletExpense.bank_name ?? null);
 
     setIsMobileExpenseModalOpen(true);
   }
@@ -2013,6 +2045,8 @@ export function WalletsPage({
     setLoanInterestStartDate(getTodayIsoDate());
     setLoanDueDate("");
     setLoanNotes("");
+    setLoanBankAccountId(null);
+    setLoanBankName(null);
     setShowLoanValidation(false);
     setIsLoanModalOpen(true);
   }
@@ -2031,6 +2065,8 @@ export function WalletsPage({
     setLoanInterestStartDate(loan.interest_start_date || "");
     setLoanDueDate(loan.due_date || "");
     setLoanNotes(loan.notes || "");
+    setLoanBankAccountId(loan.bank_account_id ?? null);
+    setLoanBankName(loan.bank_name ?? null);
     setShowLoanValidation(false);
     setIsLoanModalOpen(true);
   }
@@ -2103,7 +2139,9 @@ export function WalletsPage({
       lendingDate: loanLendingDate,
       interestStartDate: loanInterestStartDate.trim() || undefined,
       dueDate: loanDueDate.trim() || undefined,
-      notes: loanNotes.trim() || undefined
+      notes: loanNotes.trim() || undefined,
+      bankAccountId: loanBankAccountId,
+      bankName: loanBankName
     };
 
     if (editingLoan) {
@@ -2225,6 +2263,24 @@ export function WalletsPage({
     }
   }
 
+  function handleCancelWalletExpenseEdit() {
+    setEditingWalletExpenseId(null);
+    setExpensePlatform(null);
+    setIsMobileExpenseModalOpen(false);
+    setExpenseAmount("");
+    setExpenseCategory("");
+    setExpenseDescription("");
+    setExpenseDate(getTodayIsoDate());
+    setSplitValues({});
+    setIsGroupExpenseFormOpen(false);
+  }
+
+  function handleCancelSettlementEdit() {
+    setEditingSettlementId(null);
+    setIsMobileSettlementModalOpen(false);
+    setIsGroupPaybackFormOpen(false);
+  }
+
   function renderWalletExpenseForm() {
     return (
       <form
@@ -2329,6 +2385,18 @@ export function WalletsPage({
           <PlatformPicker
             value={expensePlatform}
             onChange={setExpensePlatform}
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <span className="text-sm font-medium text-secondary">Bank Account / Card (Optional)</span>
+          <BankPicker
+            selectedBankAccountId={expenseBankAccountId ?? null}
+            selectedBankName={expenseBankName ?? null}
+            onChange={(bankAccountId, bankName) => {
+              setExpenseBankAccountId(bankAccountId);
+              setExpenseBankName(bankName);
+            }}
           />
         </div>
 
@@ -2590,85 +2658,68 @@ export function WalletsPage({
 
   return (
     <>
-      <PageHero
-        eyebrow={viewMode === "wallets" ? "Shared wallets" : "Peer Lending & Loans"}
-        title={viewMode === "wallets" ? "Track group spending, balances, and settlements." : "Track loans, custom interest, and repayments directly."}
-        description={viewMode === "wallets"
-          ? "Create a wallet for a trip, home, or shared budget, then manage balances, group budgets, transactions, invites, and payback history in one connected surface."
-          : "Lend money with customizable monthly, yearly, or one-time interest schedules and start dates. Track principal, accrued interest, and repayments without needing a group wallet."}
-      />
-
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-2 border-b border-[color:var(--border)] mb-6">
-        <div className="inline-flex p-1 rounded-2xl bg-zinc-100/90 dark:bg-zinc-800/80 border border-[color:var(--border)] shadow-inner">
-          <button
-            type="button"
-            onClick={() => setViewMode("wallets")}
-            className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
-              viewMode === "wallets"
-                ? "bg-white dark:bg-zinc-900 text-ink shadow-sm scale-[1.01]"
-                : "text-secondary hover:text-ink"
-            )}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-primary">
-              <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM14 8a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM3.5 15.5a3.5 3.5 0 0 1 7 0h-7ZM13.5 15.5a3.5 3.5 0 0 1 7 0h-7Z" />
-            </svg>
-            <span>Shared Wallets</span>
-            {wallets.length > 0 && (
-              <span className="ml-1 px-2 py-0.5 text-xs font-bold rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200">
-                {wallets.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setViewMode("loans");
-              void onLoadLoans?.();
-            }}
-            className={cn(
-              "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200",
-              viewMode === "loans"
-                ? "bg-white dark:bg-zinc-900 text-ink shadow-sm scale-[1.01]"
-                : "text-secondary hover:text-ink"
-            )}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-emerald-500">
-              <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
-            </svg>
-            <span>Peer Loans &amp; Lending</span>
-            {standaloneLoansList.length > 0 && (
-              <span className="ml-1 px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                {standaloneLoansList.length}
-              </span>
-            )}
-          </button>
+      {/* Sleek Executive Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1 pb-3 mb-4 border-b border-[color:var(--border)]">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-ink">
+              {viewMode === "wallets" ? "Shared Wallets" : "Peer Lending & Loans"}
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+              {viewMode === "wallets" ? (
+                <>
+                  <Users className="size-3" />
+                  <span>{wallets.length} {wallets.length === 1 ? "group" : "groups"}</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="size-3" />
+                  <span>{standaloneLoansList.length} {standaloneLoansList.length === 1 ? "loan" : "loans"}</span>
+                </>
+              )}
+            </span>
+          </div>
+          <p className="text-xs text-muted mt-0.5">
+            {viewMode === "wallets"
+              ? "Track group spending, balances, split rules, and settlements."
+              : "Track peer loans, custom interest schedules, and repayments directly."}
+          </p>
         </div>
 
-        {/* {viewMode === "loans" && (
-          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-            {standaloneLoansList.length > 0 && (
-              <button
-                type="button"
-                className="ui-button-secondary flex items-center gap-2 shadow-xs cursor-pointer"
-                onClick={() => handleOpenBorrowerStatement(null)}
-                title="View consolidated monthly statement for borrowers"
-              >
-                <span>📄 Mini Statement</span>
-              </button>
-            )}
+        {/* Mode Switcher & Quick Actions */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
+          <div className="inline-flex p-1 rounded-xl bg-zinc-100/90 dark:bg-zinc-800/80 border border-[color:var(--border)] shadow-inner">
             <button
               type="button"
-              className="ui-button-primary flex items-center gap-2 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={handleOpenCreateLoan}
+              onClick={() => setViewMode("wallets")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer",
+                viewMode === "wallets"
+                  ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs scale-[1.01]"
+                  : "text-secondary hover:text-ink"
+              )}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-              </svg>
-              <span>Lend Money</span>
+              <Users className="size-3.5 text-primary" />
+              <span>Shared Wallets</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("loans");
+                void onLoadLoans?.();
+              }}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer",
+                viewMode === "loans"
+                  ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs scale-[1.01]"
+                  : "text-secondary hover:text-ink"
+              )}
+            >
+              <CreditCard className="size-3.5 text-emerald-500" />
+              <span>Peer Loans</span>
             </button>
           </div>
-        )} */}
+        </div>
       </div>
 
       {statusMessage ? (
@@ -2752,73 +2803,71 @@ export function WalletsPage({
         <div className="space-y-6">
           {/* Top Active Shared Wallet Banner */}
           {displayWallet && (
-            <SurfaceCard className="relative overflow-hidden border-primary/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.9))] p-5 sm:p-6 shadow-[0_16px_40px_rgba(30,122,83,0.08)] backdrop-blur-xl">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <SurfaceCard className="relative overflow-hidden border-primary/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.9))] p-4 sm:p-5 shadow-xs backdrop-blur-xl">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 {/* Left side: Avatar + Details */}
-                <div className="flex flex-col gap-3.5 sm:gap-4 min-w-0 flex-1">
+                <div className="flex flex-col gap-2.5 sm:gap-3 min-w-0 flex-1">
                   {/* Group Avatar and Name & Description aligned side-by-side */}
-                  <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
+                  <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
                     {displayWallet.picture_url ? (
                       <img
                         src={displayWallet.picture_url}
                         alt={displayWallet.name}
-                        className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover ring-2 ring-primary/20 shadow-md shrink-0"
+                        className="h-12 w-12 sm:h-14 sm:w-14 rounded-xl object-cover ring-2 ring-primary/20 shadow-xs shrink-0"
                       />
                     ) : (
-                      <div className="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-2xl sm:text-3xl font-bold font-display text-white shadow-md">
+                      <div className="flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-lg sm:text-xl font-bold font-display text-white shadow-xs">
                         {displayWallet.name.slice(0, 2).toUpperCase()}
                       </div>
                     )}
 
                     <div className="min-w-0 flex-1">
-                      <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold font-display text-ink tracking-tight truncate">
+                      <h2 className="text-lg sm:text-xl font-bold font-display text-ink tracking-tight truncate">
                         {displayWallet.name}
                       </h2>
 
-                      <p className="text-sm text-secondary line-clamp-2 mt-0.5 sm:mt-1">
+                      <p className="text-xs text-secondary line-clamp-1 mt-0.5">
                         {displayWallet.description || "No description provided for this group yet."}
                       </p>
                     </div>
                   </div>
 
                   {/* Badges row */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     {isSwitchingWallet ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                        <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-2xs font-semibold text-primary">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                         Loading wallet...
                       </span>
                     ) : (
                       <>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                          <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-2xs font-semibold text-primary">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                           Active Shared Wallet
                         </span>
-                        <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-xs font-medium text-secondary">
+                        <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2 py-0.5 text-2xs font-medium text-secondary">
                           {isWalletOwner ? "👑 Group Owner" : "Member"}
                         </span>
                       </>
                     )}
-                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-xs font-semibold text-ink">
+                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-2xs font-semibold text-ink">
                       {displayWallet.currency || "INR"}
                     </span>
-                    <span className="rounded-full border border-primary/15 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-ink capitalize">
+                    <span className="rounded-full border border-primary/15 bg-primary/5 px-2 py-0.5 text-2xs font-medium text-ink capitalize">
                       {displayWallet.default_split_rule} split by default
                     </span>
                   </div>
 
                     {/* Member Initials Chips Row */}
                     {isSwitchingWallet ? (
-                      <div className="mt-3.5 flex items-center gap-2 text-xs font-medium text-secondary">
-                        <span className="h-2 w-2 rounded-full bg-primary animate-ping" />
+                      <div className="mt-2 flex items-center gap-2 text-xs font-medium text-secondary">
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
                         <span className="text-muted">Downloading members &amp; balances...</span>
                       </div>
                     ) : selectedWallet ? (
-                      <div className="mt-3.5 flex flex-wrap items-center gap-2">
-                        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-secondary pr-1">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 text-primary shrink-0">
-                            <path d="M7 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM14.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM1.615 16.428a1.224 1.224 0 0 1-.569-1.175 6.002 6.002 0 0 1 11.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 0 1 7 18a9.953 9.953 0 0 1-5.385-1.572ZM14.5 16h-.106c.07-.297.088-.611.048-.933a7.47 7.47 0 0 0-1.588-3.755 4.502 4.502 0 0 1 5.874 2.636.818.818 0 0 1-.36.98A7.465 7.465 0 0 1 14.5 16Z" />
-                          </svg>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <div className="inline-flex items-center gap-1 text-2xs font-semibold text-secondary pr-1">
+                          <Users className="size-3 text-primary shrink-0" />
                           <span>Members:</span>
                         </div>
 
@@ -2832,16 +2881,16 @@ export function WalletsPage({
                               <span
                                 key={member.id}
                                 title={`${member.display_name} • ${isOwner ? "👑 Group Owner" : "Member"}${member.email ? ` (${member.email})` : ""}`}
-                                className="relative inline-flex items-center gap-1 rounded-full border border-primary/25 bg-white/95 dark:bg-zinc-800/90 py-0.5 px-2 text-xs font-bold text-ink shadow-xs backdrop-blur-xs transition-transform hover:scale-110 cursor-help"
+                                className="relative inline-flex items-center gap-1 rounded-full border border-primary/25 bg-white/95 dark:bg-zinc-800/90 py-0.5 px-1.5 text-2xs font-bold text-ink shadow-2xs backdrop-blur-xs transition-transform hover:scale-105 cursor-help"
                               >
                                 <span
-                                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs font-bold text-white shadow-2xs"
+                                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-2xs"
                                   style={{ background: gradient }}
                                 >
                                   {initials}
                                 </span>
                                 {isOwner && (
-                                  <span className="text-amber-500 text-2xs -ml-0.5" title="Group Owner">👑</span>
+                                  <span className="text-amber-500 text-[10px] -ml-0.5" title="Group Owner">👑</span>
                                 )}
                               </span>
                             );
@@ -2859,14 +2908,14 @@ export function WalletsPage({
                         <>
                           <button
                             type="button"
-                            className="ui-button-secondary text-xs sm:text-sm"
+                            className="ui-button-secondary !py-1.5 !px-3 text-xs"
                             onClick={handleStartWalletEdit}
                           >
                             Edit group
                           </button>
                           <button
                             type="button"
-                            className="ui-button-danger text-xs sm:text-sm"
+                            className="ui-button-danger !py-1.5 !px-3 text-xs"
                             onClick={() => void handleDeleteWalletClick()}
                             disabled={isSubmitting || isDeletingWallet}
                           >
@@ -2876,7 +2925,7 @@ export function WalletsPage({
                       ) : currentWalletMember ? (
                         <button
                           type="button"
-                          className="ui-button-danger text-xs sm:text-sm"
+                          className="ui-button-danger !py-1.5 !px-3 text-xs"
                           onClick={() => void handleLeaveWalletClick()}
                           disabled={isSubmitting || isLeavingWallet}
                         >
@@ -2890,24 +2939,24 @@ export function WalletsPage({
 
               {/* Wallet quick switcher if multiple wallets exist */}
               {wallets.length > 1 && (
-                <div className="mt-4 pt-3.5 border-t border-[color:var(--border)] flex items-center gap-2 overflow-x-auto pb-1">
-                  <span className="text-xs font-semibold text-muted shrink-0">Switch:</span>
+                <div className="mt-3 pt-2.5 border-t border-[color:var(--border)] flex items-center gap-2 overflow-x-auto pb-0.5">
+                  <span className="text-2xs font-semibold text-muted shrink-0">Switch:</span>
                   {wallets.map((w) => (
                     <button
                       key={w.id}
                       type="button"
                       onClick={() => onSelectWallet(w.id)}
                       className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium shrink-0 transition-all cursor-pointer",
+                        "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 transition-all cursor-pointer",
                         w.id === selectedWalletId
-                          ? "bg-primary text-white shadow-xs font-semibold"
+                          ? "bg-primary text-white shadow-2xs font-semibold"
                           : "bg-white/80 dark:bg-zinc-800 text-secondary border border-[color:var(--border)] hover:bg-white hover:text-ink"
                       )}
                     >
                       {w.picture_url ? (
-                        <img src={w.picture_url} alt="" className="h-4 w-4 rounded-full object-cover" />
+                        <img src={w.picture_url} alt="" className="h-3.5 w-3.5 rounded-full object-cover" />
                       ) : (
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/20 text-2xs font-bold text-primary">
+                        <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary/20 text-[9px] font-bold text-primary">
                           {w.name.slice(0, 1).toUpperCase()}
                         </span>
                       )}
@@ -2917,7 +2966,7 @@ export function WalletsPage({
                   <button
                     type="button"
                     onClick={() => setIsCreateWalletModalOpen(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-primary hover:bg-primary/10 transition-colors shrink-0 cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold text-primary hover:bg-primary/10 transition-colors shrink-0 cursor-pointer"
                   >
                     + New
                   </button>
@@ -2926,8 +2975,8 @@ export function WalletsPage({
             </SurfaceCard>
           )}
 
-          <section className="grid gap-5 xl:grid-cols-[minmax(280px,0.34fr)_minmax(0,0.66fr)]">
-            <SurfaceCard className="space-y-4 p-5 sm:p-6 xl:sticky xl:top-32 xl:self-start">
+          <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.32fr)_minmax(0,0.68fr)]">
+            <SurfaceCard className="space-y-3.5 p-4 sm:p-5 xl:sticky xl:top-28 xl:self-start">
               <SectionHeader
                 eyebrow="Your wallets"
                 title="Groups & Ledgers"
@@ -2936,9 +2985,9 @@ export function WalletsPage({
                   <button
                     type="button"
                     onClick={() => setIsCreateWalletModalOpen(true)}
-                    className="ui-button-primary !min-h-9 !px-3.5 !py-1.5 text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    className="ui-button-primary !min-h-8 !px-3 !py-1 text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
                   >
-                    <span className="text-sm font-bold leading-none">+</span>
+                    <Plus className="size-3" />
                     <span>New Wallet</span>
                   </button>
                 }
@@ -2959,16 +3008,16 @@ export function WalletsPage({
                   }
                 />
               ) : (
-                <div className="grid gap-2.5">
+                <div className="grid gap-2">
                   {wallets.map((wallet) => (
                     <button
                       key={wallet.id}
                       type="button"
                       className={cn(
-                        "flex items-start gap-3 rounded-2xl border p-3.5 text-left shadow-sm transition-all duration-200 cursor-pointer",
+                        "flex items-start gap-2.5 rounded-xl border p-2.5 sm:p-3 text-left shadow-2xs transition-all duration-200 cursor-pointer",
                         wallet.id === selectedWalletId
-                          ? "border-primary/35 bg-success-tint/70 text-ink ring-1 ring-primary/20 shadow-xs"
-                          : "border-[color:var(--border)] bg-white/80 text-secondary hover:bg-white hover:border-primary/25",
+                          ? "border-primary/35 bg-success-tint/70 text-ink ring-1 ring-primary/20 shadow-2xs"
+                          : "border-[color:var(--border)] bg-card text-secondary hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:border-primary/25",
                       )}
                       onClick={() => onSelectWallet(wallet.id)}
                     >
@@ -2976,26 +3025,26 @@ export function WalletsPage({
                         <img
                           src={wallet.picture_url}
                           alt={wallet.name}
-                          className="h-11 w-11 rounded-2xl object-cover ring-1 ring-black/10 shrink-0 mt-0.5"
+                          className="h-9 w-9 rounded-xl object-cover ring-1 ring-black/10 shrink-0 mt-0.5"
                         />
                       ) : (
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-sm font-bold text-white shadow-xs mt-0.5">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-xs font-bold text-white shadow-2xs mt-0.5">
                           {wallet.name.slice(0, 2).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
-                          <strong className="truncate block text-sm font-bold text-ink">
+                          <strong className="truncate block text-xs sm:text-sm font-bold text-ink">
                             {wallet.name}
                           </strong>
-                          <span className="text-2xs font-semibold text-primary shrink-0">
+                          <span className="text-[11px] font-semibold text-primary shrink-0">
                             {wallet.currency || "INR"}
                           </span>
                         </div>
-                        <span className="mt-0.5 block text-xs line-clamp-1 text-secondary">
+                        <span className="mt-0.5 block text-2xs line-clamp-1 text-secondary">
                           {wallet.description || "No description"}
                         </span>
-                        <div className="mt-2 flex items-center gap-1.5 text-2xs font-semibold text-muted">
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-semibold text-muted">
                           <span className="capitalize">{wallet.default_split_rule} split</span>
                         </div>
                       </div>
@@ -3134,40 +3183,73 @@ export function WalletsPage({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="ui-button-primary ui-button-sm text-xs cursor-pointer"
+                        className={cn(
+                          "ui-button-sm text-xs cursor-pointer flex items-center gap-1.5 transition-all",
+                          isGroupExpenseFormOpen
+                            ? "ui-button-secondary border-primary/30 text-primary font-semibold"
+                            : "ui-button-primary"
+                        )}
                         onClick={() => {
-                          setWalletSubTab("transactions");
-                          setTimeout(() => {
-                            document.getElementById("wallet-transaction-forms")?.scrollIntoView({ behavior: "smooth" });
-                          }, 50);
+                          setIsGroupExpenseFormOpen((prev) => !prev);
+                          if (!isGroupExpenseFormOpen) {
+                            setTimeout(() => {
+                              document.getElementById("wallet-transaction-forms")?.scrollIntoView({ behavior: "smooth" });
+                            }, 50);
+                          }
                         }}
                       >
-                        ＋ Add Transaction
+                        {isGroupExpenseFormOpen ? (
+                          <>
+                            <X className="size-3.5" />
+                            <span>Close Form</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="size-3.5" />
+                            <span>Add Transaction</span>
+                          </>
+                        )}
                       </button>
                       <button
                         type="button"
-                        className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
+                        className={cn(
+                          "ui-button-sm text-xs cursor-pointer flex items-center gap-1.5 transition-all",
+                          isGroupPaybackFormOpen
+                            ? "ui-button-secondary border-primary/30 text-primary font-semibold"
+                            : "ui-button-secondary"
+                        )}
                         onClick={() => {
-                          setWalletSubTab("transactions");
-                          setTimeout(() => {
-                            document.getElementById("wallet-payback-form")?.scrollIntoView({ behavior: "smooth" });
-                          }, 50);
+                          setIsGroupPaybackFormOpen((prev) => !prev);
+                          if (!isGroupPaybackFormOpen) {
+                            setTimeout(() => {
+                              document.getElementById("wallet-payback-form")?.scrollIntoView({ behavior: "smooth" });
+                            }, 50);
+                          }
                         }}
                       >
-                        Record Payback
+                        {isGroupPaybackFormOpen ? (
+                          <>
+                            <X className="size-3.5" />
+                            <span>Close Payback</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>Record Payback</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
 
                   {/* Section 1: Balances */}
                   {(walletSubTab === "overview" || walletSubTab === "all") && (
-                    <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                    <SurfaceCard className="space-y-4 p-4 sm:p-5">
                       <SectionHeader
                         eyebrow="Balances"
                         title="Who should receive and who owes"
                         description="Live net balances keep the group aware of who is owed and who still needs to settle."
                       />
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid gap-2.5 sm:gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {selectedWallet.balances.map((balance) => {
                           const numericBalance = Number(balance.net_amount);
 
@@ -3175,25 +3257,34 @@ export function WalletsPage({
                             <article
                               key={balance.member_id}
                               className={cn(
-                                "rounded-2xl border p-5 shadow-sm",
+                                "rounded-xl border p-3.5 sm:p-4 shadow-2xs transition-all",
                                 numericBalance > 0
-                                  ? "border-primary/12 bg-success-tint"
+                                  ? "border-primary/20 bg-emerald-500/5 text-ink"
                                   : numericBalance < 0
-                                    ? "border-[color:rgba(154,63,56,0.14)] bg-danger-tint"
-                                    : "border-[color:var(--border)] bg-white/80",
+                                    ? "border-rose-500/20 bg-rose-500/5 text-ink"
+                                    : "border-[color:var(--border)] bg-card text-ink",
                               )}
                             >
-                              <strong className="block text-lg text-ink">
-                                {balance.member_name}
-                              </strong>
-                              <span className="mt-2 block text-sm text-secondary">
-                                {numericBalance > 0
-                                  ? "Should receive"
-                                  : numericBalance < 0
-                                    ? "Needs to settle"
-                                    : "Square"}
-                              </span>
-                              <h3 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-ink">
+                              <div className="flex items-center justify-between gap-2">
+                                <strong className="text-sm font-bold text-ink truncate">
+                                  {balance.member_name}
+                                </strong>
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded-full text-2xs font-semibold shrink-0",
+                                  numericBalance > 0
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    : numericBalance < 0
+                                      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                      : "bg-zinc-100 dark:bg-zinc-800 text-muted"
+                                )}>
+                                  {numericBalance > 0
+                                    ? "Should receive"
+                                    : numericBalance < 0
+                                      ? "Needs to settle"
+                                      : "Settled"}
+                                </span>
+                              </div>
+                              <h3 className="mt-2 text-xl sm:text-2xl font-bold tracking-tight text-ink">
                                 {formatCurrency(Math.abs(numericBalance).toFixed(2), selectedWallet.wallet.currency)}
                               </h3>
                             </article>
@@ -3203,47 +3294,77 @@ export function WalletsPage({
                     </SurfaceCard>
                   )}
 
-                  {/* Section 2: Shared expense & Settlement forms (vertically stacked) */}
-                  {(walletSubTab === "overview" || walletSubTab === "transactions" || walletSubTab === "all") && (
-                    <section id="wallet-transaction-forms" className="space-y-5">
-                      <SurfaceCard className="space-y-5 p-5 sm:p-6">
-                        <SectionHeader
-                          eyebrow="Shared expense"
-                          title={
-                            editingWalletExpenseId
-                              ? "Edit group transaction"
-                              : "Add a group transaction"
-                          }
-                          description="Capture a shared purchase, choose the payer, and define how the split should be distributed across members."
-                        />
-                        {renderWalletExpenseForm()}
-                      </SurfaceCard>
+                  {/* Section 2: Shared expense & Settlement forms (collapsible on overview) */}
+                  {((walletSubTab === "overview" && (isGroupExpenseFormOpen || Boolean(editingWalletExpenseId) || isGroupPaybackFormOpen || Boolean(editingSettlementId))) ||
+                    walletSubTab === "transactions" ||
+                    walletSubTab === "all") && (
+                    <section id="wallet-transaction-forms" className="space-y-4">
+                      {(isGroupExpenseFormOpen || Boolean(editingWalletExpenseId) || walletSubTab === "transactions" || walletSubTab === "all") && (
+                        <SurfaceCard className="space-y-4 p-4 sm:p-5 border-primary/20 shadow-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <SectionHeader
+                              eyebrow="Shared expense"
+                              title={
+                                editingWalletExpenseId
+                                  ? "Edit group transaction"
+                                  : "Add a group transaction"
+                              }
+                              description="Capture a shared purchase, choose the payer, and define how the split should be distributed."
+                            />
+                            {walletSubTab === "overview" && (
+                              <button
+                                type="button"
+                                onClick={handleCancelWalletExpenseEdit}
+                                className="p-1 rounded-lg text-secondary hover:text-ink hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                                title="Close expense form"
+                              >
+                                <X className="size-4" />
+                              </button>
+                            )}
+                          </div>
+                          {renderWalletExpenseForm()}
+                        </SurfaceCard>
+                      )}
 
-                      <SurfaceCard id="wallet-payback-form" className="space-y-5 p-5 sm:p-6">
-                        <SectionHeader
-                          eyebrow="Settlement"
-                          title={
-                            editingSettlementId ? "Edit payback" : "Record a payback"
-                          }
-                          description="Log repayments to keep group balances current and the shared ledger easy to reconcile."
-                          actions={
-                            <button
-                              type="button"
-                              className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
-                              onClick={() => setIsSettlementModalOpen(true)}
-                            >
-                              Payback history
-                            </button>
-                          }
-                        />
-                        {renderSettlementForm()}
-                      </SurfaceCard>
+                      {(isGroupPaybackFormOpen || Boolean(editingSettlementId) || walletSubTab === "transactions" || walletSubTab === "all") && (
+                        <SurfaceCard id="wallet-payback-form" className="space-y-4 p-4 sm:p-5 border-primary/20 shadow-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <SectionHeader
+                              eyebrow="Settlement"
+                              title={
+                                editingSettlementId ? "Edit payback" : "Record a payback"
+                              }
+                              description="Log repayments to keep group balances current and the shared ledger easy to reconcile."
+                              actions={
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
+                                  onClick={() => setIsSettlementModalOpen(true)}
+                                >
+                                  Payback history
+                                </button>
+                              }
+                            />
+                            {walletSubTab === "overview" && (
+                              <button
+                                type="button"
+                                onClick={handleCancelSettlementEdit}
+                                className="p-1 rounded-lg text-secondary hover:text-ink hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                                title="Close payback form"
+                              >
+                                <X className="size-4" />
+                              </button>
+                            )}
+                          </div>
+                          {renderSettlementForm()}
+                        </SurfaceCard>
+                      )}
                     </section>
                   )}
 
                   {/* Section 3: Recent group activity */}
                   {(walletSubTab === "overview" || walletSubTab === "transactions" || walletSubTab === "all") && (
-                    <SurfaceCard className="space-y-5 p-5 sm:p-6">
+                    <SurfaceCard className="space-y-4 p-4 sm:p-5">
                 <SectionHeader
                   eyebrow="Shared expenses"
                   title="Recent group activity"
@@ -3251,7 +3372,7 @@ export function WalletsPage({
                   actions={
                     <button
                       type="button"
-                      className="ui-button-secondary"
+                      className="ui-button-secondary !py-1.5 !px-3 text-xs"
                       onClick={() => setIsExpenseModalOpen(true)}
                     >
                       Filter expenses
@@ -3259,8 +3380,8 @@ export function WalletsPage({
                   }
                 />
                 {activeExpenseFilters.length > 0 ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3">
-                    <p className="text-sm text-secondary">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-[color:var(--border)] bg-zinc-50/75 px-3 py-2">
+                    <p className="text-xs text-secondary">
                       Showing: {activeExpenseFilters.join(" • ")}
                     </p>
                     <button
@@ -3278,7 +3399,7 @@ export function WalletsPage({
                   </div>
                 ) : null}
                 {selectedWallet.expensePagination && selectedWallet.expensePagination.total > selectedWallet.expenses.length ? (
-                  <div className="rounded-2xl border border-amber-100 bg-amber-50/50 px-4 py-3 text-xs text-amber-800 font-medium">
+                  <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-3 py-2 text-xs text-amber-800 font-medium">
                     Showing only the latest {selectedWallet.expenses.length} of {selectedWallet.expensePagination.total} expenses. Please load more to see older data.
                   </div>
                 ) : null}
@@ -3289,19 +3410,19 @@ export function WalletsPage({
                   />
                 ) : filteredExpenses.length === 0 ? (
                   selectedWallet.expensePagination?.hasMore ? (
-                    <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-8 text-center sm:p-12">
-                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
+                    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[color:var(--border)] bg-zinc-50/50 p-6 text-center sm:p-8">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-5">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
                         </svg>
                       </div>
-                      <h3 className="mt-4 text-base font-semibold text-ink">No matches in loaded data</h3>
-                      <p className="mt-2 max-w-sm text-sm text-secondary">
+                      <h3 className="mt-3 text-sm font-semibold text-ink">No matches in loaded data</h3>
+                      <p className="mt-1.5 max-w-sm text-xs text-secondary">
                         None of the currently loaded {selectedWallet.expenses.length} expenses match these filters. You can load older data to search further back.
                       </p>
                       <button
                         type="button"
-                        className="ui-button-secondary mt-6 flex items-center gap-2"
+                        className="ui-button-secondary mt-4 !py-1.5 !px-3 text-xs flex items-center gap-2"
                         onClick={onLoadMoreExpenses}
                         disabled={isLoading}
                       >
@@ -3317,8 +3438,8 @@ export function WalletsPage({
                 ) : (
                   <>
                     {filteredExpenses.length > 0 ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/75 px-4 py-3 mb-3">
-                        <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-[color:var(--border)] bg-zinc-50/75 px-3 py-2 mb-2.5">
+                        <div className="flex items-center gap-2.5">
                           <input
                             type="checkbox"
                             aria-label="Select all filtered group expenses"
@@ -3336,8 +3457,8 @@ export function WalletsPage({
                               }
                             }}
                           />
-                          <span className="text-sm font-semibold text-ink">Select All</span>
-                          <span className="text-sm text-secondary">
+                          <span className="text-xs font-semibold text-ink">Select All</span>
+                          <span className="text-xs text-secondary">
                             {selectedExpenseIds.length > 0 ? `(${selectedExpenseIds.length} selected)` : ""}
                           </span>
                         </div>
@@ -3345,7 +3466,7 @@ export function WalletsPage({
                           {selectedExpenseIds.length > 0 ? (
                             <button
                               type="button"
-                              className="ui-button-danger ui-button-sm"
+                              className="ui-button-danger !py-1 !px-2.5 text-xs"
                               disabled={selectedExpenseIds.some((id) => deletingExpenseIds.includes(id))}
                               onClick={handleDeleteSelectedExpensesClick}
                             >
@@ -3420,7 +3541,7 @@ export function WalletsPage({
                                       {isLoadMoreMode ? (
                                         <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.63l3.72-3.72a.75.75 0 1 1 1.06 1.06l-5 5a.75.75 0 0 1-1.06 0l-5-5a.75.75 0 1 1 1.06-1.06l3.72 3.72V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
                                       ) : (
-                                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1 1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
                                       )}
                                     </svg>
                                   )}
@@ -3432,20 +3553,20 @@ export function WalletsPage({
                       </div>
                     ) : null}
                     {/* Desktop View */}
-                    <div className="hidden lg:grid lg:gap-3">
+                    <div className="hidden lg:grid lg:gap-2.5">
                       {paginatedWalletExpenses.map((expense) => (
                         <article
                           key={expense.id}
                           className={cn(
-                            "group rounded-2xl border p-4 shadow-sm transition-all duration-200 hover:shadow-md",
+                            "group rounded-xl border p-3 sm:p-3.5 shadow-2xs transition-all duration-200 hover:shadow-xs",
                             selectedExpenseIds.includes(expense.id)
                               ? "border-primary/25 bg-success-tint"
-                              : "border-[color:var(--border)] bg-white/80",
+                              : "border-[color:var(--border)] bg-card",
                             deletingExpenseIds.includes(expense.id) && "animate-delete",
                           )}
                         >
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               <input
                                 type="checkbox"
                                 aria-label={`Select ${expense.description}`}
@@ -3454,7 +3575,7 @@ export function WalletsPage({
                                 onChange={() => handleToggleExpenseSelection(expense.id)}
                                 className="mr-1"
                               />
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint/60 text-ink shadow-sm">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-success-tint/60 text-ink shadow-2xs">
                                 <CategoryIcon
                                   iconId={
                                     budgetCategoryOptions.find(
@@ -3466,21 +3587,27 @@ export function WalletsPage({
                               {expense.platform ? (
                                 <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                               ) : null}
-                              <div className="min-w-0 space-y-1">
-                                <strong className="block text-base font-semibold text-ink truncate">
+                              {expense.bank_name ? (
+                                <div className="flex items-center gap-1.5 rounded-full border border-[color:var(--border)] bg-card px-2 py-0.5 text-xs text-secondary shadow-2xs">
+                                  <BankLogo bankName={expense.bank_name} size="xs" />
+                                  <span className="font-medium text-[11px] truncate max-w-[85px]">{expense.bank_name}</span>
+                                </div>
+                              ) : null}
+                              <div className="min-w-0 space-y-0.5">
+                                <strong className="block text-sm font-semibold text-ink truncate">
                                   {expense.description}
                                 </strong>
-                                <p className="text-xs text-secondary leading-none">
+                                <p className="text-2xs text-secondary leading-none">
                                   {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3.5 shrink-0 justify-between lg:justify-end">
+                            <div className="flex items-center gap-3 shrink-0 justify-between lg:justify-end">
                               <div className="text-left lg:text-right">
-                                <strong className="block text-lg sm:text-xl font-bold tracking-tight text-ink">
+                                <strong className="block text-base sm:text-lg font-bold tracking-tight text-ink">
                                   {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
                                 </strong>
-                                <span className="text-xs font-medium text-secondary">
+                                <span className="text-2xs font-medium text-secondary">
                                   {expense.split_rule} split
                                 </span>
                               </div>
@@ -3499,20 +3626,20 @@ export function WalletsPage({
                     </div>
 
                     {/* Mobile View */}
-                    <div className="grid gap-3 lg:hidden">
+                    <div className="grid gap-2.5 lg:hidden">
                       {paginatedWalletExpenses.map((expense) => (
                         <article
                           key={expense.id}
                           className={cn(
-                            "table-card-mobile space-y-4 transition-all duration-200",
+                            "table-card-mobile !p-3 sm:!p-3.5 space-y-2.5 transition-all duration-200",
                             selectedExpenseIds.includes(expense.id)
                               ? "border-primary/25 bg-success-tint"
-                              : "border-[color:var(--border)] bg-white/80",
+                              : "border-[color:var(--border)] bg-card",
                             deletingExpenseIds.includes(expense.id) && "animate-delete",
                           )}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3">
+                          <div className="flex items-start justify-between gap-2.5">
+                            <div className="flex items-start gap-2.5">
                               <input
                                 type="checkbox"
                                 aria-label={`Select ${expense.description}`}
@@ -3520,7 +3647,7 @@ export function WalletsPage({
                                 disabled={deletingExpenseIds.includes(expense.id)}
                                 onChange={() => handleToggleExpenseSelection(expense.id)}
                               />
-                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-success-tint text-ink shadow-sm">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-success-tint text-ink shadow-2xs">
                                 <CategoryIcon
                                   iconId={
                                     budgetCategoryOptions.find(
@@ -3532,22 +3659,28 @@ export function WalletsPage({
                               {expense.platform ? (
                                 <PlatformPicker value={expense.platform} onChange={null} className="shrink-0 self-center" />
                               ) : null}
+                              {expense.bank_name ? (
+                                <div className="flex items-center gap-1 rounded-full border border-[color:var(--border)] bg-card px-1.5 py-0.5 text-xs text-secondary shadow-2xs self-center">
+                                  <BankLogo bankName={expense.bank_name} size="xs" />
+                                  <span className="font-medium text-[10px] truncate max-w-[70px]">{expense.bank_name}</span>
+                                </div>
+                              ) : null}
                             </div>
-                            <strong className="text-xl text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
+                            <strong className="text-base font-bold text-ink">{formatCurrency(expense.amount, selectedWallet?.wallet.currency)}</strong>
                           </div>
 
-                          <div className="space-y-1">
-                            <strong className="block text-base font-semibold text-ink">{expense.description}</strong>
+                          <div className="space-y-0.5">
+                            <strong className="block text-sm font-semibold text-ink">{expense.description}</strong>
                           </div>
 
-                          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2.5">
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
-                              <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2">
+                            <div className="flex flex-wrap items-center gap-1.5 text-2xs text-secondary">
+                              <span className="rounded-full border border-[color:var(--border)] bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-secondary">{expense.category}</span>
                               <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
                               <span>•</span>
                               <span>{expense.date}</span>
                               <span>•</span>
-                              <span className="text-xs font-medium text-secondary">
+                              <span className="text-2xs font-medium text-secondary">
                                 {expense.split_rule} split
                               </span>
                             </div>
@@ -3568,8 +3701,8 @@ export function WalletsPage({
                       if (!showPagination) return null;
 
                       return (
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--border)] bg-white/75 px-4 py-4">
-                          <p className="text-sm text-secondary">
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-[color:var(--border)] bg-card px-3.5 py-2.5">
+                          <p className="text-xs text-secondary">
                             Page {currentWalletExpensesPage} of {totalWalletExpensePages}
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -4276,901 +4409,913 @@ export function WalletsPage({
           ) : (
             <>
               {/* Top Mode Navigation: Lent vs Borrowed vs Unified Mini-Statement */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[color:var(--border)] pb-4">
-            <div className="flex items-center gap-1.5 p-1.5 bg-zinc-100 dark:bg-zinc-800/70 rounded-2xl border border-[color:var(--border)] shrink-0">
-              <button
-                type="button"
-                onClick={() => setLoanTab("lent")}
-                className={cn(
-                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
-                  loanTab === "lent"
-                    ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                    : "text-secondary hover:text-ink"
-                )}
-              >
-                <span>💸 Money Lent</span>
-                <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 text-2xs text-emerald-800 dark:text-emerald-300 font-semibold">
-                  {lentLoansList.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLoanTab("borrowed")}
-                className={cn(
-                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
-                  loanTab === "borrowed"
-                    ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
-                    : "text-secondary hover:text-ink"
-                )}
-              >
-                <span>📥 Money Borrowed</span>
-                <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 text-2xs text-amber-800 dark:text-amber-300 font-semibold">
-                  {borrowedLoansList.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLoanTab("statement")}
-                className={cn(
-                  "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
-                  loanTab === "statement"
-                    ? "bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
-                    : "text-secondary hover:text-ink"
-                )}
-              >
-                <span>📑 Mini-Statement</span>
-                <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 text-2xs text-indigo-800 dark:text-indigo-300 font-semibold">
-                  {unifiedStatementItems.length}
-                </span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {loanTab === "lent" && (
-                <button
-                  type="button"
-                  className="ui-button-primary !py-2 !px-4 text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer"
-                  onClick={() => handleOpenCreateLoan("lent")}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                  </svg>
-                  <span> Lend Money</span>
-                </button>
-              )}
-
-              {loanTab === "borrowed" && (
-                <button
-                  type="button"
-                  className="ui-button-primary !py-2 !px-4 text-xs sm:text-sm font-semibold flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
-                  onClick={() => handleOpenCreateLoan("borrowed")}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                  </svg>
-                  <span> Record Borrowed</span>
-                </button>
-              )}
-
-              {loanTab === "statement" && (
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 border-b border-[color:var(--border)] pb-3">
+                <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/70 rounded-xl border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar max-w-full">
                   <button
                     type="button"
-                    className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
-                    onClick={() => handleOpenCreateLoan("lent")}
+                    onClick={() => setLoanTab("lent")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      loanTab === "lent"
+                        ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                        : "text-secondary hover:text-ink"
+                    )}
                   >
-                    <span> Lend</span>
+                    <ArrowUpRight className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>Money Lent</span>
+                    <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 text-2xs text-emerald-800 dark:text-emerald-300 font-semibold">
+                      {lentLoansList.length}
+                    </span>
                   </button>
+
                   <button
                     type="button"
-                    className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
-                    onClick={() => handleOpenCreateLoan("borrowed")}
+                    onClick={() => setLoanTab("borrowed")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      loanTab === "borrowed"
+                        ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-2xs"
+                        : "text-secondary hover:text-ink"
+                    )}
                   >
-                    <span> Borrow</span>
+                    <ArrowDownLeft className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>Money Borrowed</span>
+                    <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.2 text-2xs text-amber-800 dark:text-amber-300 font-semibold">
+                      {borrowedLoansList.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLoanTab("statement")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      loanTab === "statement"
+                        ? "bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                        : "text-secondary hover:text-ink"
+                    )}
+                  >
+                    <FileText className="size-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    <span>Mini-Statement</span>
+                    <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-1.5 py-0.2 text-2xs text-indigo-800 dark:text-indigo-300 font-semibold">
+                      {unifiedStatementItems.length}
+                    </span>
                   </button>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* LENT OR BORROWED VIEW */}
-          {loanTab !== "statement" ? (
-            <>
-              {/* Top Aggregate Summary Metrics Cards */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      {loanTab === "borrowed" ? "Total Principal Borrowed" : "Total Principal Lent"}
-                    </p>
-                    <span className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-xl",
-                      loanTab === "borrowed"
-                        ? "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
-                        : "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400"
-                    )}>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                      </svg>
-                    </span>
-                  </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
-                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalBorrowed : lentLoansAggregate.totalLent).toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    Across {loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans} {loanTab === "borrowed" ? "borrowed loan" : "lent loan"}{(loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans) !== 1 ? "s" : ""}
-                  </span>
-                </SurfaceCard>
-
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      {loanTab === "borrowed" ? "Interest Payable" : "Interest Accrued"}
-                    </p>
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                        <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 6a.75.75 0 0 0-1.5 0v6c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5h-3.75V6Z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                  </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
-                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalInterest : lentLoansAggregate.totalInterest).toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    Calculated per terms
-                  </span>
-                </SurfaceCard>
-
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      {loanTab === "borrowed" ? "Total Paid Back" : "Total Collected"}
-                    </p>
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                  </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
-                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalPaidBack : lentLoansAggregate.totalRepaid).toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    {loanTab === "borrowed" ? "Installments paid to lenders" : "Installments received"}
-                  </span>
-                </SurfaceCard>
-
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      {loanTab === "borrowed" ? "Remaining to Pay" : "Outstanding to Collect"}
-                    </p>
-                    <span className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-xl",
-                      loanTab === "borrowed"
-                        ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
-                        : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
-                    )}>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                        <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                  </div>
-                  <strong className={cn(
-                    "mt-3 block text-2xl font-bold tracking-tight",
-                    loanTab === "borrowed" ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
-                  )}>
-                    {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalRemaining : lentLoansAggregate.totalRemaining).toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    {loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount} active loan{(loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount) !== 1 ? "s" : ""}
-                  </span>
-                </SurfaceCard>
-              </div>
-
-              {/* Controls Bar: Search & Status Filters */}
-              <SurfaceCard className="p-4 sm:p-5">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        value={standaloneSearch}
-                        onChange={(e) => setStandaloneSearch(e.target.value)}
-                        placeholder={loanTab === "borrowed" ? "Search by lender name or email..." : "Search by borrower name or email..."}
-                        className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
-                      />
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
-                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
-                      </svg>
-                      {standaloneSearch && (
-                        <button
-                          type="button"
-                          onClick={() => setStandaloneSearch("")}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink cursor-pointer"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setStandaloneFilterStatus("all")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          standaloneFilterStatus === "all"
-                            ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        All ({currentCategoryLoans.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStandaloneFilterStatus("active")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          standaloneFilterStatus === "active"
-                            ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        Active
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStandaloneFilterStatus("repaid")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          standaloneFilterStatus === "repaid"
-                            ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        {loanTab === "borrowed" ? "Settled" : "Repaid"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStandaloneFilterStatus("overdue")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          standaloneFilterStatus === "overdue"
-                            ? "bg-white dark:bg-zinc-900 text-red-600 dark:text-red-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        Overdue
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </SurfaceCard>
-
-              {/* Loans Cards Grid */}
-              {filteredStandaloneLoans.length === 0 ? (
-                currentCategoryLoans.length === 0 ? (
-                  <SurfaceCard className="p-8 sm:p-12 text-center space-y-4">
-                    <div className={cn(
-                      "mx-auto flex h-16 w-16 items-center justify-center rounded-3xl text-2xl shadow-inner",
-                      loanTab === "borrowed"
-                        ? "bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400"
-                        : "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400"
-                    )}>
-                      {loanTab === "borrowed" ? "📥" : "💸"}
-                    </div>
-                    <div className="space-y-2 max-w-md mx-auto">
-                      <h3 className="font-display text-xl font-bold text-ink">
-                        {loanTab === "borrowed" ? "No borrowed money recorded yet" : "No peer loans tracked yet"}
-                      </h3>
-                      <p className="text-sm leading-6 text-secondary">
-                        {loanTab === "borrowed"
-                          ? "Record funds borrowed from friends, family, or lenders, schedule repayments, and track interest owed in one simple dashboard."
-                          : "Lend money with customizable interest schedules, start months, and repayment tracking without requiring a shared wallet."}
-                      </p>
-                    </div>
+                <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                  {loanTab === "lent" && (
                     <button
                       type="button"
-                      className={cn(
-                        "ui-button-primary mt-2 inline-flex items-center gap-2 cursor-pointer",
-                        loanTab === "borrowed" && "bg-amber-600 hover:bg-amber-700 text-white"
-                      )}
-                      onClick={() => handleOpenCreateLoan(loanTab === "borrowed" ? "borrowed" : "lent")}
+                      className="ui-button-primary !py-1.5 !px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      onClick={() => handleOpenCreateLoan("lent")}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
                         <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
                       </svg>
-                      <span>{loanTab === "borrowed" ? " Record Borrowed Money" : " Lend Money to Someone"}</span>
+                      <span>Lend Money</span>
                     </button>
-                  </SurfaceCard>
-                ) : (
-                  <SurfaceCard className="p-8 text-center space-y-2">
-                    <p className="text-base font-semibold text-ink">No matching loans found</p>
-                    <p className="text-xs text-secondary">Try adjusting your search query or status filter.</p>
-                  </SurfaceCard>
-                )
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredStandaloneLoans.map((loan) => {
-                    const {
-                      principal,
-                      accruedInterest,
-                      totalDue,
-                      totalRepaid,
-                      remainingBalance,
-                      isFullyPaid,
-                      isOverpaid,
-                      overpaidAmount,
-                      progressPercent,
-                      isOverdue
-                    } = calculateLoanFinancials(loan);
+                  )}
 
-                    const bName = getLoanBorrowerName(loan);
-                    const bEmail = getLoanBorrowerEmail(loan);
-                    const isBorrowed = loan.loan_type === "borrowed";
+                  {loanTab === "borrowed" && (
+                    <button
+                      type="button"
+                      className="ui-button-primary !py-1.5 !px-3 text-xs font-semibold flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                      onClick={() => handleOpenCreateLoan("borrowed")}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
+                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                      </svg>
+                      <span>Record Borrowed</span>
+                    </button>
+                  )}
 
-                    return (
-                      <article
-                        key={loan.id}
-                        className={cn(
-                          "rounded-3xl border p-5 shadow-sm transition-all duration-200 flex flex-col justify-between",
-                          isOverpaid
-                            ? "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
-                            : isFullyPaid
-                              ? "border-emerald-200/70 bg-emerald-50/25 dark:border-emerald-900/40 dark:bg-emerald-950/10"
-                              : isOverdue
-                                ? "border-red-200/80 bg-red-50/20 dark:border-red-900/40 dark:bg-red-950/10"
-                                : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/90"
-                        )}
+                  {loanTab === "statement" && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        className="ui-button-secondary ui-button-sm !py-1.5 !px-2.5 text-xs flex items-center gap-1 cursor-pointer"
+                        onClick={() => handleOpenCreateLoan("lent")}
                       >
-                        <div className="space-y-4">
-                          {/* Card Header: Person info & status badge */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <img
-                                src={getMemberAvatarUrl(bName, bEmail)}
-                                alt={bName}
-                                className="h-11 w-11 shrink-0 rounded-2xl border border-[color:var(--border)] object-cover shadow-sm"
-                              />
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
-                                  <strong className="block truncate text-base font-bold text-ink max-w-[130px] sm:max-w-[180px]">
-                                    {bName}
-                                  </strong>
-                                  <span className={cn(
-                                    "rounded-md px-1.5 py-0.2 text-2xs font-bold uppercase tracking-wider shrink-0",
-                                    isBorrowed ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                  )}>
-                                    {isBorrowed ? "Lender" : "Borrower"}
-                                  </span>
-                                  {loan.is_owner === false && (
-                                    <span
-                                      className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-2xs font-bold tracking-wider shrink-0"
-                                      title={`Recorded by ${bName}`}
-                                    >
-                                      Shared with you
-                                    </span>
-                                  )}
-                                </div>
-                                {loan.is_owner === false ? (
-                                  <p className="truncate text-xs text-indigo-600 dark:text-indigo-400 font-medium max-w-[180px] sm:max-w-[240px]">
-                                    Shared by {bName}
-                                  </p>
-                                ) : bEmail ? (
-                                  <p className="truncate text-xs text-secondary max-w-[180px] sm:max-w-[240px]">
-                                    {bEmail}
-                                  </p>
-                                ) : (
-                                  <p className="text-xs text-secondary">
-                                    {isBorrowed ? "Borrowed Record" : "Standalone Loan"}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Status Badge */}
-                            <div className="shrink-0">
-                              {isOverpaid ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2.5 py-0.5 text-xs font-bold shadow-sm animate-pulse">
-                                  ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2))}
-                                </span>
-                              ) : isFullyPaid ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                                  {isBorrowed ? "✓ Settled" : "✓ Paid"}
-                                </span>
-                              ) : isOverdue ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-800 dark:bg-red-950/80 dark:text-red-300 animate-pulse">
-                                  Overdue
-                                </span>
-                              ) : (
-                                <span className={cn(
-                                  "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                                  isBorrowed
-                                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
-                                    : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300"
-                                )}>
-                                  Active
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Financials Overview */}
-                          <div className="rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40 p-3.5 space-y-2.5">
-                            <div className="flex items-baseline justify-between">
-                              <span className="text-xs text-secondary">{isBorrowed ? "Principal Borrowed:" : "Principal Lent:"}</span>
-                              <span className="text-base font-bold text-ink">
-                                {formatCurrency(principal.toFixed(2))}
-                              </span>
-                            </div>
-
-                            {Number(loan.interest_rate) > 0 && (
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-secondary">
-                                  {isBorrowed ? "Interest to Pay" : "Interest"} ({loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}):
-                                </span>
-                                <span className="font-semibold text-purple-600 dark:text-purple-400">
-                                  +{formatCurrency(accruedInterest.toFixed(2))}
-                                </span>
-                              </div>
-                            )}
-
-                            <div className="flex items-baseline justify-between border-t border-[color:var(--border)] pt-2">
-                              <span className="text-xs font-semibold text-secondary">Total Due:</span>
-                              <span className="text-base font-extrabold text-ink">
-                                {formatCurrency(totalDue.toFixed(2))}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Repayment Progress Bar */}
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-secondary">
-                                {isBorrowed ? "Paid Back:" : "Repaid:"} <strong className="text-ink">{formatCurrency(totalRepaid.toFixed(2))}</strong>
-                              </span>
-                              <span className={cn("font-semibold", isOverpaid ? "text-rose-600 font-bold" : isFullyPaid ? "text-emerald-600" : "text-ink")}>
-                                {progressPercent}%
-                              </span>
-                            </div>
-
-                            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
-                              <div
-                                className={cn(
-                                  "h-full transition-all duration-300 rounded-full",
-                                  isOverpaid ? "bg-rose-500" : isFullyPaid ? "bg-emerald-500" : "bg-primary"
-                                )}
-                                style={{ width: `${progressPercent}%` }}
-                              />
-                            </div>
-
-                            <div className="flex items-center justify-between pt-1 text-xs">
-                              <span className="text-secondary">
-                                {loan.due_date ? `Due: ${loan.due_date}` : `${isBorrowed ? "Borrowed" : "Lent"}: ${loan.lending_date}`}
-                              </span>
-                              {isOverpaid ? (
-                                <span className="font-bold text-rose-600 dark:text-rose-400">
-                                  Overpaid: +{formatCurrency(overpaidAmount.toFixed(2))}
-                                </span>
-                              ) : (
-                                <span className="font-semibold text-ink">
-                                  {isBorrowed ? "Remaining to Pay:" : "Remaining:"} {formatCurrency(remainingBalance.toFixed(2))}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {isOverpaid && (
-                            <div className="rounded-xl border border-rose-300 bg-rose-50/90 dark:bg-rose-950/40 p-2.5 text-xs text-rose-800 dark:text-rose-300">
-                              <strong className="block font-bold mb-0.5">⚠️ Overpayment Alert</strong>
-                              Repayments exceed total due by <span className="font-extrabold text-rose-600 dark:text-rose-400">{formatCurrency(overpaidAmount.toFixed(2))}</span>.
-                              You can use <strong>Edit</strong> or adjust repayment in Timeline.
-                            </div>
-                          )}
-
-                          {loan.notes && (
-                            <p className="text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2.5 rounded-xl border border-[color:var(--border)]">
-                              "{loan.notes}"
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Actions Toolbar */}
-                        <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--border)] pt-3.5">
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              className="ui-button-ghost ui-button-sm cursor-pointer"
-                              onClick={() => setSelectedLoanForDetails(loan)}
-                            >
-                              Timeline ({loan.repayments?.length || 0})
-                            </button>
-                            <button
-                              type="button"
-                              className="ui-button-secondary ui-button-sm flex items-center gap-1 cursor-pointer"
-                              onClick={() => {
-                                const bKey = loan.borrower_member_id
-                                  ? `member:${loan.borrower_member_id}`
-                                  : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
-                                handleOpenBorrowerStatement(bKey);
-                              }}
-                              title="View monthly statement"
-                            >
-                              <span>📄 Statement</span>
-                            </button>
-                          </div>
-
-                          <div className="flex items-center gap-1.5">
-                            {!isFullyPaid && (
-                              <button
-                                type="button"
-                                className="ui-button-primary ui-button-sm cursor-pointer"
-                                onClick={() => handleOpenRepaymentModal(loan)}
-                              >
-                                {isBorrowed ? "+ Pay Back" : "+ Record Repayment"}
-                              </button>
-                            )}
-
-                            {/* Edit & Delete are restricted to loan owner; non-owners can still record repayments & view timeline/statement */}
-                            {loan.is_owner !== false ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="ui-button-secondary ui-button-sm cursor-pointer"
-                                  onClick={() => handleOpenEditLoan(loan)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ui-button-danger ui-button-sm cursor-pointer"
-                                  disabled={deletingLoanIds.includes(loan.id)}
-                                  onClick={() => void handleDeleteLoanClick(loan)}
-                                >
-                                  {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
-                                </button>
-                              </>
-                            ) : (
-                              <span
-                                className="text-2xs text-secondary italic px-1.5"
-                                title="Only the creator of this loan can edit terms or delete it."
-                              >
-                                Terms managed by creator
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })}
+                        <span>+ Lend</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-button-secondary ui-button-sm !py-1.5 !px-2.5 text-xs flex items-center gap-1 cursor-pointer"
+                        onClick={() => handleOpenCreateLoan("borrowed")}
+                      >
+                        <span>+ Borrow</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </>
-          ) : (
-            /* UNIFIED MINI-STATEMENT VIEW */
-            <div className="space-y-6">
-              {/* Summary Cards */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {/* Net Financial Position Card */}
-                {(() => {
-                  const netBalance = lentLoansAggregate.totalRemaining - borrowedLoansAggregate.totalRemaining;
-                  const isNetReceivable = netBalance > 0;
-                  const isBalanced = netBalance === 0;
-                  return (
-                    <SurfaceCard className={cn(
-                      "relative overflow-hidden p-5 border",
-                      isNetReceivable
-                        ? "border-emerald-300/80 bg-emerald-50/40 dark:border-emerald-900/60 dark:bg-emerald-950/20"
-                        : isBalanced
-                          ? "border-zinc-300/80 bg-zinc-50/40 dark:border-zinc-800/60 dark:bg-zinc-900/20"
-                          : "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
-                    )}>
+              </div>
+
+              {/* LENT OR BORROWED VIEW */}
+              {loanTab !== "statement" ? (
+                <>
+                  {/* Top Aggregate Summary Metrics Cards (2x2 grid on mobile, 4 columns on desktop) */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                            Net Balance
-                          </p>
-                          <span className={cn(
-                            "rounded-full px-1.5 py-0.5 text-2xs font-bold uppercase",
-                            isNetReceivable
-                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
-                              : isBalanced
-                                ? "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
-                                : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
-                          )}>
-                            {isNetReceivable ? "To Collect (+)" : isBalanced ? "Balanced" : "To Pay Back (-)"}
-                          </span>
-                        </div>
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          {loanTab === "borrowed" ? "Principal Borrowed" : "Principal Lent"}
+                        </p>
                         <span className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-xl",
-                          isNetReceivable
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
-                            : isBalanced
-                              ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                              : "bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300"
+                          "flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg shrink-0",
+                          loanTab === "borrowed"
+                            ? "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+                            : "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400"
                         )}>
-                          {isNetReceivable ? "📈" : isBalanced ? "⚖️" : "📉"}
+                          {loanTab === "borrowed" ? (
+                            <ArrowDownLeft className="size-3.5" />
+                          ) : (
+                            <ArrowUpRight className="size-3.5" />
+                          )}
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                        {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalBorrowed : lentLoansAggregate.totalLent).toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        Across {loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans} {loanTab === "borrowed" ? "loan" : "loan"}{(loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans) !== 1 ? "s" : ""}
+                      </span>
+                    </SurfaceCard>
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          {loanTab === "borrowed" ? "Interest Payable" : "Interest Accrued"}
+                        </p>
+                        <span className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 shrink-0">
+                          <Clock className="size-3.5" />
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
+                        {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalInterest : lentLoansAggregate.totalInterest).toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        Calculated per terms
+                      </span>
+                    </SurfaceCard>
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          {loanTab === "borrowed" ? "Total Paid Back" : "Total Collected"}
+                        </p>
+                        <span className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 shrink-0">
+                          <CheckCircle2 className="size-3.5" />
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 truncate">
+                        {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalPaidBack : lentLoansAggregate.totalRepaid).toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        {loanTab === "borrowed" ? "Paid to lenders" : "Installments received"}
+                      </span>
+                    </SurfaceCard>
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          {loanTab === "borrowed" ? "Remaining to Pay" : "To Collect"}
+                        </p>
+                        <span className={cn(
+                          "flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg shrink-0",
+                          loanTab === "borrowed"
+                            ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                            : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+                        )}>
+                          <AlertCircle className="size-3.5" />
                         </span>
                       </div>
                       <strong className={cn(
-                        "mt-3 block text-2xl font-extrabold tracking-tight",
-                        isNetReceivable
-                          ? "text-emerald-700 dark:text-emerald-400"
-                          : isBalanced
-                            ? "text-ink"
-                            : "text-rose-700 dark:text-rose-400"
+                        "mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight truncate",
+                        loanTab === "borrowed" ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
                       )}>
-                        {isNetReceivable
-                          ? `+${formatCurrency(netBalance.toFixed(2))}`
-                          : isBalanced
-                            ? formatCurrency((0).toFixed(2))
-                            : `-${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
+                        {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalRemaining : lentLoansAggregate.totalRemaining).toFixed(2))}
                       </strong>
-                      <div className="mt-1 flex flex-col gap-0.5 text-xs text-secondary">
-                        <span>
-                          {isNetReceivable
-                            ? `Surplus: you will receive ${formatCurrency(Math.abs(netBalance).toFixed(2))}`
-                            : isBalanced
-                              ? "All loans and debts are evenly matched"
-                              : `Deficit: you owe lenders ${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
-                        </span>
-                        <span className="text-2xs opacity-80">
-                          {formatCurrency(lentLoansAggregate.totalRemaining.toFixed(2))} to collect · {formatCurrency(borrowedLoansAggregate.totalRemaining.toFixed(2))} to pay back
-                        </span>
-                      </div>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        {loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount} active loan{(loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount) !== 1 ? "s" : ""}
+                      </span>
                     </SurfaceCard>
-                  );
-                })()}
-
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      Total Money Lent
-                    </p>
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                      💸
-                    </span>
                   </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
-                    {formatCurrency(lentLoansAggregate.totalLent.toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    {lentLoansAggregate.totalLoans} loan{lentLoansAggregate.totalLoans !== 1 ? "s" : ""} issued
-                  </span>
-                </SurfaceCard>
 
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      Total Money Borrowed
-                    </p>
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
-                      📥
-                    </span>
-                  </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-ink">
-                    {formatCurrency(borrowedLoansAggregate.totalBorrowed.toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    {borrowedLoansAggregate.totalLoans} loan{borrowedLoansAggregate.totalLoans !== 1 ? "s" : ""} taken
-                  </span>
-                </SurfaceCard>
+                  {/* Controls Bar: Search & Status Filters */}
+                  <SurfaceCard className="p-2.5 sm:p-3 rounded-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={standaloneSearch}
+                          onChange={(e) => setStandaloneSearch(e.target.value)}
+                          placeholder={loanTab === "borrowed" ? "Search by lender name or email..." : "Search by borrower name or email..."}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs sm:text-sm rounded-lg"
+                        />
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
+                          <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                        </svg>
+                        {standaloneSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setStandaloneSearch("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-secondary hover:text-ink cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
 
-                <SurfaceCard className="relative overflow-hidden p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-secondary">
-                      Total Settled
-                    </p>
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400">
-                      💰
-                    </span>
-                  </div>
-                  <strong className="mt-3 block text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">
-                    {formatCurrency((lentLoansAggregate.totalRepaid + borrowedLoansAggregate.totalPaidBack).toFixed(2))}
-                  </strong>
-                  <span className="mt-1 block text-xs text-secondary">
-                    Across both lent &amp; borrowed
-                  </span>
-                </SurfaceCard>
-              </div>
-
-              {/* Statement Search and Type Filter */}
-              <SurfaceCard className="p-4 sm:p-5">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        value={statementSearch}
-                        onChange={(e) => setStatementSearch(e.target.value)}
-                        placeholder="Search statement by person, email, or notes..."
-                        className="w-full pl-9 pr-4 py-2 text-sm rounded-xl"
-                      />
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
-                        <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
-                      </svg>
-                      {statementSearch && (
+                      <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar">
                         <button
                           type="button"
-                          onClick={() => setStatementSearch("")}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary hover:text-ink cursor-pointer"
+                          onClick={() => setStandaloneFilterStatus("all")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            standaloneFilterStatus === "all"
+                              ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
                         >
-                          Clear
+                          All ({currentCategoryLoans.length})
                         </button>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-[color:var(--border)] shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setStatementFilterType("all")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          statementFilterType === "all"
-                            ? "bg-white dark:bg-zinc-900 text-ink shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        All ({unifiedStatementItems.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatementFilterType("lent")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          statementFilterType === "lent"
-                            ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        Lent ({unifiedStatementItems.filter((i) => i.type === "loan_lent").length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatementFilterType("borrowed")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          statementFilterType === "borrowed"
-                            ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        Borrowed ({unifiedStatementItems.filter((i) => i.type === "loan_borrowed").length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setStatementFilterType("repayments")}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                          statementFilterType === "repayments"
-                            ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-sm"
-                            : "text-secondary hover:text-ink"
-                        )}
-                      >
-                        Repayments ({unifiedStatementItems.filter((i) => i.type === "repayment_received" || i.type === "repayment_paid").length})
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </SurfaceCard>
-
-              {/* Statement Ledger List */}
-              {filteredStatementItems.length === 0 ? (
-                <SurfaceCard className="p-8 sm:p-12 text-center space-y-3">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-2xl">
-                    📑
-                  </div>
-                  <h3 className="font-display text-lg font-bold text-ink">
-                    No transactions recorded in mini-statement
-                  </h3>
-                  <p className="text-sm text-secondary max-w-sm mx-auto">
-                    Transactions and repayments from both lent and borrowed loans will automatically appear here chronologically.
-                  </p>
-                </SurfaceCard>
-              ) : (
-                <SurfaceCard className="overflow-hidden p-0">
-                  <div className="border-b border-[color:var(--border)] px-5 py-4 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-base text-ink">Unified Loans Statement</h3>
-                      <p className="text-xs text-secondary">Complete chronological record of money lent, borrowed, and repaid</p>
-                    </div>
-                    <span className="text-xs text-secondary font-medium">
-                      {filteredStatementItems.length} record{filteredStatementItems.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-[color:var(--border)]">
-                    {filteredStatementItems.map((entry) => {
-                      const isLent = entry.type === "loan_lent";
-                      const isBorrowed = entry.type === "loan_borrowed";
-                      const isRepReceived = entry.type === "repayment_received";
-                      const isRepPaid = entry.type === "repayment_paid";
-
-                      // Cash-flow standard (Owner's bank account / cashbook perspective):
-                      // Credited (+) = Cash IN (borrowed principal received into account, or loan repayment collected from borrower)
-                      // Debited (-) = Cash OUT (loan principal given out to borrower, or repayment sent to lender)
-                      const isCredit = isBorrowed || isRepReceived;
-
-                      return (
-                        <div
-                          key={entry.id}
-                          className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:px-6 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors gap-3"
+                        <button
+                          type="button"
+                          onClick={() => setStandaloneFilterStatus("active")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            standaloneFilterStatus === "active"
+                              ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
                         >
-                          <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                            <span className={cn(
-                              "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-base shadow-sm font-semibold",
-                              isCredit
-                                ? "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300"
-                                : "bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300"
-                            )}>
-                              {isCredit ? "↙" : "↗"}
-                            </span>
+                          Active
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStandaloneFilterStatus("repaid")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            standaloneFilterStatus === "repaid"
+                              ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          {loanTab === "borrowed" ? "Settled" : "Repaid"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStandaloneFilterStatus("overdue")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            standaloneFilterStatus === "overdue"
+                              ? "bg-white dark:bg-zinc-900 text-red-600 dark:text-red-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          Overdue
+                        </button>
+                      </div>
+                    </div>
+                  </SurfaceCard>
 
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <strong className="text-sm font-bold text-ink">
-                                  {entry.counterparty}
-                                </strong>
-                                <span className={cn(
-                                  "rounded-full px-2 py-0.5 text-2xs font-bold uppercase tracking-wider",
-                                  isLent && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300",
-                                  isBorrowed && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
-                                  isRepReceived && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
-                                  isRepPaid && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
-                                )}>
-                                  {isLent ? "Money Lent" : isBorrowed ? "Money Borrowed" : isRepReceived ? "Repayment Received" : "Payment to Lender"}
-                                </span>
+                  {/* Loans Cards Grid */}
+                  {filteredStandaloneLoans.length === 0 ? (
+                    currentCategoryLoans.length === 0 ? (
+                      <SurfaceCard className="p-6 sm:p-8 text-center space-y-3 rounded-xl">
+                        <div className={cn(
+                          "mx-auto flex h-12 w-12 items-center justify-center rounded-xl shadow-inner",
+                          loanTab === "borrowed"
+                            ? "bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400"
+                            : "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400"
+                        )}>
+                          {loanTab === "borrowed" ? (
+                            <ArrowDownLeft className="size-6" />
+                          ) : (
+                            <ArrowUpRight className="size-6" />
+                          )}
+                        </div>
+                        <div className="space-y-1.5 max-w-md mx-auto">
+                          <h3 className="font-display text-lg font-bold text-ink">
+                            {loanTab === "borrowed" ? "No borrowed money recorded yet" : "No peer loans tracked yet"}
+                          </h3>
+                          <p className="text-xs sm:text-sm leading-relaxed text-secondary">
+                            {loanTab === "borrowed"
+                              ? "Record funds borrowed from friends, family, or lenders, schedule repayments, and track interest owed in one simple dashboard."
+                              : "Lend money with customizable interest schedules, start months, and repayment tracking without requiring a shared wallet."}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className={cn(
+                            "ui-button-primary mt-1 inline-flex items-center gap-1.5 cursor-pointer !py-1.5 !px-3 text-xs font-semibold",
+                            loanTab === "borrowed" && "bg-amber-600 hover:bg-amber-700 text-white"
+                          )}
+                          onClick={() => handleOpenCreateLoan(loanTab === "borrowed" ? "borrowed" : "lent")}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
+                            <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                          </svg>
+                          <span>{loanTab === "borrowed" ? "Record Borrowed Money" : "Lend Money to Someone"}</span>
+                        </button>
+                      </SurfaceCard>
+                    ) : (
+                      <SurfaceCard className="p-6 text-center space-y-1.5 rounded-xl">
+                        <p className="text-sm font-semibold text-ink">No matching loans found</p>
+                        <p className="text-xs text-secondary">Try adjusting your search query or status filter.</p>
+                      </SurfaceCard>
+                    )
+                  ) : (
+                    <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {filteredStandaloneLoans.map((loan) => {
+                        const {
+                          principal,
+                          accruedInterest,
+                          totalDue,
+                          totalRepaid,
+                          remainingBalance,
+                          isFullyPaid,
+                          isOverpaid,
+                          overpaidAmount,
+                          progressPercent,
+                          isOverdue
+                        } = calculateLoanFinancials(loan);
+
+                        const bName = getLoanBorrowerName(loan);
+                        const bEmail = getLoanBorrowerEmail(loan);
+                        const isBorrowed = loan.loan_type === "borrowed";
+
+                        return (
+                          <article
+                            key={loan.id}
+                            className={cn(
+                              "rounded-xl border p-3.5 sm:p-4 shadow-2xs transition-all duration-200 flex flex-col justify-between",
+                              isOverpaid
+                                ? "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
+                                : isFullyPaid
+                                  ? "border-emerald-200/70 bg-emerald-50/25 dark:border-emerald-900/40 dark:bg-emerald-950/10"
+                                  : isOverdue
+                                    ? "border-red-200/80 bg-red-50/20 dark:border-red-900/40 dark:bg-red-950/10"
+                                    : "border-[color:var(--border)] bg-white/90 dark:bg-zinc-900/90"
+                            )}
+                          >
+                            <div className="space-y-3">
+                              {/* Card Header: Person info & status badge */}
+                              <div className="flex items-start justify-between gap-2.5">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <img
+                                    src={getMemberAvatarUrl(bName, bEmail)}
+                                    alt={bName}
+                                    className="h-9 w-9 shrink-0 rounded-xl border border-[color:var(--border)] object-cover shadow-2xs"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <strong className="block truncate text-sm sm:text-base font-bold text-ink max-w-[130px] sm:max-w-[180px]">
+                                        {bName}
+                                      </strong>
+                                      <span className={cn(
+                                        "rounded-md px-1.5 py-0.2 text-2xs font-bold uppercase tracking-wider shrink-0",
+                                        isBorrowed ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                      )}>
+                                        {isBorrowed ? "Lender" : "Borrower"}
+                                      </span>
+                                      {loan.is_owner === false && (
+                                        <span
+                                          className="rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 text-2xs font-bold tracking-wider shrink-0"
+                                          title={`Recorded by ${bName}`}
+                                        >
+                                          Shared
+                                        </span>
+                                      )}
+                                    </div>
+                                    {loan.is_owner === false ? (
+                                      <p className="truncate text-xs text-indigo-600 dark:text-indigo-400 font-medium max-w-[180px] sm:max-w-[240px]">
+                                        Shared by {bName}
+                                      </p>
+                                    ) : bEmail ? (
+                                      <p className="truncate text-xs text-secondary max-w-[180px] sm:max-w-[240px]">
+                                        {bEmail}
+                                      </p>
+                                    ) : (
+                                      <p className="text-xs text-secondary">
+                                        {isBorrowed ? "Borrowed Record" : "Standalone Loan"}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Status Badge */}
+                                <div className="shrink-0">
+                                  {isOverpaid ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-2xs sm:text-xs font-bold shadow-2xs">
+                                      <AlertCircle className="size-3" />
+                                      <span>Overpaid +{formatCurrency(overpaidAmount.toFixed(2))}</span>
+                                    </span>
+                                  ) : isFullyPaid ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-2xs sm:text-xs font-semibold text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                                      <CheckCircle2 className="size-3" />
+                                      <span>{isBorrowed ? "Settled" : "Paid"}</span>
+                                    </span>
+                                  ) : isOverdue ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-2xs sm:text-xs font-semibold text-red-800 dark:bg-red-950/80 dark:text-red-300 animate-pulse">
+                                      <AlertCircle className="size-3" />
+                                      <span>Overdue</span>
+                                    </span>
+                                  ) : (
+                                    <span className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs sm:text-xs font-semibold",
+                                      isBorrowed
+                                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
+                                        : "bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300"
+                                    )}>
+                                      Active
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
-                              <p className="text-xs text-secondary mt-0.5 truncate">
-                                {entry.notes || (isLent ? "Loan principal disbursed to borrower" : isBorrowed ? "Borrowed principal received from lender" : isRepReceived ? "Repayment collected from borrower" : "Payment sent to lender")}
-                                {entry.counterpartyEmail && ` • ${entry.counterpartyEmail}`}
-                              </p>
-                            </div>
-                          </div>
+                              {/* Financials Overview */}
+                              <div className="rounded-lg border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5 sm:p-3 space-y-2">
+                                <div className="flex items-baseline justify-between">
+                                  <span className="text-2xs sm:text-xs text-secondary">{isBorrowed ? "Principal Borrowed:" : "Principal Lent:"}</span>
+                                  <span className="text-sm sm:text-base font-bold text-ink">
+                                    {formatCurrency(principal.toFixed(2))}
+                                  </span>
+                                </div>
 
-                          <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pl-13 sm:pl-0">
-                            <div className="text-left sm:text-right">
-                              <div className="flex items-center sm:justify-end gap-1.5">
-                                <p className={cn(
-                                  "text-base font-extrabold",
-                                  isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-                                )}>
-                                  {isCredit ? "+" : "-"}{formatCurrency(entry.amount.toFixed(2))}
+                                {Number(loan.interest_rate) > 0 && (
+                                  <div className="flex items-center justify-between text-2xs sm:text-xs">
+                                    <span className="text-secondary">
+                                      {isBorrowed ? "Interest to Pay" : "Interest"} ({loan.interest_type === "percentage" ? `${loan.interest_rate}% ${loan.interest_rate_period}` : `${currencySymbol}${loan.interest_rate} fixed`}):
+                                    </span>
+                                    <span className="font-semibold text-purple-600 dark:text-purple-400">
+                                      +{formatCurrency(accruedInterest.toFixed(2))}
+                                    </span>
+                                  </div>
+                                )}
+
+                                <div className="flex items-baseline justify-between border-t border-[color:var(--border)] pt-1.5">
+                                  <span className="text-2xs sm:text-xs font-semibold text-secondary">Total Due:</span>
+                                  <span className="text-sm sm:text-base font-extrabold text-ink">
+                                    {formatCurrency(totalDue.toFixed(2))}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Repayment Progress Bar */}
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-2xs sm:text-xs">
+                                  <span className="text-secondary">
+                                    {isBorrowed ? "Paid Back:" : "Repaid:"} <strong className="text-ink">{formatCurrency(totalRepaid.toFixed(2))}</strong>
+                                  </span>
+                                  <span className={cn("font-semibold", isOverpaid ? "text-rose-600 font-bold" : isFullyPaid ? "text-emerald-600" : "text-ink")}>
+                                    {progressPercent}%
+                                  </span>
+                                </div>
+
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                                  <div
+                                    className={cn(
+                                      "h-full transition-all duration-300 rounded-full",
+                                      isOverpaid ? "bg-rose-500" : isFullyPaid ? "bg-emerald-500" : "bg-primary"
+                                    )}
+                                    style={{ width: `${progressPercent}%` }}
+                                  />
+                                </div>
+
+                                <div className="flex items-center justify-between pt-0.5 text-2xs sm:text-xs">
+                                  <span className="text-secondary truncate">
+                                    {loan.due_date ? `Due: ${loan.due_date}` : `${isBorrowed ? "Borrowed" : "Lent"}: ${loan.lending_date}`}
+                                  </span>
+                                  {isOverpaid ? (
+                                    <span className="font-bold text-rose-600 dark:text-rose-400 shrink-0">
+                                      Overpaid: +{formatCurrency(overpaidAmount.toFixed(2))}
+                                    </span>
+                                  ) : (
+                                    <span className="font-semibold text-ink shrink-0">
+                                      {isBorrowed ? "Remaining:" : "Remaining:"} {formatCurrency(remainingBalance.toFixed(2))}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {isOverpaid && (
+                                <div className="rounded-lg border border-rose-300 bg-rose-50/90 dark:bg-rose-950/40 p-2 text-2xs sm:text-xs text-rose-800 dark:text-rose-300">
+                                  <strong className="block font-bold mb-0.5">Overpayment Alert</strong>
+                                  Repayments exceed total due by <span className="font-extrabold text-rose-600 dark:text-rose-400">{formatCurrency(overpaidAmount.toFixed(2))}</span>.
+                                </div>
+                              )}
+
+                              {loan.notes && (
+                                <p className="text-2xs sm:text-xs text-secondary italic line-clamp-2 bg-white/50 dark:bg-zinc-800/30 p-2 rounded-lg border border-[color:var(--border)]">
+                                  "{loan.notes}"
                                 </p>
-                                <span className={cn(
-                                  "text-2xs font-bold px-1.5 py-0.5 rounded uppercase tracking-wider",
-                                  isCredit
-                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
-                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
-                                )}>
-                                  {isCredit ? "Credited" : "Debited"}
-                                </span>
+                              )}
+                            </div>
+
+                            {/* Actions Toolbar */}
+                            <div className="mt-3.5 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-t border-[color:var(--border)] pt-2.5">
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  className="ui-button-ghost ui-button-sm !py-1 !px-2 text-2xs sm:text-xs cursor-pointer"
+                                  onClick={() => setSelectedLoanForDetails(loan)}
+                                >
+                                  Timeline ({loan.repayments?.length || 0})
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary ui-button-sm !py-1 !px-2 text-2xs sm:text-xs flex items-center gap-1 cursor-pointer"
+                                  onClick={() => {
+                                    const bKey = loan.borrower_member_id
+                                      ? `member:${loan.borrower_member_id}`
+                                      : `name:${getLoanBorrowerName(loan).toLowerCase()}`;
+                                    handleOpenBorrowerStatement(bKey);
+                                  }}
+                                  title="View monthly statement"
+                                >
+                                  <FileText className="size-3" />
+                                  <span>Statement</span>
+                                </button>
                               </div>
-                              <span className="text-2xs text-secondary">
-                                {entry.date}
+
+                              <div className="flex items-center gap-1">
+                                {!isFullyPaid && (
+                                  <button
+                                    type="button"
+                                    className="ui-button-primary ui-button-sm !py-1 !px-2.5 text-2xs sm:text-xs cursor-pointer"
+                                    onClick={() => handleOpenRepaymentModal(loan)}
+                                  >
+                                    {isBorrowed ? "+ Pay Back" : "+ Repay"}
+                                  </button>
+                                )}
+
+                                {/* Edit & Delete are restricted to loan owner */}
+                                {loan.is_owner !== false ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="ui-button-secondary ui-button-sm !py-1 !px-2 text-2xs sm:text-xs cursor-pointer"
+                                      onClick={() => handleOpenEditLoan(loan)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ui-button-danger ui-button-sm !py-1 !px-2 text-2xs sm:text-xs cursor-pointer"
+                                      disabled={deletingLoanIds.includes(loan.id)}
+                                      onClick={() => void handleDeleteLoanClick(loan)}
+                                    >
+                                      {deletingLoanIds.includes(loan.id) ? "..." : "Delete"}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span
+                                    className="text-2xs text-secondary italic px-1"
+                                    title="Only the creator of this loan can edit terms or delete it."
+                                  >
+                                    Managed by creator
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* UNIFIED MINI-STATEMENT VIEW */
+                <div className="space-y-4 sm:space-y-5">
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                    {/* Net Financial Position Card */}
+                    {(() => {
+                      const netBalance = lentLoansAggregate.totalRemaining - borrowedLoansAggregate.totalRemaining;
+                      const isNetReceivable = netBalance > 0;
+                      const isBalanced = netBalance === 0;
+                      return (
+                        <SurfaceCard className={cn(
+                          "relative overflow-hidden p-3 sm:p-3.5 rounded-xl border",
+                          isNetReceivable
+                            ? "border-emerald-300/80 bg-emerald-50/40 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+                            : isBalanced
+                              ? "border-zinc-300/80 bg-zinc-50/40 dark:border-zinc-800/60 dark:bg-zinc-900/20"
+                              : "border-rose-300/80 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20"
+                        )}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1 min-w-0">
+                              <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                                Net Balance
+                              </p>
+                              <span className={cn(
+                                "rounded-full px-1.5 py-0.2 text-2xs font-bold uppercase truncate shrink-0",
+                                isNetReceivable
+                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                                  : isBalanced
+                                    ? "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
+                                    : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                              )}>
+                                {isNetReceivable ? "+ Net" : isBalanced ? "Balanced" : "- Owed"}
                               </span>
                             </div>
-
-                            <button
-                              type="button"
-                              className="ui-button-ghost ui-button-sm cursor-pointer"
-                              onClick={() => setSelectedLoanForDetails(entry.loan)}
-                            >
-                              Timeline
-                            </button>
+                            <span className={cn(
+                              "flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg shrink-0",
+                              isNetReceivable
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"
+                                : isBalanced
+                                  ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                                  : "bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300"
+                            )}>
+                              {isNetReceivable ? (
+                                <TrendingUp className="size-3.5" />
+                              ) : isBalanced ? (
+                                <Scale className="size-3.5" />
+                              ) : (
+                                <TrendingDown className="size-3.5" />
+                              )}
+                            </span>
                           </div>
-                        </div>
+                          <strong className={cn(
+                            "mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-extrabold tracking-tight truncate",
+                            isNetReceivable
+                              ? "text-emerald-700 dark:text-emerald-400"
+                              : isBalanced
+                                ? "text-ink"
+                                : "text-rose-700 dark:text-rose-400"
+                          )}>
+                            {isNetReceivable
+                              ? `+${formatCurrency(netBalance.toFixed(2))}`
+                              : isBalanced
+                                ? formatCurrency((0).toFixed(2))
+                                : `-${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
+                          </strong>
+                          <div className="mt-0.5 flex flex-col gap-0.5 text-2xs text-secondary">
+                            <span className="truncate">
+                              {isNetReceivable
+                                ? `Surplus: ${formatCurrency(Math.abs(netBalance).toFixed(2))}`
+                                : isBalanced
+                                  ? "Evenly matched"
+                                  : `Deficit: ${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
+                            </span>
+                            <span className="text-2xs opacity-80 truncate">
+                              {formatCurrency(lentLoansAggregate.totalRemaining.toFixed(2))} to collect · {formatCurrency(borrowedLoansAggregate.totalRemaining.toFixed(2))} to pay
+                            </span>
+                          </div>
+                        </SurfaceCard>
                       );
-                    })}
+                    })()}
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          Total Lent
+                        </p>
+                        <span className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 shrink-0">
+                          <ArrowUpRight className="size-3.5" />
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                        {formatCurrency(lentLoansAggregate.totalLent.toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        {lentLoansAggregate.totalLoans} loan{lentLoansAggregate.totalLoans !== 1 ? "s" : ""} issued
+                      </span>
+                    </SurfaceCard>
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          Total Borrowed
+                        </p>
+                        <span className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 shrink-0">
+                          <ArrowDownLeft className="size-3.5" />
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                        {formatCurrency(borrowedLoansAggregate.totalBorrowed.toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        {borrowedLoansAggregate.totalLoans} loan{borrowedLoansAggregate.totalLoans !== 1 ? "s" : ""} taken
+                      </span>
+                    </SurfaceCard>
+
+                    <SurfaceCard className="relative overflow-hidden p-3 sm:p-3.5 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <p className="text-2xs sm:text-xs font-semibold uppercase tracking-wider text-secondary truncate">
+                          Total Settled
+                        </p>
+                        <span className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 shrink-0">
+                          <CheckCircle2 className="size-3.5" />
+                        </span>
+                      </div>
+                      <strong className="mt-1.5 sm:mt-2 block text-base sm:text-lg lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
+                        {formatCurrency((lentLoansAggregate.totalRepaid + borrowedLoansAggregate.totalPaidBack).toFixed(2))}
+                      </strong>
+                      <span className="mt-0.5 block text-2xs text-secondary truncate">
+                        Lent &amp; borrowed settled
+                      </span>
+                    </SurfaceCard>
                   </div>
-                </SurfaceCard>
+
+                  {/* Statement Search and Type Filter */}
+                  <SurfaceCard className="p-2.5 sm:p-3 rounded-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={statementSearch}
+                          onChange={(e) => setStatementSearch(e.target.value)}
+                          placeholder="Search statement by person, email, or notes..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs sm:text-sm rounded-lg"
+                        />
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
+                          <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                        </svg>
+                        {statementSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setStatementSearch("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-2xs text-secondary hover:text-ink cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar">
+                        <button
+                          type="button"
+                          onClick={() => setStatementFilterType("all")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            statementFilterType === "all"
+                              ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          All ({unifiedStatementItems.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStatementFilterType("lent")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            statementFilterType === "lent"
+                              ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          Lent ({unifiedStatementItems.filter((i) => i.type === "loan_lent").length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStatementFilterType("borrowed")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            statementFilterType === "borrowed"
+                              ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          Borrowed ({unifiedStatementItems.filter((i) => i.type === "loan_borrowed").length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStatementFilterType("repayments")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            statementFilterType === "repayments"
+                              ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-2xs"
+                              : "text-secondary hover:text-ink"
+                          )}
+                        >
+                          Repayments ({unifiedStatementItems.filter((i) => i.type === "repayment_received" || i.type === "repayment_paid").length})
+                        </button>
+                      </div>
+                    </div>
+                  </SurfaceCard>
+
+                  {/* Statement Ledger List */}
+                  {filteredStatementItems.length === 0 ? (
+                    <SurfaceCard className="p-6 sm:p-8 text-center space-y-2 rounded-xl">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-secondary">
+                        <FileText className="size-5" />
+                      </div>
+                      <h3 className="font-display text-base font-bold text-ink">
+                        No transactions recorded in mini-statement
+                      </h3>
+                      <p className="text-xs text-secondary max-w-sm mx-auto">
+                        Transactions and repayments from both lent and borrowed loans will automatically appear here chronologically.
+                      </p>
+                    </SurfaceCard>
+                  ) : (
+                    <SurfaceCard className="overflow-hidden p-0 rounded-xl">
+                      <div className="border-b border-[color:var(--border)] px-4 py-3 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-bold text-sm sm:text-base text-ink">Unified Loans Statement</h3>
+                          <p className="text-2xs sm:text-xs text-secondary">Chronological record of money lent, borrowed, and repaid</p>
+                        </div>
+                        <span className="text-2xs sm:text-xs text-secondary font-medium">
+                          {filteredStatementItems.length} record{filteredStatementItems.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+
+                      <div className="divide-y divide-[color:var(--border)]">
+                        {filteredStatementItems.map((entry) => {
+                          const isLent = entry.type === "loan_lent";
+                          const isBorrowed = entry.type === "loan_borrowed";
+                          const isRepReceived = entry.type === "repayment_received";
+                          const isRepPaid = entry.type === "repayment_paid";
+
+                          // Cash-flow standard:
+                          // Credited (+) = Cash IN
+                          // Debited (-) = Cash OUT
+                          const isCredit = isBorrowed || isRepReceived;
+
+                          return (
+                            <div
+                              key={entry.id}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:px-4 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors gap-2 sm:gap-3"
+                            >
+                              <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+                                <span className={cn(
+                                  "flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg shadow-2xs font-semibold",
+                                  isCredit
+                                    ? "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300"
+                                    : "bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300"
+                                )}>
+                                  {isCredit ? (
+                                    <ArrowDownLeft className="size-4" />
+                                  ) : (
+                                    <ArrowUpRight className="size-4" />
+                                  )}
+                                </span>
+
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <strong className="text-xs sm:text-sm font-bold text-ink">
+                                      {entry.counterparty}
+                                    </strong>
+                                    <span className={cn(
+                                      "rounded-md px-1.5 py-0.2 text-2xs font-bold uppercase tracking-wider",
+                                      isLent && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300",
+                                      isBorrowed && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
+                                      isRepReceived && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
+                                      isRepPaid && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                                    )}>
+                                      {isLent ? "Lent" : isBorrowed ? "Borrowed" : isRepReceived ? "Repayment Recv" : "Repaid Lender"}
+                                    </span>
+                                  </div>
+
+                                  <p className="text-2xs sm:text-xs text-secondary mt-0.5 truncate">
+                                    {entry.notes || (isLent ? "Loan principal disbursed to borrower" : isBorrowed ? "Borrowed principal received from lender" : isRepReceived ? "Repayment collected from borrower" : "Payment sent to lender")}
+                                    {entry.counterpartyEmail && ` • ${entry.counterpartyEmail}`}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-10 sm:pl-0">
+                                <div className="text-left sm:text-right">
+                                  <div className="flex items-center sm:justify-end gap-1">
+                                    <p className={cn(
+                                      "text-xs sm:text-sm font-extrabold",
+                                      isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                                    )}>
+                                      {isCredit ? "+" : "-"}{formatCurrency(entry.amount.toFixed(2))}
+                                    </p>
+                                    <span className={cn(
+                                      "text-2xs font-bold px-1 py-0.2 rounded uppercase tracking-wider",
+                                      isCredit
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                                        : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
+                                    )}>
+                                      {isCredit ? "Credit" : "Debit"}
+                                    </span>
+                                  </div>
+                                  <span className="text-2xs text-secondary">
+                                    {entry.date}
+                                  </span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  className="ui-button-ghost ui-button-sm !py-1 !px-2 text-2xs sm:text-xs cursor-pointer"
+                                  onClick={() => setSelectedLoanForDetails(entry.loan)}
+                                >
+                                  Timeline
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </SurfaceCard>
+                  )}
+                </div>
               )}
-            </div>
-          )}
             </>
           )}
         </section>
@@ -5769,6 +5914,21 @@ export function WalletsPage({
                 placeholder="Reason or notes regarding this loan"
               />
             </label>
+
+            {/* Bank / Account Source */}
+            <div className="grid gap-2">
+              <span className="text-sm font-medium text-secondary">
+                {loanType === "borrowed" ? "Receiving Bank Account / Card (Optional)" : "Disbursing Bank Account / Card (Optional)"}
+              </span>
+              <BankPicker
+                selectedBankAccountId={loanBankAccountId ?? null}
+                selectedBankName={loanBankName ?? null}
+                onChange={(bankAccountId, bankName) => {
+                  setLoanBankAccountId(bankAccountId);
+                  setLoanBankName(bankName);
+                }}
+              />
+            </div>
 
             <div className="flex justify-end gap-2 mt-2">
               <button

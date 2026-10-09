@@ -13,7 +13,11 @@ import {
   walletInviteResponseSchema,
   createWalletMemberSchema,
   createWalletSchema,
-  expensesQuerySchema
+  expensesQuerySchema,
+  createBankAccountSchema,
+  updateBankAccountSchema,
+  createFeedbackSchema,
+  updateFeedbackSchema
 } from "./lib/validation.js";
 import {
   BillReminderNotFoundError,
@@ -28,7 +32,11 @@ import {
   WalletNotFoundError,
   WalletLoanNotFoundError,
   WalletSettlementNotFoundError,
-  WalletValidationError
+  WalletValidationError,
+  BankAccountNotFoundError,
+  FeedbackLimitExceededError,
+  FeedbackNotFoundError,
+  FeedbackWindowExpiredError
 } from "./store/types.js";
 
 export type HandlerResponse = {
@@ -1636,3 +1644,272 @@ export async function handleUpsertWalletReminderPreferences(rawBody: unknown, wa
     };
   }
 }
+
+export async function handleListBankAccounts(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const bankAccounts = await store.listBankAccounts(userId);
+    return {
+      status: 200,
+      body: { bankAccounts }
+    };
+  } catch (error) {
+    console.error("Failed to list bank accounts:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to load bank accounts." }
+    };
+  }
+}
+
+export async function handleCreateBankAccount(rawBody: unknown, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createBankAccountSchema.safeParse(rawBody);
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid bank account payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const bankAccount = await store.createBankAccount(userId, result.data);
+    return {
+      status: 201,
+      body: { bankAccount }
+    };
+  } catch (error) {
+    console.error("Failed to create bank account:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to add bank account." }
+    };
+  }
+}
+
+export async function handleUpdateBankAccount(rawBody: unknown, bankAccountId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = updateBankAccountSchema.safeParse(rawBody);
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid bank account update payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const bankAccount = await store.updateBankAccount(userId, bankAccountId, result.data);
+    return {
+      status: 200,
+      body: { bankAccount }
+    };
+  } catch (error) {
+    if (error instanceof BankAccountNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+    console.error("Failed to update bank account:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to update bank account." }
+    };
+  }
+}
+
+export async function handleDeleteBankAccount(bankAccountId: string, userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    await store.deleteBankAccount(userId, bankAccountId);
+    return {
+      status: 200,
+      body: { message: "Bank account removed successfully." }
+    };
+  } catch (error) {
+    if (error instanceof BankAccountNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+    console.error("Failed to delete bank account:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to delete bank account." }
+    };
+  }
+}
+
+export async function handleCreateFeedback(rawBody: unknown, userId: string, userEmail: string | null, store: ExpenseStore): Promise<HandlerResponse> {
+  const result = createFeedbackSchema.safeParse(rawBody);
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid feedback payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const feedback = await store.createFeedback(userId, userEmail, result.data);
+
+    let emailSent = false;
+    const resendApiKey = process.env.RESEND_API_KEY?.trim();
+    if (resendApiKey) {
+      try {
+        const rawRecipient = (process.env.EMAIL?.trim() || "niharnics").toLowerCase();
+        const recipientEmail = rawRecipient.includes("@") ? rawRecipient : `${rawRecipient}@gmail.com`;
+        const senderName = result.data.userName?.trim() || userEmail || "User";
+
+        const response = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: "Expense Tracker Feedback <onboarding@resend.dev>",
+            to: [recipientEmail],
+            reply_to: userEmail || undefined,
+            subject: `[Expense Tracker] New ${result.data.category.toUpperCase()} from ${senderName}`,
+            html: `
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #0f172a; margin-top: 0; margin-bottom: 12px; font-size: 20px;">New Feedback Received</h2>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 16px 0;">
+                  <p style="margin: 0 0 10px;"><strong>Category:</strong> <span style="text-transform: capitalize; padding: 3px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 13px; font-weight: 600;">${result.data.category}</span></p>
+                  <p style="margin: 0 0 10px;"><strong>Submitted By:</strong> ${result.data.userName ? `${result.data.userName} (${userEmail || "No email"})` : (userEmail || "User")}</p>
+                  ${result.data.rating ? `<p style="margin: 0 0 10px;"><strong>Rating:</strong> ${"⭐".repeat(result.data.rating)} (${result.data.rating}/5)</p>` : ""}
+                  <p style="margin: 12px 0 6px;"><strong>Message:</strong></p>
+                  <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; white-space: pre-wrap; font-size: 14px;">${result.data.message}</div>
+                </div>
+                <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">This automated alert was dispatched by Expense Tracker via the Resend API.</p>
+              </div>
+            `
+          })
+        });
+
+        if (response.ok) {
+          emailSent = true;
+        } else {
+          const errText = await response.text();
+          console.warn("Resend email delivery returned non-200:", errText);
+        }
+      } catch (err) {
+        console.error("Failed to dispatch feedback email via Resend:", err);
+      }
+    }
+
+    return {
+      status: 201,
+      body: { feedback, emailSent }
+    };
+  } catch (error) {
+    if (error instanceof FeedbackLimitExceededError) {
+      return {
+        status: 429,
+        body: { error: error.message }
+      };
+    }
+
+    console.error("Failed to create feedback:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to record feedback." }
+    };
+  }
+}
+
+export async function handleListFeedbacks(userId: string, store: ExpenseStore): Promise<HandlerResponse> {
+  try {
+    const feedbacks = await store.listUserFeedbacks(userId);
+    return {
+      status: 200,
+      body: { feedbacks }
+    };
+  } catch (error) {
+    console.error("Failed to list feedbacks:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to list feedbacks." }
+    };
+  }
+}
+
+export async function handleUpdateFeedback(
+  rawBody: unknown,
+  feedbackId: string,
+  userId: string,
+  store: ExpenseStore
+): Promise<HandlerResponse> {
+  const result = updateFeedbackSchema.safeParse(rawBody);
+  if (!result.success) {
+    return {
+      status: 400,
+      body: {
+        error: "Invalid feedback payload.",
+        details: result.error.flatten()
+      }
+    };
+  }
+
+  try {
+    const feedback = await store.updateFeedback(userId, feedbackId, result.data);
+    return {
+      status: 200,
+      body: { feedback }
+    };
+  } catch (error) {
+    if (error instanceof FeedbackNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    if (error instanceof FeedbackWindowExpiredError) {
+      return {
+        status: 400,
+        body: { error: error.message }
+      };
+    }
+
+    console.error("Failed to update feedback:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to update feedback." }
+    };
+  }
+}
+
+export async function handleDeleteFeedback(
+  feedbackId: string,
+  userId: string,
+  store: ExpenseStore
+): Promise<HandlerResponse> {
+  try {
+    await store.deleteFeedback(userId, feedbackId);
+    return {
+      status: 200,
+      body: { message: "Feedback deleted successfully." }
+    };
+  } catch (error) {
+    if (error instanceof FeedbackNotFoundError) {
+      return {
+        status: 404,
+        body: { error: error.message }
+      };
+    }
+
+    console.error("Failed to delete feedback:", error);
+    return {
+      status: 500,
+      body: { error: "Failed to delete feedback." }
+    };
+  }
+}
+

@@ -11,8 +11,38 @@ import type {
   UpdateWalletLoanInput,
   CreateWalletLoanRepaymentInput,
   UpdateWalletLoanRepaymentInput,
-  ExpensesQueryInput
+  ExpensesQueryInput,
+  CreateBankAccountInput,
+  UpdateBankAccountInput,
+  CreateFeedbackInput,
+  UpdateFeedbackInput
 } from "../lib/validation.js";
+
+export type BankAccountType = "debit" | "credit" | "rupay_credit" | "cash";
+
+export type BankAccountRecord = {
+  id: string;
+  user_id: string;
+  bank_id: string;
+  bank_name: string;
+  account_type: BankAccountType;
+  account_label: string | null;
+  last_four_digits: string | null;
+  is_default: boolean;
+  created_at: string;
+};
+
+export type FeedbackRecord = {
+  id: string;
+  user_id: string;
+  user_email: string | null;
+  user_name: string | null;
+  category: "bug" | "feature" | "feedback";
+  message: string;
+  rating: number | null;
+  created_at: string;
+  updated_at?: string;
+};
 
 export type ExpenseRecord = {
   id: string;
@@ -22,6 +52,8 @@ export type ExpenseRecord = {
   date: string;
   created_at: string;
   platform: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
 };
 
 export type BudgetScope = "monthly" | "category";
@@ -85,6 +117,8 @@ export type WalletExpenseRecord = {
   split_rule: SplitRule;
   created_at: string;
   platform: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
   splits: WalletExpenseSplitRecord[];
 };
 
@@ -180,6 +214,8 @@ export type WalletLoanRecord = {
   is_owner?: boolean;
   creator_name?: string | null;
   creator_email?: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
 };
 
 export type WalletDetailRecord = {
@@ -341,6 +377,42 @@ export interface ExpenseStore {
   runNotificationChecks(userId?: string, now?: Date): Promise<NotificationCheckResult>;
   deleteUserData(userId: string): Promise<void>;
   searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]>;
+  listBankAccounts(userId: string): Promise<BankAccountRecord[]>;
+  createBankAccount(userId: string, input: CreateBankAccountInput): Promise<BankAccountRecord>;
+  updateBankAccount(userId: string, bankAccountId: string, input: UpdateBankAccountInput): Promise<BankAccountRecord>;
+  deleteBankAccount(userId: string, bankAccountId: string): Promise<void>;
+  createFeedback(userId: string, userEmail: string | null, input: CreateFeedbackInput): Promise<FeedbackRecord>;
+  listUserFeedbacks(userId: string): Promise<FeedbackRecord[]>;
+  updateFeedback(userId: string, feedbackId: string, input: UpdateFeedbackInput): Promise<FeedbackRecord>;
+  deleteFeedback(userId: string, feedbackId: string): Promise<void>;
+}
+
+export class BankAccountNotFoundError extends Error {
+  constructor(message = "Bank account not found.") {
+    super(message);
+    this.name = "BankAccountNotFoundError";
+  }
+}
+
+export class FeedbackLimitExceededError extends Error {
+  constructor(message = "Daily limit reached. You can submit up to 5 feedbacks per day.") {
+    super(message);
+    this.name = "FeedbackLimitExceededError";
+  }
+}
+
+export class FeedbackNotFoundError extends Error {
+  constructor(message = "Feedback not found.") {
+    super(message);
+    this.name = "FeedbackNotFoundError";
+  }
+}
+
+export class FeedbackWindowExpiredError extends Error {
+  constructor(message = "Feedbacks can only be edited within 24 hours of submission.") {
+    super(message);
+    this.name = "FeedbackWindowExpiredError";
+  }
 }
 
 export class IdempotencyConflictError extends Error {

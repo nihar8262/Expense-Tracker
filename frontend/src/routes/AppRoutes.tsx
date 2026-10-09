@@ -87,7 +87,9 @@ function createInitialFormState(baseDate = new Date()): ExpenseForm {
     category: "",
     description: "",
     date: getTodayIsoDate(baseDate),
-    platform: null
+    platform: null,
+    bankAccountId: null,
+    bankName: null
   };
 }
 
@@ -668,7 +670,9 @@ export function AppRoutes() {
       description: walletExpense.description,
       date: walletExpense.date,
       created_at: walletExpense.created_at,
-      platform: walletExpense.platform
+      platform: walletExpense.platform,
+      bank_account_id: (walletExpense as any).bank_account_id ?? (walletExpense as any).bankAccountId ?? null,
+      bank_name: (walletExpense as any).bank_name ?? (walletExpense as any).bankName ?? null
     }));
   }, [dashboardViewMode, dashboardWallet, dashboardPersonalExpenses, expenses]);
 
@@ -2034,8 +2038,8 @@ export function AppRoutes() {
       void loadBudgets(currentUser);
     }
 
-    // Load wallets metadata when visiting wallets page or dashboard shared-wallet mode
-    if ((location.pathname === "/wallets" || (location.pathname === "/dashboard" && dashboardViewMode === "wallet")) && !hasLoadedWallets) {
+    // Load wallets metadata when visiting wallets page or dashboard
+    if ((location.pathname === "/wallets" || location.pathname === "/dashboard") && !hasLoadedWallets) {
       setHasLoadedWallets(true);
       void loadWallets(currentUser);
     }
@@ -2228,7 +2232,9 @@ export function AppRoutes() {
       category: expense.category,
       description: expense.description,
       date: expense.date,
-      platform: expense.platform ?? null
+      platform: expense.platform ?? null,
+      bankAccountId: expense.bank_account_id ?? null,
+      bankName: expense.bank_name ?? null
     });
     setStatusMessage("");
     setErrorMessage("");
@@ -2582,7 +2588,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleCreateWalletExpense(inputWalletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null }) {
+  async function handleCreateWalletExpense(inputWalletId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null; bankAccountId?: string | null; bankName?: string | null }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to add a shared expense.");
       return false;
@@ -2606,7 +2612,7 @@ export function AppRoutes() {
     }
   }
 
-  async function handleUpdateWalletExpense(inputWalletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null }) {
+  async function handleUpdateWalletExpense(inputWalletId: string, walletExpenseId: string, input: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null; bankAccountId?: string | null; bankName?: string | null }) {
     if (!currentUser) {
       setWalletErrorMessage("Sign in to update a shared expense.");
       return false;
@@ -3117,7 +3123,9 @@ export function AppRoutes() {
         budget_alert_threshold: 80,
         default_currency: "INR",
         default_timezone: "UTC",
-        updated_at: ""
+        updated_at: "",
+        photo_url: reminderPreferences?.photo_url,
+        display_name: reminderPreferences?.display_name
       };
     }
     return {
@@ -3127,7 +3135,9 @@ export function AppRoutes() {
       budget_alert_threshold: walletPrefs.budget_alert_threshold,
       default_currency: "INR",
       default_timezone: "UTC",
-      updated_at: ""
+      updated_at: "",
+      photo_url: reminderPreferences?.photo_url,
+      display_name: reminderPreferences?.display_name
     };
   }, [preferenceScope, reminderPreferences, walletPreferences]);
 

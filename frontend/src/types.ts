@@ -9,6 +9,8 @@ export type Expense = {
 	date: string;
 	created_at: string;
 	platform?: string | null;
+	bank_account_id?: string | null;
+	bank_name?: string | null;
 };
 
 export type ExpensesQuery = {
@@ -62,6 +64,8 @@ export type ExpenseForm = {
 	description: string;
 	date: string;
 	platform?: string | null;
+	bankAccountId?: string | null;
+	bankName?: string | null;
 };
 
 export type BudgetScope = "monthly" | "category";
@@ -128,6 +132,8 @@ export type WalletExpense = {
 	split_rule: SplitRule;
 	created_at: string;
 	platform?: string | null;
+	bank_account_id?: string | null;
+	bank_name?: string | null;
 	splits: WalletExpenseSplit[];
 };
 
@@ -212,6 +218,8 @@ export type WalletLoan = {
 	is_owner?: boolean;
 	creator_name?: string | null;
 	creator_email?: string | null;
+	bank_account_id?: string | null;
+	bank_name?: string | null;
 };
 
 export type WalletLoanForm = {
@@ -229,6 +237,8 @@ export type WalletLoanForm = {
 	dueDate?: string;
 	notes?: string;
 	status?: "active" | "settled" | "cancelled";
+	bankAccountId?: string | null;
+	bankName?: string | null;
 };
 
 export type WalletLoanRepaymentForm = {
@@ -460,3 +470,48 @@ export class ApiError extends Error {
 		this.retryable = status >= 500;
 	}
 }
+
+export type BankAccountType = "debit" | "credit" | "rupay_credit" | "cash";
+
+export type BankAccount = {
+	id: string;
+	user_id: string;
+	bank_id: string;
+	bank_name: string;
+	account_type: BankAccountType;
+	account_label: string | null;
+	last_four_digits: string | null;
+	is_default: boolean;
+	created_at: string;
+};
+
+export type BankAccountForm = {
+	bankId: string;
+	bankName: string;
+	accountType: BankAccountType;
+	accountLabel?: string;
+	lastFourDigits?: string;
+	isDefault?: boolean;
+};
+
+export type FeedbackCategory = "bug" | "feature" | "feedback";
+
+export type FeedbackInput = {
+	category: FeedbackCategory;
+	message: string;
+	rating?: number;
+	userName?: string;
+};
+
+export type FeedbackRecord = {
+	id: string;
+	user_id: string;
+	user_email: string | null;
+	user_name: string | null;
+	category: FeedbackCategory;
+	message: string;
+	rating: number | null;
+	created_at: string;
+	updated_at?: string;
+};
+

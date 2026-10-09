@@ -16,7 +16,11 @@ import type {
   WalletLoan,
   WalletLoanForm,
   WalletLoanRepaymentForm,
-  WalletLoanRepaymentUpdateForm
+  WalletLoanRepaymentUpdateForm,
+  BankAccount,
+  BankAccountForm,
+  FeedbackInput,
+  FeedbackRecord
 } from "../types";
 import { ApiError } from "../types";
 
@@ -330,7 +334,7 @@ export async function deleteWalletBudget(walletId: string, walletBudgetId: strin
 
 export async function createSharedWalletExpense(
   walletId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null },
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null; bankAccountId?: string | null; bankName?: string | null },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses`;
@@ -345,7 +349,7 @@ export async function createSharedWalletExpense(
 export async function updateSharedWalletExpense(
   walletId: string,
   walletExpenseId: string,
-  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null },
+  payload: { paidByMemberId: string; amount: string; category: string; description: string; date: string; splitRule: SplitRule; splits: Array<{ memberId: string; value?: string }>; platform?: string | null; bankAccountId?: string | null; bankName?: string | null },
   user: User
 ): Promise<WalletDetail> {
   const endpoint = API_BASE_URL ? new URL(`/api/wallets/${walletId}/expenses/${walletExpenseId}`, API_BASE_URL).toString() : `/api/wallets/${walletId}/expenses/${walletExpenseId}`;
@@ -822,5 +826,102 @@ export async function revokeToken(tokenId: string, user: User, purge = false): P
     purge ? "Failed to delete access token." : "Failed to revoke access token."
   );
 }
+
+export async function listBankAccounts(user: User): Promise<BankAccount[]> {
+  const endpoint = API_BASE_URL ? new URL("/api/profile/banks", API_BASE_URL).toString() : "/api/profile/banks";
+  const body = await apiRequest<{ bankAccounts: BankAccount[] }>(
+    user,
+    { url: endpoint, method: "GET" },
+    "Failed to load bank accounts."
+  );
+  return body.bankAccounts;
+}
+
+export async function createBankAccount(payload: BankAccountForm, user: User): Promise<BankAccount> {
+  const endpoint = API_BASE_URL ? new URL("/api/profile/banks", API_BASE_URL).toString() : "/api/profile/banks";
+  const body = await apiRequest<{ bankAccount: BankAccount }>(
+    user,
+    { url: endpoint, method: "POST", data: payload },
+    "Failed to add bank account."
+  );
+  return body.bankAccount;
+}
+
+export async function updateBankAccount(
+  bankAccountId: string,
+  payload: Partial<BankAccountForm>,
+  user: User
+): Promise<BankAccount> {
+  const endpoint = API_BASE_URL
+    ? new URL(`/api/profile/banks/${bankAccountId}`, API_BASE_URL).toString()
+    : `/api/profile/banks/${bankAccountId}`;
+  const body = await apiRequest<{ bankAccount: BankAccount }>(
+    user,
+    { url: endpoint, method: "PATCH", data: payload },
+    "Failed to update bank account."
+  );
+  return body.bankAccount;
+}
+
+export async function deleteBankAccount(bankAccountId: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL
+    ? new URL(`/api/profile/banks/${bankAccountId}`, API_BASE_URL).toString()
+    : `/api/profile/banks/${bankAccountId}`;
+  await apiRequest<{ message: string }>(
+    user,
+    { url: endpoint, method: "DELETE" },
+    "Failed to remove bank account."
+  );
+}
+
+export async function submitFeedback(payload: FeedbackInput, user: User): Promise<{ feedback: FeedbackRecord; emailSent: boolean }> {
+  const endpoint = API_BASE_URL ? new URL("/api/feedback", API_BASE_URL).toString() : "/api/feedback";
+  return await apiRequest<{ feedback: FeedbackRecord; emailSent: boolean }>(
+    user,
+    { url: endpoint, method: "POST", data: payload },
+    "Failed to submit feedback."
+  );
+}
+
+export async function listUserFeedbacks(user: User): Promise<FeedbackRecord[]> {
+  const endpoint = API_BASE_URL ? new URL("/api/feedback", API_BASE_URL).toString() : "/api/feedback";
+  const body = await apiRequest<{ feedbacks: FeedbackRecord[] }>(
+    user,
+    { url: endpoint, method: "GET" },
+    "Failed to load user feedbacks."
+  );
+  return body.feedbacks;
+}
+
+export async function updateFeedback(
+  feedbackId: string,
+  payload: Partial<FeedbackInput>,
+  user: User
+): Promise<FeedbackRecord> {
+  const endpoint = API_BASE_URL 
+    ? new URL(`/api/feedback/${feedbackId}`, API_BASE_URL).toString() 
+    : `/api/feedback/${feedbackId}`;
+  const body = await apiRequest<{ feedback: FeedbackRecord }>(
+    user,
+    { url: endpoint, method: "PATCH", data: payload },
+    "Failed to update feedback."
+  );
+  return body.feedback;
+}
+
+export async function deleteFeedback(
+  feedbackId: string,
+  user: User
+): Promise<void> {
+  const endpoint = API_BASE_URL 
+    ? new URL(`/api/feedback/${feedbackId}`, API_BASE_URL).toString() 
+    : `/api/feedback/${feedbackId}`;
+  await apiRequest<{ message?: string }>(
+    user,
+    { url: endpoint, method: "DELETE" },
+    "Failed to delete feedback."
+  );
+}
+
 
 

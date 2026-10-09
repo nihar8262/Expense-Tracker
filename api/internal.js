@@ -3,7 +3,15 @@ const { runReminderChecks, runReminderChecksForUser } = require("./_lib/finance"
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
+  if (request.query.health === "true" || (request.query.route && request.query.route === "health")) {
+    return response.status(200).json({ ok: true });
+  }
+
   const segments = getRoutedSegments(request);
+
+  if (segments.length === 1 && segments[0] === "health") {
+    return response.status(200).json({ ok: true });
+  }
 
   if (segments.length !== 2 || segments[0] !== "reminders" || segments[1] !== "run") {
     return notFound(response);

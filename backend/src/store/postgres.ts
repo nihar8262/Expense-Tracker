@@ -16,7 +16,11 @@ import type {
   UpdateWalletLoanInput,
   CreateWalletLoanRepaymentInput,
   UpdateWalletLoanRepaymentInput,
-  ExpensesQueryInput
+  ExpensesQueryInput,
+  CreateBankAccountInput,
+  UpdateBankAccountInput,
+  CreateFeedbackInput,
+  UpdateFeedbackInput
 } from "../lib/validation.js";
 import {
   type BillReminderRecord,
@@ -52,10 +56,40 @@ import {
   WalletSettlementNotFoundError,
   type WalletSettlementRecord,
   WalletValidationError,
-  type WalletHistoryPagination
+  type WalletHistoryPagination,
+  type BankAccountRecord,
+  type FeedbackRecord,
+  BankAccountNotFoundError,
+  FeedbackLimitExceededError,
+  FeedbackNotFoundError,
+  FeedbackWindowExpiredError
 } from "./types.js";
 
 type DbClient = Sql | TransactionSql;
+
+type BankAccountRow = {
+  id: string;
+  user_id: string;
+  bank_id: string;
+  bank_name: string;
+  account_type: "debit" | "credit" | "rupay_credit" | "cash";
+  account_label: string | null;
+  last_four_digits: string | null;
+  is_default: boolean;
+  created_at: string | Date;
+};
+
+type FeedbackRow = {
+  id: string;
+  user_id: string;
+  user_email: string | null;
+  user_name: string | null;
+  category: "bug" | "feature" | "feedback";
+  message: string;
+  rating: number | null;
+  created_at: string | Date;
+  updated_at?: string | Date | null;
+};
 
 type ExpenseRow = {
   id: string;
@@ -65,6 +99,8 @@ type ExpenseRow = {
   expense_date: string | Date;
   created_at: string | Date;
   platform: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
 };
 
 type IdempotencyRow = {
@@ -128,6 +164,8 @@ type WalletExpenseRow = {
   split_rule: "equal" | "fixed" | "percentage";
   created_at: string | Date;
   platform: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
 };
 
 type WalletExpenseSplitRow = {
@@ -182,6 +220,8 @@ type WalletLoanRow = {
   loan_type?: "lent" | "borrowed" | null;
   creator_name?: string | null;
   creator_email?: string | null;
+  bank_account_id?: string | null;
+  bank_name?: string | null;
   created_at: string | Date;
 };
 
@@ -251,6 +291,34 @@ function asIsoTimestamp(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+function mapBankAccount(row: BankAccountRow): BankAccountRecord {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    bank_id: row.bank_id,
+    bank_name: row.bank_name,
+    account_type: row.account_type,
+    account_label: row.account_label,
+    last_four_digits: row.last_four_digits,
+    is_default: Boolean(row.is_default),
+    created_at: asIsoTimestamp(row.created_at)
+  };
+}
+
+function mapFeedback(row: FeedbackRow): FeedbackRecord {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    user_email: row.user_email,
+    user_name: row.user_name ?? null,
+    category: row.category,
+    message: row.message,
+    rating: row.rating,
+    created_at: asIsoTimestamp(row.created_at),
+    updated_at: row.updated_at ? asIsoTimestamp(row.updated_at) : undefined
+  };
+}
+
 function mapExpense(row: ExpenseRow): ExpenseRecord {
   return {
     id: row.id,
@@ -259,7 +327,9 @@ function mapExpense(row: ExpenseRow): ExpenseRecord {
     description: row.description,
     date: asIsoDate(row.expense_date),
     created_at: asIsoTimestamp(row.created_at),
-    platform: row.platform
+    platform: row.platform,
+    bank_account_id: row.bank_account_id ?? null,
+    bank_name: row.bank_name ?? null
   };
 }
 
@@ -374,7 +444,9 @@ function mapWalletLoan(row: WalletLoanRow, repayments: WalletLoanRepaymentRecord
     repayments,
     is_owner: isOwner,
     creator_name: creatorName,
-    creator_email: creatorEmail
+    creator_email: creatorEmail,
+    bank_account_id: row.bank_account_id ?? null,
+    bank_name: row.bank_name ?? null
   };
 }
 
@@ -906,6 +978,45 @@ async function ensureSchema(sql: Sql): Promise<void> {
         )
       `;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS content_embeddings_owner_idx ON content_embeddings (owner_id, owner_type)`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_bank_accounts (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          bank_id VARCHAR(64) NOT NULL,
+          bank_name VARCHAR(120) NOT NULL,
+          account_type VARCHAR(32) NOT NULL CHECK (account_type IN ('debit', 'credit', 'rupay_credit', 'cash')),
+          account_label VARCHAR(64),
+          last_four_digits VARCHAR(4),
+          is_default BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_bank_accounts_user_idx ON user_bank_accounts (user_id, created_at DESC)`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS user_feedbacks (
+          id UUID PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          user_email VARCHAR(320),
+          category VARCHAR(64) NOT NULL DEFAULT 'feedback',
+          message TEXT NOT NULL,
+          rating INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS user_feedbacks_user_idx ON user_feedbacks (user_id, created_at DESC)`;
+      await sql`ALTER TABLE user_feedbacks ADD COLUMN IF NOT EXISTS user_name VARCHAR(128)`;
+      await sql`ALTER TABLE user_feedbacks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+
+      await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS bank_account_id UUID REFERENCES user_bank_accounts(id) ON DELETE SET NULL`;
+      await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120)`;
+
+      await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS bank_account_id UUID REFERENCES user_bank_accounts(id) ON DELETE SET NULL`;
+      await sql`ALTER TABLE wallet_expenses ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120)`;
+
+      await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS bank_account_id UUID REFERENCES user_bank_accounts(id) ON DELETE SET NULL`;
+      await sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS bank_name VARCHAR(120)`;
     })();
   }
 
@@ -1137,7 +1248,9 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
            wallet_expenses.expense_date,
            wallet_expenses.split_rule,
            wallet_expenses.created_at,
-           wallet_expenses.platform
+           wallet_expenses.platform,
+           wallet_expenses.bank_account_id,
+           wallet_expenses.bank_name
     FROM wallet_expenses
     INNER JOIN wallet_members AS payer ON payer.id = wallet_expenses.paid_by_member_id
     WHERE wallet_expenses.wallet_id = ${walletId}
@@ -1191,6 +1304,8 @@ async function loadWalletDetail(db: DbClient, walletId: string, pagination = get
     split_rule: expense.split_rule,
     created_at: asIsoTimestamp(expense.created_at),
     platform: expense.platform,
+    bank_account_id: expense.bank_account_id ?? null,
+    bank_name: expense.bank_name ?? null,
     splits: splitsByExpenseId.get(expense.id) ?? []
   }));
 
@@ -1474,6 +1589,8 @@ async function loadLoanRecord(db: DbClient, loanId: string, viewingUserId?: stri
            wallet_loans.status,
            wallet_loans.loan_type,
            wallet_loans.created_at,
+           wallet_loans.bank_account_id,
+           wallet_loans.bank_name,
            COALESCE(
              NULLIF(wallet_loans.creator_name, ''),
              NULLIF(owner_prefs.display_name, ''),
@@ -1531,9 +1648,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         const insertedExpenses = await tx<ExpenseRow[]>`
-          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform)
-          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt}, ${input.platform ?? null})
-          RETURNING id, amount_minor, category, description, expense_date, created_at, platform
+          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name)
+          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt}, ${input.platform ?? null}, ${input.bankAccountId ?? null}, ${input.bankName ?? null})
+          RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
         `;
 
         await tx`
@@ -1572,7 +1689,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       const searchPattern = query.search?.trim() ? `%${query.search.trim()}%` : null;
 
       const rows = await sql<ExpenseRow[]>`
-        SELECT id, amount_minor, category, description, expense_date, created_at, platform
+        SELECT id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
         FROM expenses
         WHERE user_id = ${userId}
           ${query.category ? sql`AND category = ${query.category}` : sql``}
@@ -1825,9 +1942,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
             category = ${input.category.trim()},
             description = ${input.description.trim()},
             expense_date = ${input.date},
-            platform = ${input.platform ?? null}
+            platform = ${input.platform ?? null},
+            bank_account_id = ${input.bankAccountId ?? null},
+            bank_name = ${input.bankName ?? null}
         WHERE id = ${expenseId} AND user_id = ${userId}
-        RETURNING id, amount_minor, category, description, expense_date, created_at, platform
+        RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
       `;
 
       if (!updatedRows[0]) {
@@ -2645,7 +2764,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         await tx`
-          INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at, platform)
+          INSERT INTO wallet_expenses (id, wallet_id, paid_by_member_id, amount_minor, category, description, expense_date, split_rule, created_at, platform, bank_account_id, bank_name)
           VALUES (
             ${expenseId},
             ${walletId},
@@ -2656,7 +2775,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${input.date},
             ${input.splitRule},
             ${createdAt},
-            ${input.platform ?? null}
+            ${input.platform ?? null},
+            ${input.bankAccountId ?? null},
+            ${input.bankName ?? null}
           )
         `;
 
@@ -2706,7 +2827,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
               description = ${input.description.trim()},
               expense_date = ${input.date},
               split_rule = ${input.splitRule},
-              platform = ${input.platform ?? null}
+              platform = ${input.platform ?? null},
+              bank_account_id = ${input.bankAccountId ?? null},
+              bank_name = ${input.bankName ?? null}
           WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}
         `;
 
@@ -2857,7 +2980,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
           INSERT INTO wallet_loans (
             id, owner_user_id, wallet_id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor,
             interest_rate_basis_points, interest_type, interest_rate_period, loan_type,
-            lending_date, due_date, interest_start_date, notes, status, created_at
+            lending_date, due_date, interest_start_date, notes, status, created_at,
+            bank_account_id, bank_name
           ) VALUES (
             ${newLoanId},
             ${wallet.owner_user_id},
@@ -2876,7 +3000,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${input.interestStartDate ?? null},
             ${input.notes?.trim() || null},
             ${"active"},
-            ${new Date().toISOString()}
+            ${new Date().toISOString()},
+            ${input.bankAccountId ?? null},
+            ${input.bankName ?? null}
           )
         `;
 
@@ -2932,7 +3058,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletValidationError("Only the wallet owner can update loan terms and interest.");
         }
 
-        const loanRows = await tx<WalletLoanRow[]>`SELECT id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, loan_type, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
+        const loanRows = await tx<WalletLoanRow[]>`SELECT id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, loan_type, lending_date, due_date, interest_start_date, notes, status, bank_account_id, bank_name FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
         const currentLoan = loanRows[0];
         if (!currentLoan) {
           throw new WalletLoanNotFoundError();
@@ -2963,6 +3089,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const updatedNotes = (input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes) ?? null;
         const updatedStatus = input.status ?? currentLoan.status;
         const updatedLoanType = input.loanType ?? currentLoan.loan_type ?? "lent";
+        const updatedBankAccountId = (input.bankAccountId !== undefined ? (input.bankAccountId || null) : (currentLoan.bank_account_id ?? null)) ?? null;
+        const updatedBankName = (input.bankName !== undefined ? (input.bankName?.trim() || null) : (currentLoan.bank_name ?? null)) ?? null;
 
         await tx`
           UPDATE wallet_loans
@@ -2978,7 +3106,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
               due_date = ${updatedDueDate},
               interest_start_date = ${updatedInterestStartDate},
               notes = ${updatedNotes},
-              status = ${updatedStatus}
+              status = ${updatedStatus},
+              bank_account_id = ${updatedBankAccountId},
+              bank_name = ${updatedBankName}
           WHERE id = ${loanId} AND wallet_id = ${walletId}
         `;
 
@@ -3138,6 +3268,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
                wallet_loans.status,
                wallet_loans.loan_type,
                wallet_loans.created_at,
+               wallet_loans.bank_account_id,
+               wallet_loans.bank_name,
                COALESCE(
                  NULLIF(wallet_loans.creator_name, ''),
                  NULLIF(owner_prefs.display_name, ''),
@@ -3220,7 +3352,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
             borrower_name, borrower_email, amount_minor,
             interest_rate_basis_points, interest_type, interest_rate_period, loan_type,
             lending_date, due_date, interest_start_date, notes, status, created_at,
-            creator_name, creator_email
+            creator_name, creator_email, bank_account_id, bank_name
           ) VALUES (
             ${loanId},
             ${userId},
@@ -3241,7 +3373,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
             ${"active"},
             ${new Date().toISOString()},
             ${resolvedCreatorName},
-            ${resolvedCreatorEmail}
+            ${resolvedCreatorEmail},
+            ${input.bankAccountId ?? null},
+            ${input.bankName ?? null}
           )
         `;
 
@@ -3282,7 +3416,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await ensureSchema(sql);
 
       return sql.begin(async (tx) => {
-        const loanRows = await tx<WalletLoanRow[]>`SELECT id, owner_user_id, borrower_name, borrower_email, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, loan_type, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+        const loanRows = await tx<WalletLoanRow[]>`SELECT id, owner_user_id, borrower_name, borrower_email, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, loan_type, lending_date, due_date, interest_start_date, notes, status, bank_account_id, bank_name FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
         const currentLoan = loanRows[0];
         if (!currentLoan) {
           throw new WalletLoanNotFoundError();
@@ -3301,6 +3435,8 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const updatedNotes = (input.notes !== undefined ? (input.notes?.trim() || null) : currentLoan.notes) ?? null;
         const updatedStatus = input.status ?? currentLoan.status;
         const updatedLoanType = input.loanType ?? currentLoan.loan_type ?? "lent";
+        const updatedBankAccountId = (input.bankAccountId !== undefined ? (input.bankAccountId || null) : (currentLoan.bank_account_id ?? null)) ?? null;
+        const updatedBankName = (input.bankName !== undefined ? (input.bankName?.trim() || null) : (currentLoan.bank_name ?? null)) ?? null;
 
         await tx`
           UPDATE wallet_loans
@@ -3316,7 +3452,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
               due_date = ${updatedDueDate},
               interest_start_date = ${updatedInterestStartDate},
               notes = ${updatedNotes},
-              status = ${updatedStatus}
+              status = ${updatedStatus},
+              bank_account_id = ${updatedBankAccountId},
+              bank_name = ${updatedBankName}
           WHERE id = ${loanId} AND owner_user_id = ${userId}
         `;
 
@@ -4169,12 +4307,224 @@ export function createPostgresExpenseStore(): ExpenseStore {
         if (hasTable("wallet_loans")) {
           await tx`DELETE FROM wallet_loans WHERE owner_user_id = ${userId}`;
         }
+        if (hasTable("user_bank_accounts")) {
+          await tx`DELETE FROM user_bank_accounts WHERE user_id = ${userId}`;
+        }
+        if (hasTable("user_feedbacks")) {
+          await tx`DELETE FROM user_feedbacks WHERE user_id = ${userId}`;
+        }
       });
     },
 
     async searchExpensesSemantic(userId: string, query: string, limit?: number): Promise<any[]> {
       const { searchExpensesSemantic } = await import("../mcp/semanticSearch.js");
       return searchExpensesSemantic(sql, userId, query, limit);
+    },
+
+    async listBankAccounts(userId: string): Promise<BankAccountRecord[]> {
+      await ensureSchema(sql);
+
+      const rows = await sql<BankAccountRow[]>`
+        SELECT id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at
+        FROM user_bank_accounts
+        WHERE user_id = ${userId}
+        ORDER BY is_default DESC, created_at ASC
+      `;
+
+      return rows.map(mapBankAccount);
+    },
+
+    async createBankAccount(userId: string, input: CreateBankAccountInput): Promise<BankAccountRecord> {
+      await ensureSchema(sql);
+
+      const accountId = randomUUID();
+      const lastDigits = input.lastFourDigits && input.lastFourDigits.trim() ? input.lastFourDigits.trim() : null;
+      const label = input.accountLabel && input.accountLabel.trim() ? input.accountLabel.trim() : null;
+      const isDefault = Boolean(input.isDefault);
+
+      return await sql.begin(async (tx) => {
+        if (isDefault) {
+          await tx`
+            UPDATE user_bank_accounts
+            SET is_default = FALSE
+            WHERE user_id = ${userId}
+          `;
+        } else {
+          const countRows = await tx<{ count: string | number }[]>`
+            SELECT COUNT(*)::int AS count FROM user_bank_accounts WHERE user_id = ${userId}
+          `;
+          if (Number(countRows[0]?.count ?? 0) === 0) {
+            const rows = await tx<BankAccountRow[]>`
+              INSERT INTO user_bank_accounts (id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at)
+              VALUES (${accountId}, ${userId}, ${input.bankId.trim()}, ${input.bankName.trim()}, ${input.accountType}, ${label}, ${lastDigits}, TRUE, NOW())
+              RETURNING id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at
+            `;
+            return mapBankAccount(rows[0]);
+          }
+        }
+
+        const rows = await tx<BankAccountRow[]>`
+          INSERT INTO user_bank_accounts (id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at)
+          VALUES (${accountId}, ${userId}, ${input.bankId.trim()}, ${input.bankName.trim()}, ${input.accountType}, ${label}, ${lastDigits}, ${isDefault}, NOW())
+          RETURNING id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at
+        `;
+
+        return mapBankAccount(rows[0]);
+      });
+    },
+
+    async updateBankAccount(userId: string, bankAccountId: string, input: UpdateBankAccountInput): Promise<BankAccountRecord> {
+      await ensureSchema(sql);
+
+      return await sql.begin(async (tx) => {
+        if (input.isDefault) {
+          await tx`
+            UPDATE user_bank_accounts
+            SET is_default = FALSE
+            WHERE user_id = ${userId}
+          `;
+        }
+
+        const lastDigits = input.lastFourDigits !== undefined ? (input.lastFourDigits?.trim() || null) : undefined;
+        const label = input.accountLabel !== undefined ? (input.accountLabel?.trim() || null) : undefined;
+
+        const rows = await tx<BankAccountRow[]>`
+          UPDATE user_bank_accounts
+          SET account_label = COALESCE(${label !== undefined ? label : null}, account_label),
+              last_four_digits = ${lastDigits !== undefined ? lastDigits : sql`last_four_digits`},
+              is_default = COALESCE(${input.isDefault ?? null}, is_default)
+          WHERE id = ${bankAccountId} AND user_id = ${userId}
+          RETURNING id, user_id, bank_id, bank_name, account_type, account_label, last_four_digits, is_default, created_at
+        `;
+
+        if (!rows[0]) {
+          throw new BankAccountNotFoundError();
+        }
+
+        return mapBankAccount(rows[0]);
+      });
+    },
+
+    async deleteBankAccount(userId: string, bankAccountId: string): Promise<void> {
+      await ensureSchema(sql);
+
+      await sql.begin(async (tx) => {
+        const deleted = await tx<{ id: string; is_default: boolean }[]>`
+          DELETE FROM user_bank_accounts
+          WHERE id = ${bankAccountId} AND user_id = ${userId}
+          RETURNING id, is_default
+        `;
+
+        if (deleted.length === 0) {
+          throw new BankAccountNotFoundError();
+        }
+
+        if (deleted[0].is_default) {
+          await tx`
+            UPDATE user_bank_accounts
+            SET is_default = TRUE
+            WHERE id = (
+              SELECT id FROM user_bank_accounts
+              WHERE user_id = ${userId}
+              ORDER BY created_at ASC
+              LIMIT 1
+            )
+          `;
+        }
+      });
+    },
+
+    async createFeedback(userId: string, userEmail: string | null, input: CreateFeedbackInput): Promise<FeedbackRecord> {
+      await ensureSchema(sql);
+
+      // Enforce daily limit: max 5 feedbacks per 24 hours
+      const countRows = await sql<{ count: number }[]>`
+        SELECT COUNT(*)::int AS count FROM user_feedbacks
+        WHERE user_id = ${userId} AND created_at >= NOW() - INTERVAL '24 hours'
+      `;
+      if ((countRows[0]?.count ?? 0) >= 5) {
+        throw new FeedbackLimitExceededError();
+      }
+
+      const feedbackId = randomUUID();
+      const rows = await sql<FeedbackRow[]>`
+        INSERT INTO user_feedbacks (id, user_id, user_email, user_name, category, message, rating, created_at, updated_at)
+        VALUES (${feedbackId}, ${userId}, ${userEmail ?? null}, ${input.userName?.trim() ?? null}, ${input.category}, ${input.message.trim()}, ${input.rating ?? null}, NOW(), NOW())
+        RETURNING id, user_id, user_email, user_name, category, message, rating, created_at, updated_at
+      `;
+
+      return mapFeedback(rows[0]);
+    },
+
+    async listUserFeedbacks(userId: string): Promise<FeedbackRecord[]> {
+      await ensureSchema(sql);
+      const rows = await sql<FeedbackRow[]>`
+        SELECT id, user_id, user_email, user_name, category, message, rating, created_at, updated_at
+        FROM user_feedbacks
+        WHERE user_id = ${userId} AND created_at >= NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC
+      `;
+      return rows.map(mapFeedback);
+    },
+
+    async updateFeedback(userId: string, feedbackId: string, input: UpdateFeedbackInput): Promise<FeedbackRecord> {
+      await ensureSchema(sql);
+
+      const existing = await sql<FeedbackRow[]>`
+        SELECT id, user_id, user_email, user_name, category, message, rating, created_at, updated_at
+        FROM user_feedbacks
+        WHERE id = ${feedbackId} AND user_id = ${userId}
+        LIMIT 1
+      `;
+
+      if (existing.length === 0) {
+        throw new FeedbackNotFoundError();
+      }
+
+      const createdAt = new Date(existing[0].created_at).getTime();
+      const now = Date.now();
+      if (now - createdAt > 24 * 60 * 60 * 1000) {
+        throw new FeedbackWindowExpiredError();
+      }
+
+      const nextCategory = input.category ?? existing[0].category;
+      const nextMessage = input.message !== undefined ? input.message.trim() : existing[0].message;
+      const nextRating = input.rating !== undefined ? input.rating : existing[0].rating;
+      const nextUserName = input.userName !== undefined ? input.userName.trim() : existing[0].user_name;
+
+      const rows = await sql<FeedbackRow[]>`
+        UPDATE user_feedbacks
+        SET
+          category = ${nextCategory},
+          message = ${nextMessage},
+          rating = ${nextRating},
+          user_name = ${nextUserName},
+          updated_at = NOW()
+        WHERE id = ${feedbackId} AND user_id = ${userId}
+        RETURNING id, user_id, user_email, user_name, category, message, rating, created_at, updated_at
+      `;
+
+      return mapFeedback(rows[0]);
+    },
+
+    async deleteFeedback(userId: string, feedbackId: string): Promise<void> {
+      await ensureSchema(sql);
+
+      const existing = await sql<FeedbackRow[]>`
+        SELECT id, user_id
+        FROM user_feedbacks
+        WHERE id = ${feedbackId} AND user_id = ${userId}
+        LIMIT 1
+      `;
+
+      if (existing.length === 0) {
+        throw new FeedbackNotFoundError();
+      }
+
+      await sql`
+        DELETE FROM user_feedbacks
+        WHERE id = ${feedbackId} AND user_id = ${userId}
+      `;
     }
   };
 }

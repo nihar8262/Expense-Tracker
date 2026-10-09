@@ -57,7 +57,15 @@ import {
   handleUpdateWallet,
   handleUpsertReminderPreferences,
   handleGetWalletReminderPreferences,
-  handleUpsertWalletReminderPreferences
+  handleUpsertWalletReminderPreferences,
+  handleListBankAccounts,
+  handleCreateBankAccount,
+  handleUpdateBankAccount,
+  handleDeleteBankAccount,
+  handleCreateFeedback,
+  handleListFeedbacks,
+  handleUpdateFeedback,
+  handleDeleteFeedback
 } from "./http.js";
 import type { ExpenseStore } from "./store/types.js";
 import { handleAssistantQuery, handleAssistantQueryStream } from "./assistant/assistantService.js";
@@ -928,6 +936,114 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to delete account data."
+    );
+  });
+
+  app.get("/api/profile/banks", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleListBankAccounts(user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to list bank accounts."
+    );
+  });
+
+  app.post("/api/profile/banks", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateBankAccount(request.body, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to create bank account."
+    );
+  });
+
+  app.patch("/api/profile/banks/:bankAccountId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateBankAccount(request.body, request.params.bankAccountId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update bank account."
+    );
+  });
+
+  app.delete("/api/profile/banks/:bankAccountId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteBankAccount(request.params.bankAccountId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete bank account."
+    );
+  });
+
+  app.get("/api/feedback", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleListFeedbacks(user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to list feedback."
+    );
+  });
+
+  app.post("/api/feedback", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleCreateFeedback(request.body, user.id, user.email, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to submit feedback."
+    );
+  });
+
+  app.patch("/api/feedback/:feedbackId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateFeedback(request.body, request.params.feedbackId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update feedback."
+    );
+  });
+
+  app.put("/api/feedback/:feedbackId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleUpdateFeedback(request.body, request.params.feedbackId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to update feedback."
+    );
+  });
+
+  app.delete("/api/feedback/:feedbackId", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const result = await handleDeleteFeedback(request.params.feedbackId, user.id, store);
+        return response.status(result.status).json(result.body);
+      },
+      "Failed to delete feedback."
     );
   });
 
