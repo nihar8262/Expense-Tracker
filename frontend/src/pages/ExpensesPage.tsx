@@ -525,7 +525,7 @@ export function ExpensesPage({
           <button
             type="button"
             className={cn(
-              "ui-button-primary text-xs px-3.5 py-1.5 flex items-center gap-1.5 shadow-sm transition-all",
+              "ui-button-primary text-xs px-3.5 py-1.5 hidden lg:inline-flex items-center gap-1.5 shadow-sm transition-all",
               (isExpenseFormOpen || editingExpenseId) && "bg-secondary text-ink border border-[color:var(--border)] shadow-none"
             )}
             onClick={() => {
@@ -680,23 +680,6 @@ export function ExpensesPage({
               Select multiple expenses for bulk actions or click a row to edit.
             </p>
           </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            {selectedVisibleExpenseIds.length > 0 && (
-              <span className="text-xs font-semibold text-primary px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
-                {selectedVisibleExpenseIds.length} selected
-              </span>
-            )}
-            <button
-              type="button"
-              className="ui-button-danger text-xs px-3 py-1.5 flex items-center gap-1.5"
-              disabled={selectedVisibleExpenseIds.length === 0 || selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
-              onClick={handleDeleteSelectedClick}
-            >
-              <Trash2 className="size-3.5" />
-              <span>{selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId)) ? "Deleting..." : "Delete selected"}</span>
-            </button>
-          </div>
         </div>
 
         {!currentUserPresent && !authLoading ? <EmptyState title="Sign in to view expenses" description="Your private expense history only appears after authentication." /> : null}
@@ -705,6 +688,68 @@ export function ExpensesPage({
 
         {currentUserPresent && !isLoading && visibleExpenses.length > 0 ? (
           <>
+            {/* Top Toolbar: Select All + Bulk Actions + Prev & Next Pagination (same as Wallets section) */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-[color:var(--border)] bg-zinc-50/75 dark:bg-zinc-800/50 px-3 py-2">
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  aria-label={areAllVisibleExpensesSelected ? "Deselect all visible expenses" : "Select all visible expenses"}
+                  checked={areAllVisibleExpensesSelected}
+                  onChange={onToggleSelectAllVisibleExpenses}
+                />
+                <span className="text-xs font-semibold text-ink">Select All</span>
+                <span className="text-xs text-secondary">
+                  {selectedVisibleExpenseIds.length > 0 ? `(${selectedVisibleExpenseIds.length} selected)` : ""}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {selectedVisibleExpenseIds.length > 0 ? (
+                  <button
+                    type="button"
+                    className="ui-button-danger !py-1 !px-2.5 text-xs flex items-center gap-1.5"
+                    disabled={selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId))}
+                    onClick={handleDeleteSelectedClick}
+                  >
+                    <Trash2 className="size-3.5" />
+                    <span>{selectedVisibleExpenseIds.some((expenseId) => deletingExpenseIds.includes(expenseId)) ? "Deleting..." : "Delete selected"}</span>
+                  </button>
+                ) : null}
+
+                {totalExpensePages > 1 ? (
+                  <div className="flex items-center gap-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[70px] text-xs !py-1 !px-2"
+                      disabled={currentExpensesPage === 1}
+                      onClick={() => onExpensesPageChange(currentExpensesPage - 1)}
+                      title="Previous Page"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 sm:mr-1">
+                        <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                      </svg>
+                      <span className="hidden sm:inline">Prev</span>
+                    </button>
+                    <span className="text-xs font-semibold text-secondary px-1 text-center min-w-[40px]">
+                      {currentExpensesPage}/{totalExpensePages}
+                    </span>
+                    <button
+                      type="button"
+                      className="ui-button-secondary ui-button-sm flex items-center justify-center min-w-[32px] sm:min-w-[70px] text-xs !py-1 !px-2"
+                      disabled={currentExpensesPage === totalExpensePages}
+                      onClick={() => onExpensesPageChange(currentExpensesPage + 1)}
+                      title="Next Page"
+                    >
+                      <span className="hidden sm:inline">Next</span>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5 sm:ml-1">
+                        <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1 1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
             <div className="hidden overflow-hidden rounded-[20px] border border-[color:var(--border)] lg:block">
               <table className="bg-white/80 [&_th]:py-2.5 [&_td]:py-2.5 [&_th]:px-3.5 [&_td]:px-3.5 [&_td]:align-middle">
                 <thead>
@@ -858,15 +903,6 @@ export function ExpensesPage({
           </>
         ) : null}
       </SurfaceCard>
-
-      <button
-        type="button"
-        className="fixed bottom-28 right-4 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-2xl text-white shadow-[0_20px_50px_rgba(30,122,83,0.28)] lg:hidden"
-        onClick={() => setIsExpenseSheetOpen(true)}
-        aria-label="Add expense"
-      >
-        <Plus className="size-6" />
-      </button>
 
       {isExpenseSheetOpen ? (
         <ModalFrame onClose={() => { if (editingExpenseId) { handleEditCancel(); } else { setIsExpenseSheetOpen(false); } }} className="max-w-[760px] overflow-y-auto p-5 sm:p-6">

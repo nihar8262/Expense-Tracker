@@ -6,7 +6,7 @@ import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { AssistantPanel } from "../components/AssistantPanel";
 import { cn } from "../components/ui";
-import { LayoutDashboard, Receipt, ReceiptIndianRupee, Wallet as WalletIcon, Bell } from "lucide-react";
+import { LayoutDashboard, Receipt, ReceiptIndianRupee, Wallet as WalletIcon, Bell, Plus } from "lucide-react";
 import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
 
 type SignedInLayoutProps = {
@@ -53,6 +53,7 @@ type SignedInLayoutProps = {
   onOpenDeleteAccountModal: () => void;
   onCloseDeleteAccountModal: () => void;
   onDeleteAccount: () => Promise<void>;
+  onOpenAddExpenseModal?: () => void;
   children: ReactNode;
 };
 
@@ -91,6 +92,7 @@ export function SignedInLayout({
   onOpenDeleteAccountModal,
   onCloseDeleteAccountModal,
   onDeleteAccount,
+  onOpenAddExpenseModal,
   children
 }: SignedInLayoutProps) {
   const location = useLocation();
@@ -108,14 +110,6 @@ export function SignedInLayout({
     ],
     [ExpenseIcon]
   );
-
-  const activeIndex = mainNavItems.findIndex((item) => {
-    if (item.to === "/dashboard") {
-      return location.pathname === "/dashboard" || location.pathname === "/";
-    }
-    return location.pathname.startsWith(item.to);
-  });
-  const validActiveIndex = activeIndex >= 0 ? activeIndex : 0;
 
   const handleNavClick = () => {
     onCloseProfileMenu();
@@ -217,78 +211,167 @@ export function SignedInLayout({
       <div className="mt-6 app-grid pb-24 lg:mt-8 lg:pb-0">{children}</div>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-50 rounded-t-[22px] sm:rounded-t-[26px] border-t border-x border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,250,248,0.95))] px-1.5 pt-0 pb-[max(0.6rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(20,40,25,0.08)] backdrop-blur-2xl lg:hidden overflow-hidden"
+        className="fixed inset-x-0 bottom-0 z-50 rounded-t-[24px] border-t border-slate-200/85 dark:border-zinc-800 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(250,250,248,0.95))] dark:bg-[linear-gradient(180deg,rgba(18,24,20,0.98),rgba(14,18,15,0.95))] px-2 pt-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] shadow-[0_-8px_32px_rgba(20,40,25,0.08)] dark:shadow-[0_-8px_32px_rgba(0,0,0,0.3)] backdrop-blur-2xl lg:hidden"
         aria-label="Bottom navigation"
       >
-        <div className="relative grid grid-cols-4 items-center">
-          {/* Fluid Sliding Flat Green Dew Drop Notch Indicator */}
-          <div
-            className="absolute top-0 bottom-0 pointer-events-none transition-all duration-300 ease-[cubic-bezier(0.34,1.25,0.64,1)] flex items-start justify-center"
-            style={{
-              left: `${validActiveIndex * 25}%`,
-              width: "25%",
-              opacity: activeIndex >= 0 ? 1 : 0
-            }}
+        <div className="grid grid-cols-5 items-center">
+          {/* Item 1: Dashboard */}
+          <NavLink
+            to="/dashboard"
+            onClick={handleNavClick}
+            className={({ isActive }) =>
+              cn(
+                "flex flex-col items-center justify-center gap-1 py-1 px-1 transition-all duration-200 select-none group",
+                isActive
+                  ? "text-primary dark:text-emerald-400 font-bold"
+                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              )
+            }
+            aria-label="Dashboard"
           >
-            <svg
-              viewBox="0 0 100 62"
-              preserveAspectRatio="none"
-              className="w-full h-full max-h-[62px]"
-              aria-hidden="true"
+            <LayoutDashboard
+              className={cn(
+                "h-5 w-5 transition-transform duration-200 group-active:scale-95",
+                (location.pathname === "/dashboard" || location.pathname === "/") && "scale-110 stroke-[2.3]"
+              )}
+            />
+            <span
+              className={cn(
+                "truncate text-[10.5px] leading-tight transition-colors duration-200",
+                (location.pathname === "/dashboard" || location.pathname === "/")
+                  ? "font-bold text-primary dark:text-emerald-400"
+                  : "font-medium"
+              )}
             >
-              {/* Smartphone-style natural flat green dewdrop notch dipping down from top edge - expanded at top */}
-              <path
-                d="M 0 0 C 10 0, 14 3, 16 12 C 19 22, 22 32, 25 39 C 29 52, 38 60, 50 60 C 62 60, 71 52, 75 39 C 78 32, 81 22, 84 12 C 86 3, 90 0, 100 0 Z"
-                fill="#1e7a53"
-              />
-            </svg>
+              Dashboard
+            </span>
+          </NavLink>
+
+          {/* Item 2: Expenses */}
+          <NavLink
+            to="/expenses"
+            onClick={handleNavClick}
+            className={({ isActive }) =>
+              cn(
+                "flex flex-col items-center justify-center gap-1 py-1 px-1 transition-all duration-200 select-none group",
+                isActive
+                  ? "text-primary dark:text-emerald-400 font-bold"
+                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              )
+            }
+            aria-label="Expenses"
+          >
+            <ExpenseIcon
+              className={cn(
+                "h-5 w-5 transition-transform duration-200 group-active:scale-95",
+                location.pathname.startsWith("/expenses") && "scale-110 stroke-[2.3]"
+              )}
+            />
+            <span
+              className={cn(
+                "truncate text-[10.5px] leading-tight transition-colors duration-200",
+                location.pathname.startsWith("/expenses")
+                  ? "font-bold text-primary dark:text-emerald-400"
+                  : "font-medium"
+              )}
+            >
+              Expenses
+            </span>
+          </NavLink>
+
+          {/* Center Item: Elevated BHIM UPI-style Circular + Action Button */}
+          <div className="flex flex-col items-center justify-center -mt-6 sm:-mt-7 relative">
+            <button
+              type="button"
+              onClick={() => {
+                onCloseProfileMenu();
+                onCloseNotificationPanel();
+                setIsAssistantOpen(false);
+                onOpenAddExpenseModal?.();
+              }}
+              className="group relative flex items-center justify-center size-[52px] sm:size-[56px] rounded-full p-[3px] bg-gradient-to-tr from-[#1e7a53] via-[#22c55e] to-[#d4a857] shadow-[0_8px_22px_rgba(30,122,83,0.38)] active:scale-90 transition-all duration-200 ring-4 ring-white dark:ring-[#121814] cursor-pointer"
+              aria-label="Add expense"
+              title="Add expense"
+            >
+              <div className="size-full rounded-full bg-[#1e7a53] group-hover:bg-[#176343] flex items-center justify-center text-white transition-colors duration-200 shadow-inner">
+                <Plus className="size-6 text-white stroke-[2.6] transition-transform duration-200 group-hover:rotate-90" />
+              </div>
+            </button>
           </div>
 
-          {mainNavItems.map((item, idx) => {
-            const Icon = item.icon;
-            const isActive = activeIndex === idx;
+          {/* Item 4: Wallets */}
+          <NavLink
+            to="/wallets"
+            onClick={handleNavClick}
+            className={({ isActive }) =>
+              cn(
+                "flex flex-col items-center justify-center gap-1 py-1 px-1 transition-all duration-200 select-none group",
+                isActive
+                  ? "text-primary dark:text-emerald-400 font-bold"
+                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              )
+            }
+            aria-label="Wallets"
+          >
+            <WalletIcon
+              className={cn(
+                "h-5 w-5 transition-transform duration-200 group-active:scale-95",
+                location.pathname.startsWith("/wallets") && "scale-110 stroke-[2.3]"
+              )}
+            />
+            <span
+              className={cn(
+                "truncate text-[10.5px] leading-tight transition-colors duration-200",
+                location.pathname.startsWith("/wallets")
+                  ? "font-bold text-primary dark:text-emerald-400"
+                  : "font-medium"
+              )}
+            >
+              Wallets
+            </span>
+          </NavLink>
 
-            return (
-              <NavLink
-                key={`${item.to}-bottom`}
-                to={item.to}
-                onClick={handleNavClick}
+          {/* Item 5: Alerts */}
+          <NavLink
+            to="/alerts"
+            onClick={handleNavClick}
+            className={({ isActive }) =>
+              cn(
+                "flex flex-col items-center justify-center gap-1 py-1 px-1 transition-all duration-200 select-none group",
+                isActive
+                  ? "text-primary dark:text-emerald-400 font-bold"
+                  : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              )
+            }
+            aria-label="Alerts"
+          >
+            <div className="relative flex items-center justify-center">
+              <Bell
                 className={cn(
-                  "relative z-10 flex min-w-0 flex-1 flex-col items-center justify-center gap-1 pt-1.5 pb-2 px-1 transition-all duration-200 select-none",
-                  isActive
-                    ? "text-white font-bold"
-                    : "text-slate-500 hover:text-slate-800"
+                  "h-5 w-5 transition-transform duration-200 group-active:scale-95",
+                  location.pathname.startsWith("/alerts") && "scale-110 stroke-[2.3]"
                 )}
-                aria-label={item.label}
-              >
-                {/* Text label placed ABOVE over the icon */}
-                <span className={cn(
-                  "truncate tracking-tight text-[10.5px] leading-tight transition-colors duration-200",
-                  isActive ? "text-white font-bold" : "text-slate-600 font-medium"
-                )}>
-                  {item.label}
+              />
+              {unreadNotificationCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-bold px-1 ring-2 ring-white dark:ring-[#121814]"
+                  aria-hidden="true"
+                >
+                  {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
                 </span>
-
-                {/* Icon placed DOWN */}
-                <div className="relative flex items-center justify-center transition-transform duration-200">
-                  <Icon className={cn("h-5 w-5 transition-transform duration-200", isActive && "scale-105 stroke-[2.3]")} />
-                  {item.to === "/alerts" && unreadNotificationCount > 0 ? (
-                    <span
-                      className={cn(
-                        "absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2 transition-colors",
-                        isActive
-                          ? "bg-white text-emerald-800 ring-emerald-700 shadow-xs"
-                          : "bg-rose-500 text-white ring-white"
-                      )}
-                      aria-hidden="true"
-                    >
-                      {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
-                    </span>
-                  ) : null}
-                </div>
-              </NavLink>
-            );
-          })}
+              )}
+            </div>
+            <span
+              className={cn(
+                "truncate text-[10.5px] leading-tight transition-colors duration-200",
+                location.pathname.startsWith("/alerts")
+                  ? "font-bold text-primary dark:text-emerald-400"
+                  : "font-medium"
+              )}
+            >
+              Alerts
+            </span>
+          </NavLink>
         </div>
       </nav>
 

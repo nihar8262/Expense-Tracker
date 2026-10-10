@@ -15,7 +15,6 @@ import { listBankAccounts } from "../services/api";
 import {
   User as UserIcon,
   Wallet as WalletIcon,
-  TrendingUp,
   Plus,
   CreditCard,
   Receipt,
@@ -308,7 +307,7 @@ export function DashboardPage({
     return data.sort((a, b) => b.value - a.value);
   }, [activeExpenses, selectedCategoryBreakdown, dashboardStats.categoryBreakdown]);
 
-  const { bankSpendsData, cardTypeData } = useMemo(() => {
+  const bankSpendsData = useMemo(() => {
     const bankMap = new Map<string, {
       key: string;
       bankId?: string;
@@ -320,8 +319,6 @@ export function DashboardPage({
       amount: number;
       count: number;
     }>();
-
-    const typeMap = new Map<string, { type: string; label: string; amount: number; count: number }>();
 
     let totalSpent = 0;
 
@@ -358,61 +355,15 @@ export function DashboardPage({
       existing.amount += amt;
       existing.count += 1;
       bankMap.set(key, existing);
-
-      // Determine Payment Instrument Type:
-      let cardType: string = "cash";
-      let cardLabel: string = "Cash / Unassigned";
-
-      if (finalAccountType) {
-        cardType = finalAccountType;
-        if (cardType === "credit") cardLabel = "Credit Card";
-        else if (cardType === "debit") cardLabel = "Debit Card";
-        else if (cardType === "rupay_credit") cardLabel = "RuPay Credit";
-        else if (cardType === "cash") cardLabel = "Cash";
-      } else {
-        // Fallback heuristics when unlinked to a registered account
-        const bLower = finalBankName.toLowerCase();
-        if (bLower.includes("rupay")) {
-          cardType = "rupay_credit";
-          cardLabel = "RuPay Credit";
-        } else if (bLower.includes("credit")) {
-          cardType = "credit";
-          cardLabel = "Credit Card";
-        } else if (bLower.includes("debit") || bLower.includes("savings") || bLower.includes("salary")) {
-          cardType = "debit";
-          cardLabel = "Debit Card";
-        } else if (finalBankName !== "Cash / Other" && finalBankName !== "Cash" && finalBankName !== "") {
-          cardType = "debit";
-          cardLabel = "Debit Card";
-        } else {
-          cardType = "cash";
-          cardLabel = "Cash / Unassigned";
-        }
-      }
-
-      const existingType = typeMap.get(cardType) || { type: cardType, label: cardLabel, amount: 0, count: 0 };
-      existingType.amount += amt;
-      existingType.count += 1;
-      typeMap.set(cardType, existingType);
     }
 
-    const banks = Array.from(bankMap.values())
+    return Array.from(bankMap.values())
       .map((item) => ({
         ...item,
         share: totalSpent > 0 ? (item.amount / totalSpent) * 100 : 0,
         formattedAmount: formatCurrency(item.amount.toFixed(2), activeCurrency)
       }))
       .sort((a, b) => b.amount - a.amount);
-
-    const cardTypes = Array.from(typeMap.values())
-      .map((item) => ({
-        ...item,
-        share: totalSpent > 0 ? (item.amount / totalSpent) * 100 : 0,
-        formattedAmount: formatCurrency(item.amount.toFixed(2), activeCurrency)
-      }))
-      .sort((a, b) => b.amount - a.amount);
-
-    return { bankSpendsData: banks, cardTypeData: cardTypes };
   }, [activeExpenses, userAccounts, formatCurrency, activeCurrency]);
 
   const pieChartColors = ["#1e7a53", "#d4a857", "#2e9a6e", "#e2b86c", "#41b585", "#5ca890", "#829085"];
@@ -508,25 +459,6 @@ export function DashboardPage({
           <p className="text-xs text-muted mt-0.5">
             Overview of spending velocity, category limits, instruments, and budgets.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            className="ui-button-secondary text-xs px-3 py-1.5 flex items-center gap-1.5"
-            onClick={() => trendSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          >
-            <TrendingUp className="size-3.5 text-primary" />
-            <span>Spend Trends</span>
-          </button>
-          <button
-            type="button"
-            className="ui-button-primary text-xs px-3.5 py-1.5 flex items-center gap-1.5 shadow-sm"
-            onClick={() => void navigate("/expenses")}
-          >
-            <Plus className="size-3.5" />
-            <span>Add expense</span>
-          </button>
         </div>
       </div>
 
@@ -933,8 +865,6 @@ export function DashboardPage({
         onBudgetHistoryRangeChange={onBudgetHistoryRangeChange}
         onOpenBudgetHistory={onOpenBudgetHistory}
         onCloseBudgetHistory={onCloseBudgetHistory}
-        bankSpends={bankSpendsData}
-        userAccounts={userAccounts}
       />
 
       <section className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -1050,9 +980,9 @@ export function DashboardPage({
         </SurfaceCard>
       </section>
 
-      {/* Bank & Payment Method Spends Section */}
-      <section className="grid w-full min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <SurfaceCard className="min-w-0 overflow-hidden space-y-4 p-4 sm:p-5">
+      {/* Bank & Card Spends Section */}
+      <section className="w-full min-w-0">
+        <SurfaceCard className="min-w-0 overflow-hidden space-y-4 p-4 sm:p-5 sm:p-6">
           <SectionHeader
             title="Bank & card spends"
             description="Spending aggregated by bank account and card across your active view."
@@ -1063,11 +993,11 @@ export function DashboardPage({
               description="Assign bank accounts or cards to expenses to unlock bank-level spend breakdown."
             />
           ) : (
-            <div className="space-y-3.5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {bankSpendsData.map((item) => (
                 <div
                   key={item.key}
-                  className="space-y-1.5 py-1.5 px-2 -mx-2 rounded-xl transition hover:bg-black/[0.02]"
+                  className="rounded-xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-800/40 p-3 space-y-2.5 shadow-2xs hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -1086,16 +1016,18 @@ export function DashboardPage({
                           {item.lastFourDigits && (
                             <span>•••• {item.lastFourDigits}</span>
                           )}
-                          <span>({item.count} {item.count === 1 ? "expense" : "expenses"})</span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-baseline gap-1.5 shrink-0">
-                      <span className="text-sm font-semibold text-ink">{item.formattedAmount}</span>
+                    <div className="flex flex-col items-end shrink-0">
+                      <span className="text-sm font-bold text-ink">{item.formattedAmount}</span>
                       <span className="text-[10px] font-medium text-muted">({item.share.toFixed(0)}%)</span>
                     </div>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.04]">
+                  <div className="flex items-center justify-between text-[11px] text-muted">
+                    <span>{item.count} {item.count === 1 ? "expense" : "expenses"}</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-black/[0.04] dark:bg-white/[0.06]">
                     <div
                       className="h-full rounded-full bg-[linear-gradient(90deg,#0ea5e9,var(--primary))]"
                       style={{ width: `${Math.max(item.share, 4)}%` }}
@@ -1103,89 +1035,6 @@ export function DashboardPage({
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-        </SurfaceCard>
-
-        {/* Card Type Distribution */}
-        <SurfaceCard className="flex h-full min-w-0 max-w-full flex-col overflow-hidden space-y-4 p-4 sm:p-5 sm:p-6">
-          <SectionHeader
-            title="Payment type ratio"
-            description="Debit cards vs Credit cards vs RuPay vs Cash."
-          />
-          {cardTypeData.length === 0 ? (
-            <EmptyState
-              title="No card data yet"
-              description="Add expenses with bank cards to view your payment instruments split."
-            />
-          ) : (
-            <div className="space-y-4 my-auto">
-              {/* Pie / Donut Chart */}
-              <div className="h-44 w-full flex items-center justify-center relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={cardTypeData}
-                      dataKey="amount"
-                      nameKey="label"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={42}
-                      outerRadius={68}
-                      paddingAngle={3}
-                      stroke="none"
-                    >
-                      {cardTypeData.map((item) => {
-                        const color =
-                          item.type === "debit"
-                            ? "#3b82f6"
-                            : item.type === "credit"
-                            ? "#a855f7"
-                            : item.type === "rupay_credit"
-                            ? "#f97316"
-                            : item.type === "cash"
-                            ? "#10b981"
-                            : "#64748b";
-                        return <Cell key={item.type} fill={color} />;
-                      })}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(val: any, name: any) => [
-                        formatCurrency(Number(val).toFixed(2), activeCurrency),
-                        name
-                      ]}
-                      contentStyle={{
-                        backgroundColor: "rgba(15, 23, 42, 0.9)",
-                        borderColor: "rgba(255, 255, 255, 0.1)",
-                        borderRadius: "12px",
-                        fontSize: "12px",
-                        color: "#fff",
-                        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)"
-                      }}
-                      itemStyle={{ color: "#fff" }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Payment Type Breakdown Cards */}
-              <div className="grid gap-2 sm:grid-cols-2">
-                {cardTypeData.map((item) => (
-                  <div key={item.type} className="rounded-xl border border-[color:var(--border)] bg-white/70 dark:bg-zinc-800/50 p-2.5 space-y-1.5 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <BankCardBadge type={item.type === "rupay_credit" ? "rupay_credit" : item.type === "credit" ? "credit" : item.type === "debit" ? "debit" : "other"} />
-                        <span className="text-xs font-semibold text-ink truncate">{item.label}</span>
-                      </div>
-                      <span className="text-xs font-bold text-ink shrink-0">{item.formattedAmount}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] text-muted">
-                      <span>{item.count} {item.count === 1 ? "transaction" : "transactions"}</span>
-                      <span className="font-semibold text-primary">{item.share.toFixed(0)}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </SurfaceCard>

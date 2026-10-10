@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "./ui";
 
 export type FilterOption = {
@@ -44,18 +45,70 @@ export function FilterDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const [coords, setCoords] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  }>({ left: 0, width: 0, maxHeight: 240 });
 
   const selectedOption = options.find((opt) => opt.value === value);
 
   // Auto-enable search if there are more than 6 options unless explicitly passed
   const isSearchable = searchable ?? options.length > 7;
 
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    // Show above if space below is too tight (< 180px) AND space above is greater
+    const showAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
+    const availableHeight = showAbove ? Math.max(120, spaceAbove - 16) : Math.max(120, spaceBelow - 16);
+    const maxHeight = Math.min(260, availableHeight);
+
+    const width = Math.max(rect.width, 180);
+    let left = align === "right" ? rect.right - width : rect.left;
+    if (left + width > window.innerWidth - 8) {
+      left = window.innerWidth - width - 8;
+    }
+    if (left < 8) {
+      left = 8;
+    }
+
+    setCoords({
+      top: showAbove ? undefined : Math.round(rect.bottom + 6),
+      bottom: showAbove ? Math.round(window.innerHeight - rect.top + 6) : undefined,
+      left: Math.round(left),
+      width: Math.round(width),
+      maxHeight: Math.round(maxHeight)
+    });
+  };
+
   useEffect(() => {
+    if (!isOpen) return;
+
+    updatePosition();
+
+    const handleResize = () => updatePosition();
+    const handleScroll = () => updatePosition();
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleScroll, true);
+
     function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
+        triggerRef.current &&
+        !triggerRef.current.contains(target) &&
+        menuRef.current &&
+        !menuRef.current.contains(target)
       ) {
         setIsOpen(false);
       }
@@ -64,22 +117,24 @@ export function FilterDropdown({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     }
 
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleKeyDown);
-      if (isSearchable) {
-        requestAnimationFrame(() => searchInputRef.current?.focus());
-      }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+
+    if (isSearchable) {
+      requestAnimationFrame(() => searchInputRef.current?.focus());
     }
 
     return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleScroll, true);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, isSearchable]);
+  }, [isOpen, isSearchable, align]);
 
   const filteredOptions = options.filter((opt) =>
     opt.label.toLowerCase().includes(search.trim().toLowerCase())
@@ -88,8 +143,18 @@ export function FilterDropdown({
   const isDefaultSelected = value === "" || value === "all" || value === "none";
   const hasError = Boolean(error);
 
+  const toggleDropdown = () => {
+    if (!isOpen) {
+      updatePosition();
+      setSearch("");
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  };
+
   return (
-    <div ref={containerRef} className={cn("relative inline-block text-left w-full", isOpen && "z-50", className)}>
+    <div ref={containerRef} className={cn("relative inline-block text-left w-full", className)}>
       {label ? (
         <span
           className={cn(
@@ -103,12 +168,10 @@ export function FilterDropdown({
       ) : null}
 
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
-        onClick={() => {
-          setIsOpen((prev) => !prev);
-          setSearch("");
-        }}
+        onClick={toggleDropdown}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-invalid={hasError}
@@ -151,88 +214,99 @@ export function FilterDropdown({
         <span className="mt-1 block text-sm text-[color:var(--danger-text)]">{error}</span>
       ) : null}
 
-      {isOpen && (
-        <div
-          className={cn(
-            "absolute top-full mt-1.5 z-[100] min-w-full w-full rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-900 p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95",
-            align === "right" ? "right-0" : "left-0"
-          )}
-          role="listbox"
-        >
-          {isSearchable && (
-            <div className="p-1.5 border-b border-[color:var(--border)] mb-1">
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="w-full rounded-lg border border-[color:var(--border)] bg-zinc-50 dark:bg-zinc-800 px-2.5 py-1.5 text-xs text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
-              />
-            </div>
-          )}
-
-          <div className="max-h-60 overflow-y-auto space-y-0.5 custom-scrollbar">
-            {filteredOptions.length === 0 ? (
-              <div className="py-3 px-2 text-center text-xs text-muted">
-                No matching options
+      {isOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              top: coords.top !== undefined ? `${coords.top}px` : undefined,
+              bottom: coords.bottom !== undefined ? `${coords.bottom}px` : undefined,
+              left: `${coords.left}px`,
+              width: `${coords.width}px`,
+              zIndex: 99999,
+            }}
+            className="rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-900 p-1.5 shadow-2xl animate-in fade-in-0 zoom-in-95"
+            role="listbox"
+          >
+            {isSearchable && (
+              <div className="p-1.5 border-b border-[color:var(--border)] mb-1">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full rounded-lg border border-[color:var(--border)] bg-zinc-50 dark:bg-zinc-800 px-2.5 py-1.5 text-xs text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
               </div>
-            ) : (
-              filteredOptions.map((opt) => {
-                const isSelected = opt.value === value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => {
-                      onChange(opt.value);
-                      setIsOpen(false);
-                      setSearch("");
-                    }}
-                    className={cn(
-                      "flex items-center justify-between gap-2.5 w-full rounded-lg px-2.5 py-2 text-xs text-left transition-colors cursor-pointer",
-                      isSelected
-                        ? "bg-primary/10 font-semibold text-primary"
-                        : "text-secondary hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-ink"
-                    )}
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      {opt.icon ? (
-                        <span className="shrink-0">{opt.icon}</span>
-                      ) : null}
-                      <span className="truncate">{opt.label}</span>
-                      {opt.badge ? (
-                        <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-100 text-muted">
-                          {opt.badge}
-                        </span>
-                      ) : null}
-                    </span>
-
-                    {/* Green tick on selected filter */}
-                    {isSelected ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="h-4 w-4 shrink-0 text-emerald-600"
-                        aria-hidden="true"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    ) : null}
-                  </button>
-                );
-              })
             )}
-          </div>
-        </div>
-      )}
+
+            <div
+              style={{ maxHeight: `${coords.maxHeight}px` }}
+              className="overflow-y-auto space-y-0.5 custom-scrollbar"
+            >
+              {filteredOptions.length === 0 ? (
+                <div className="py-3 px-2 text-center text-xs text-muted">
+                  No matching options
+                </div>
+              ) : (
+                filteredOptions.map((opt) => {
+                  const isSelected = opt.value === value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => {
+                        onChange(opt.value);
+                        setIsOpen(false);
+                        setSearch("");
+                      }}
+                      className={cn(
+                        "flex items-center justify-between gap-2.5 w-full rounded-lg px-2.5 py-2 text-xs text-left transition-colors cursor-pointer",
+                        isSelected
+                          ? "bg-primary/10 font-semibold text-primary"
+                          : "text-secondary hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-ink"
+                      )}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        {opt.icon ? (
+                          <span className="shrink-0">{opt.icon}</span>
+                        ) : null}
+                        <span className="truncate">{opt.label}</span>
+                        {opt.badge ? (
+                          <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-muted">
+                            {opt.badge}
+                          </span>
+                        ) : null}
+                      </span>
+
+                      {isSelected ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="h-4 w-4 shrink-0 text-emerald-600"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      ) : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

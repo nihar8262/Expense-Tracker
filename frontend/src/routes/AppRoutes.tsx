@@ -8,6 +8,7 @@ import { useExpenses } from "../hooks/useExpenses";
 import { useNotifications } from "../hooks/useNotifications";
 import { useWallets } from "../hooks/useWallets";
 import { SignedInLayout } from "../layouts/SignedInLayout";
+import { AddExpenseModal } from "../components/AddExpenseModal";
 import { AlertsPage } from "../pages/AlertsPage";
 import { AuthPage } from "../pages/AuthPage";
 import { DashboardPage } from "../pages/DashboardPage";
@@ -416,6 +417,7 @@ export function AppRoutes() {
     updateWalletReminderPreferences
   } = useNotifications();
   const [form, setForm] = useState<ExpenseForm>(initialFormState);
+  const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
   const [budgetForm, setBudgetForm] = useState<BudgetForm>(initialBudgetFormState);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalPersonalExpenses, setTotalPersonalExpenses] = useState(0);
@@ -3356,6 +3358,7 @@ export function AppRoutes() {
         await updateExpense(editingExpenseId, form, currentUser);
         setEditingExpenseId(null);
         setForm(initialFormState);
+        setIsAddExpenseModalOpen(false);
         setStatusMessage("Expense updated.");
         await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
         void loadPersonalAggregation(currentUser);
@@ -3377,6 +3380,7 @@ export function AppRoutes() {
       await createExpense(form, idempotencyKey, currentUser);
       writePendingSubmission(null);
       setForm(initialFormState);
+      setIsAddExpenseModalOpen(false);
       setStatusMessage("Expense saved.");
       await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
@@ -3651,6 +3655,11 @@ export function AppRoutes() {
         onOpenDeleteAccountModal={openDeleteAccountModal}
         onCloseDeleteAccountModal={closeDeleteAccountModal}
         onDeleteAccount={handleDeleteAccount}
+        onOpenAddExpenseModal={() => {
+          setEditingExpenseId(null);
+          setForm(createInitialFormState());
+          setIsAddExpenseModalOpen(true);
+        }}
       >
         {page === "dashboard" ? (
           <ErrorBoundary>
@@ -3870,6 +3879,32 @@ export function AppRoutes() {
             isDeletingAccount={isDeletingAccount}
           />
         )}
+
+        <AddExpenseModal
+          isOpen={isAddExpenseModalOpen}
+          onClose={() => {
+            setIsAddExpenseModalOpen(false);
+            if (editingExpenseId) {
+              handleEditCancel();
+            }
+          }}
+          form={form}
+          onFormChange={setForm}
+          onSubmit={handleSubmit}
+          isSubmitting={isSubmitting}
+          currentUserPresent={Boolean(currentUser)}
+          currencySymbol={getCurrencySymbol(reminderPreferences?.default_currency)}
+          availableCategoryOptions={availableCategoryOptions}
+          onCategorySelect={handleCategorySelect}
+          selectedCategoryOption={selectedCategoryOption}
+          customCategoryName={customCategoryName}
+          onCustomCategoryNameChange={setCustomCategoryName}
+          onCreateCustomCategory={handleCreateCustomCategory}
+          editingExpenseId={editingExpenseId}
+          onEditCancel={handleEditCancel}
+          statusMessage={statusMessage}
+          errorMessage={errorMessage}
+        />
       </SignedInLayout>
     );
   }

@@ -123,6 +123,43 @@ export function PlatformPicker({
 
   const isInteractive = Boolean(onChange) && !disabled;
 
+  const [coords, setCoords] = useState<{
+    top?: number;
+    bottom?: number;
+    left: number;
+  }>({ left: 0 });
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const width = 260;
+
+    const showAbove = spaceBelow < 280 && spaceAbove > spaceBelow;
+    let left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+
+    setCoords({
+      top: showAbove ? undefined : Math.round(rect.bottom + 8),
+      bottom: showAbove ? Math.round(window.innerHeight - rect.top + 8) : undefined,
+      left: Math.round(left)
+    });
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      const handleResize = () => updatePosition();
+      const handleScroll = () => updatePosition();
+      window.addEventListener("resize", handleResize);
+      window.addEventListener("scroll", handleScroll, true);
+      return () => {
+        window.removeEventListener("resize", handleResize);
+        window.removeEventListener("scroll", handleScroll, true);
+      };
+    }
+  }, [isOpen]);
+
   // Find selected platform details
   const selectedPlatform = findPlatform(value);
 
@@ -379,14 +416,22 @@ export function PlatformPicker({
         document.body
       )}
 
-      {/* Desktop Popover (Absolute Positioned Dropdown) */}
-      {isOpen && (
+      {/* Desktop Popover via Portal */}
+      {isOpen && typeof document !== "undefined" && createPortal(
         <div
+          ref={portalRef}
           role="dialog"
           aria-modal="true"
           aria-label="Select source platform"
+          style={{
+            position: "fixed",
+            top: coords.top !== undefined ? `${coords.top}px` : undefined,
+            bottom: coords.bottom !== undefined ? `${coords.bottom}px` : undefined,
+            left: `${coords.left}px`,
+            zIndex: 99999,
+          }}
           className={cn(
-            "hidden sm:block absolute top-full left-0 mt-2 w-64 rounded-[24px] border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-xl z-50 transition-all duration-150 ease-out origin-top-left",
+            "hidden sm:block w-64 rounded-[24px] border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-2xl transition-all duration-150 ease-out origin-top-left",
             animate ? "opacity-100 scale-100" : "opacity-0 scale-95"
           )}
         >
@@ -451,7 +496,8 @@ export function PlatformPicker({
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
