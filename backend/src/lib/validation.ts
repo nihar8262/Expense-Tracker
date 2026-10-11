@@ -64,7 +64,7 @@ export const expensesQuerySchema = z.object({
   from_date: z.string().trim().refine(isValidIsoDate, "From date must be a valid YYYY-MM-DD value.").optional(),
   to_date: z.string().trim().refine(isValidIsoDate, "To date must be a valid YYYY-MM-DD value.").optional(),
   search: z.string().trim().max(100).optional(),
-  sort: z.enum(["date_desc", "date_asc", "none"]).optional(),
+  sort: z.enum(["date_desc", "date_asc", "amount_desc", "amount_asc", "none"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional()
 });

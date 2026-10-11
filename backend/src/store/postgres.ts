@@ -1697,7 +1697,15 @@ export function createPostgresExpenseStore(): ExpenseStore {
           ${fromDate ? sql`AND expense_date >= ${fromDate}` : sql``}
           ${toDate ? sql`AND expense_date <= ${toDate}` : sql``}
           ${searchPattern ? sql`AND (description ILIKE ${searchPattern} OR category ILIKE ${searchPattern})` : sql``}
-        ${query.sort === "date_asc" ? sql`ORDER BY expense_date ASC, created_at ASC` : sql`ORDER BY expense_date DESC, created_at DESC`}
+        ${
+          query.sort === "date_asc"
+            ? sql`ORDER BY expense_date ASC, created_at ASC`
+            : query.sort === "amount_desc"
+              ? sql`ORDER BY amount_minor DESC, expense_date DESC, created_at DESC`
+              : query.sort === "amount_asc"
+                ? sql`ORDER BY amount_minor ASC, expense_date DESC, created_at DESC`
+                : sql`ORDER BY expense_date DESC, created_at DESC`
+        }
         LIMIT ${limit}
         OFFSET ${offset}
       `;

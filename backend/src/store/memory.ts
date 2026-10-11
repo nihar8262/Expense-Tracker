@@ -1069,6 +1069,16 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
           const byDate = left.date.localeCompare(right.date);
           return byDate !== 0 ? byDate : left.createdAt.localeCompare(right.createdAt);
         }
+        if (query.sort === "amount_desc") {
+          const diff = Number(right.amountMinor) - Number(left.amountMinor);
+          if (diff !== 0) return diff;
+          return right.date.localeCompare(left.date);
+        }
+        if (query.sort === "amount_asc") {
+          const diff = Number(left.amountMinor) - Number(right.amountMinor);
+          if (diff !== 0) return diff;
+          return right.date.localeCompare(left.date);
+        }
         const byDate = right.date.localeCompare(left.date);
         return byDate !== 0 ? byDate : right.createdAt.localeCompare(left.createdAt);
       });

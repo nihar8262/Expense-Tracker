@@ -32,6 +32,7 @@ import type {
   DashboardStats,
   Expense,
   ExpenseForm,
+  ExpenseSortOption,
   Notification,
   PersonalAggregation,
   ReminderPreferences,
@@ -529,7 +530,8 @@ export function AppRoutes() {
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
   const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
   const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
-  const [sortNewestFirst, setSortNewestFirst] = useState(true);
+  const [expensesSort, setExpensesSort] = useState<ExpenseSortOption>("date_desc");
+  const sortNewestFirst = expensesSort === "date_desc";
   const [currentExpensesPage, setCurrentExpensesPage] = useState(1);
   const [walletExpenseOffset, setWalletExpenseOffset] = useState(0);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
@@ -1723,7 +1725,7 @@ export function AppRoutes() {
   async function loadExpenses(
     user: User,
     activeCategory = selectedCategory,
-    activeSort = sortNewestFirst,
+    activeSort: ExpenseSortOption | boolean = expensesSort,
     page = currentExpensesPage,
     platform = selectedPlatform,
     timeRange = selectedTimeRange
@@ -1760,13 +1762,20 @@ export function AppRoutes() {
         to_date = `${today.getFullYear()}-12-31`;
       }
 
+      const resolvedSort: ExpenseSortOption =
+        typeof activeSort === "string"
+          ? activeSort
+          : activeSort
+            ? "date_desc"
+            : "date_asc";
+
       const res = await listExpenses(user, {
         category: activeCategory || undefined,
         platform: platform || undefined,
         month,
         from_date,
         to_date,
-        sort: activeSort ? "date_desc" : "date_asc",
+        sort: resolvedSort,
         limit: EXPENSES_PAGE_SIZE,
         offset: (page - 1) * EXPENSES_PAGE_SIZE
       });
@@ -1974,21 +1983,21 @@ export function AppRoutes() {
       return;
     }
 
-    void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+    void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
     void loadPersonalAggregation(currentUser);
     void loadDashboardExpenses(currentUser);
-  }, [authLoading, currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
+  }, [authLoading, currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
   useEffect(() => {
     if (!currentUser) return;
     const handleExpenseAdded = () => {
-      void loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+      void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
       void loadDashboardExpenses(currentUser);
     };
     window.addEventListener("expense-added", handleExpenseAdded);
     return () => window.removeEventListener("expense-added", handleExpenseAdded);
-  }, [currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange]);
+  }, [currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange]);
 
   // Load Preferences & Notifications on login
   useEffect(() => {
@@ -2102,7 +2111,7 @@ export function AppRoutes() {
 
   useEffect(() => {
     setCurrentExpensesPage(1);
-  }, [selectedCategory, selectedTimeRange, sortNewestFirst]);
+  }, [selectedCategory, selectedTimeRange, expensesSort]);
 
   useEffect(() => {
     if (currentExpensesPage > totalExpensePages) {
@@ -2271,7 +2280,7 @@ export function AppRoutes() {
 
       if (deletedExpenseIds.length > 0) {
         setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
-        await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+        await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
         void loadPersonalAggregation(currentUser);
         void loadDashboardExpenses(currentUser);
       }
@@ -3360,7 +3369,7 @@ export function AppRoutes() {
         setForm(initialFormState);
         setIsAddExpenseModalOpen(false);
         setStatusMessage("Expense updated.");
-        await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+        await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
         void loadPersonalAggregation(currentUser);
         void loadDashboardExpenses(currentUser);
       } catch (error) {
@@ -3382,7 +3391,7 @@ export function AppRoutes() {
       setForm(initialFormState);
       setIsAddExpenseModalOpen(false);
       setStatusMessage("Expense saved.");
-      await loadExpenses(currentUser, selectedCategory, sortNewestFirst, currentExpensesPage, selectedPlatform, selectedTimeRange);
+      await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
       void loadDashboardExpenses(currentUser);
       void runChecksAndReloadNotifications(currentUser);
@@ -3599,7 +3608,7 @@ export function AppRoutes() {
     setSelectedCategory("");
     setSelectedTimeRange("all");
     setSelectedPlatform("");
-    setSortNewestFirst(true);
+    setExpensesSort("date_desc");
     setCurrentExpensesPage(1);
   }
 
@@ -3759,6 +3768,7 @@ export function AppRoutes() {
             selectedCategory={selectedCategory}
             selectedTimeRange={selectedTimeRange}
             selectedPlatform={selectedPlatform}
+            selectedSort={expensesSort}
             sortNewestFirst={sortNewestFirst}
             categories={categories}
             expenseMonthOptions={expenseMonthOptions}
@@ -3785,7 +3795,8 @@ export function AppRoutes() {
             onSubmit={handleSubmit}
             onEditCancel={handleEditCancel}
             onSelectedCategoryChange={setSelectedCategory}
-            onSortNewestFirstChange={setSortNewestFirst}
+            onSelectedSortChange={setExpensesSort}
+            onSortNewestFirstChange={(isNewest) => setExpensesSort(isNewest ? "date_desc" : "none")}
             onSelectedTimeRangeChange={setSelectedTimeRange}
             onSelectedPlatformChange={setSelectedPlatform}
             onExpensesPageChange={setCurrentExpensesPage}

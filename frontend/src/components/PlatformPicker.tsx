@@ -119,7 +119,8 @@ export function PlatformPicker({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const portalRef = useRef<HTMLDivElement | null>(null);
+  const mobilePortalRef = useRef<HTMLDivElement | null>(null);
+  const desktopPortalRef = useRef<HTMLDivElement | null>(null);
 
   const isInteractive = Boolean(onChange) && !disabled;
 
@@ -177,20 +178,27 @@ export function PlatformPicker({
 
   // Click outside listener
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (!target) return;
+
       if (
         containerRef.current &&
-        !containerRef.current.contains(event.target as Node) &&
-        (!portalRef.current || !portalRef.current.contains(event.target as Node))
+        !containerRef.current.contains(target) &&
+        (!mobilePortalRef.current || !mobilePortalRef.current.contains(target)) &&
+        (!desktopPortalRef.current || !desktopPortalRef.current.contains(target))
       ) {
         setIsOpen(false);
       }
     };
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside, { passive: true });
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
     };
   }, [isOpen]);
 
@@ -317,13 +325,13 @@ export function PlatformPicker({
       {/* Mobile Bottom Sheet (Portal to document.body to avoid clipping & stacking context bugs) */}
       {isOpen && typeof document !== "undefined" && createPortal(
         <div
-          ref={portalRef}
-          className="sm:hidden fixed inset-0 z-[200] flex items-end justify-center"
+          ref={mobilePortalRef}
+          className="sm:hidden fixed inset-0 z-[99999] flex items-end justify-center"
         >
           {/* Backdrop */}
           <div
             className={cn(
-              "fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ease-out",
+              "fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ease-out cursor-pointer",
               animate ? "opacity-100" : "opacity-0"
             )}
             onClick={(e) => {
@@ -338,7 +346,7 @@ export function PlatformPicker({
             aria-modal="true"
             aria-label="Select source platform"
             className={cn(
-              "fixed bottom-0 left-0 right-0 w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out z-[200]",
+              "fixed bottom-0 left-0 right-0 w-full max-h-[80vh] overflow-y-auto overscroll-contain rounded-t-[28px] border-t border-white/20 bg-white dark:bg-zinc-900 p-6 shadow-2xl transition-transform duration-300 ease-out z-[99999]",
               animate ? "translate-y-0" : "translate-y-full"
             )}
             onClick={(e) => e.stopPropagation()}
@@ -419,7 +427,7 @@ export function PlatformPicker({
       {/* Desktop Popover via Portal */}
       {isOpen && typeof document !== "undefined" && createPortal(
         <div
-          ref={portalRef}
+          ref={desktopPortalRef}
           role="dialog"
           aria-modal="true"
           aria-label="Select source platform"

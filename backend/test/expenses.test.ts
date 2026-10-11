@@ -98,6 +98,50 @@ describe("expenses API", () => {
     expect(response.body.expenses[1].date).toBe("2026-04-09");
   });
 
+  it("filters and sorts expenses by amount descending (price cap)", async () => {
+    const app = buildApp();
+
+    await request(app)
+      .post("/api/expenses")
+      .set("Authorization", "Bearer user-one")
+      .set("Idempotency-Key", "amt-1")
+      .send({
+        amount: "50.00",
+        category: "Food",
+        description: "Small snack",
+        date: "2026-04-01"
+      });
+
+    await request(app)
+      .post("/api/expenses")
+      .set("Authorization", "Bearer user-one")
+      .set("Idempotency-Key", "amt-2")
+      .send({
+        amount: "500.00",
+        category: "Food",
+        description: "Big dinner",
+        date: "2026-04-02"
+      });
+
+    const descResponse = await request(app)
+      .get("/api/expenses")
+      .set("Authorization", "Bearer user-one")
+      .query({ category: "Food", sort: "amount_desc" });
+
+    expect(descResponse.status).toBe(200);
+    expect(descResponse.body.expenses[0].amount).toBe("500.00");
+    expect(descResponse.body.expenses[1].amount).toBe("50.00");
+
+    const ascResponse = await request(app)
+      .get("/api/expenses")
+      .set("Authorization", "Bearer user-one")
+      .query({ category: "Food", sort: "amount_asc" });
+
+    expect(ascResponse.status).toBe(200);
+    expect(ascResponse.body.expenses[0].amount).toBe("50.00");
+    expect(ascResponse.body.expenses[1].amount).toBe("500.00");
+  });
+
   it("rejects a reused idempotency key for a different payload", async () => {
     const app = buildApp();
 

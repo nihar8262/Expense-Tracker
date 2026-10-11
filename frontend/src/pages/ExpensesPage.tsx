@@ -8,7 +8,7 @@ import { EmptyState, ItemActionButtons, ModalFrame, StatusNotice, SurfaceCard, c
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { Plus, Trash2, RotateCcw, X, Receipt } from "lucide-react";
-import type { CategoryOption, Expense, ExpenseForm, TimeRangeFilter } from "../types";
+import type { CategoryOption, Expense, ExpenseForm, ExpenseSortOption, TimeRangeFilter } from "../types";
 import { formatBudgetMonth } from "../utils/format";
 
 type ExpensesPageProps = {
@@ -23,7 +23,8 @@ type ExpensesPageProps = {
   selectedCategory: string;
   selectedTimeRange: TimeRangeFilter;
   selectedPlatform: string;
-  sortNewestFirst: boolean;
+  selectedSort?: ExpenseSortOption;
+  sortNewestFirst?: boolean;
   categories: string[];
   expenseMonthOptions: string[];
   visibleExpenses: Expense[];
@@ -48,7 +49,8 @@ type ExpensesPageProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onEditCancel: () => void;
   onSelectedCategoryChange: (value: string) => void;
-  onSortNewestFirstChange: (value: boolean) => void;
+  onSelectedSortChange?: (value: ExpenseSortOption) => void;
+  onSortNewestFirstChange?: (value: boolean) => void;
   onSelectedTimeRangeChange: (range: TimeRangeFilter) => void;
   onSelectedPlatformChange: (platform: string) => void;
   onExpensesPageChange: (page: number) => void;
@@ -83,7 +85,8 @@ export function ExpensesPage({
   selectedCategory,
   selectedTimeRange,
   selectedPlatform,
-  sortNewestFirst,
+  selectedSort,
+  sortNewestFirst = true,
   categories,
   expenseMonthOptions,
   visibleExpenses,
@@ -108,6 +111,7 @@ export function ExpensesPage({
   onSubmit,
   onEditCancel,
   onSelectedCategoryChange,
+  onSelectedSortChange,
   onSortNewestFirstChange,
   onSelectedTimeRangeChange,
   onSelectedPlatformChange,
@@ -216,7 +220,15 @@ export function ExpensesPage({
         : `Range: ${selectedTimeRange}`
       : null,
     selectedPlatform ? `Platform: ${selectedPlatform === "none" ? "None" : (PLATFORMS.find(p => p.id === selectedPlatform)?.name ?? selectedPlatform)}` : null,
-    !sortNewestFirst ? "Sort: created order" : null
+    selectedSort === "amount_desc"
+      ? "Sort: Price cap (High to Low)"
+      : selectedSort === "amount_asc"
+        ? "Sort: Price (Low to High)"
+        : selectedSort === "date_asc"
+          ? "Sort: Oldest first"
+          : !sortNewestFirst
+            ? "Sort: Created order"
+            : null
   ].filter(Boolean) as string[];
 
   async function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
@@ -621,12 +633,18 @@ export function ExpensesPage({
 
               <FilterDropdown
                 label="Sort"
-                value={sortNewestFirst ? "date_desc" : "none"}
+                value={selectedSort || (sortNewestFirst ? "date_desc" : "none")}
                 disabled={!currentUserPresent}
-                onChange={(val) => onSortNewestFirstChange(val === "date_desc")}
+                onChange={(val) => {
+                  const sortVal = val as ExpenseSortOption;
+                  onSelectedSortChange?.(sortVal);
+                  onSortNewestFirstChange?.(sortVal === "date_desc");
+                }}
                 options={[
                   { value: "date_desc", label: "Newest first" },
-                  { value: "none", label: "Created order" },
+                  { value: "date_asc", label: "Oldest first" },
+                  { value: "amount_desc", label: "Price cap (High to Low)" },
+                  { value: "amount_asc", label: "Price (Low to High)" },
                 ]}
               />
             </div>

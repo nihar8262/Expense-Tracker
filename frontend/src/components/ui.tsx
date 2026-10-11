@@ -70,12 +70,12 @@ type SectionHeaderProps = {
 
 export function SectionHeader({ eyebrow, title, description, actions, className }: SectionHeaderProps) {
   return (
-    <div className={cn("flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between", className)}>
-      <div className="space-y-2">
-        {eyebrow ? <p className="section-eyebrow">{eyebrow}</p> : null}
-        <div className="space-y-1.5">
-          <h2 className="text-xl font-semibold tracking-[-0.02em] text-ink sm:text-2xl">{title}</h2>
-          {description ? <p className="max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">{description}</p> : null}
+    <div className={cn("flex flex-col gap-2.5 sm:gap-4 sm:flex-row sm:items-start sm:justify-between", className)}>
+      <div className="space-y-1 sm:space-y-2">
+        {eyebrow ? <p className="section-eyebrow text-[10px] sm:text-[11px]">{eyebrow}</p> : null}
+        <div className="space-y-0.5 sm:space-y-1.5">
+          <h2 className="text-base font-semibold tracking-[-0.02em] text-ink sm:text-2xl">{title}</h2>
+          {description ? <p className="max-w-2xl text-xs leading-5 text-muted sm:text-[15px] sm:leading-6">{description}</p> : null}
         </div>
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div> : null}

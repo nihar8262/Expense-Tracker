@@ -13,6 +13,8 @@ export type Expense = {
 	bank_name?: string | null;
 };
 
+export type ExpenseSortOption = "date_desc" | "date_asc" | "amount_desc" | "amount_asc" | "none";
+
 export type ExpensesQuery = {
 	category?: string;
 	platform?: string;
@@ -20,7 +22,7 @@ export type ExpensesQuery = {
 	from_date?: string;
 	to_date?: string;
 	search?: string;
-	sort?: "date_desc" | "date_asc" | "none";
+	sort?: ExpenseSortOption;
 	limit?: number;
 	offset?: number;
 };
