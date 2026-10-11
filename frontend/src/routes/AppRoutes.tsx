@@ -351,10 +351,10 @@ export function AppRoutes() {
     }
 
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((current) => [...current, { id, type, message: cleanMsg }]);
+    setToasts((current) => [...current.slice(-2), { id, type, message: cleanMsg }]);
     setTimeout(() => {
       setToasts((current) => current.filter((t) => t.id !== id));
-    }, 10000);
+    }, 4500);
   }, []);
 
   const removeToast = useCallback((id: string) => {
@@ -4015,12 +4015,12 @@ export function AppRoutes() {
       </Routes>
 
       {/* Toasts Container */}
-      <div className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4 sm:px-0">
+      <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] sm:bottom-5 right-0 sm:right-5 left-0 sm:left-auto z-[9999] flex flex-col items-center sm:items-end gap-2 max-w-sm sm:w-full pointer-events-none px-3 sm:px-0 mx-auto sm:mx-0">
         {toasts.map((toast) => (
           <div
             key={toast.id}
             className={cn(
-              "pointer-events-auto flex items-start justify-between gap-3 rounded-[20px] border p-4 shadow-[0_20px_50px_rgba(0,0,0,0.12)] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md transition-all duration-300 animate-slide-in",
+              "pointer-events-auto flex items-center justify-between gap-2.5 rounded-xl sm:rounded-2xl border py-2 px-3 sm:py-3 sm:px-4 shadow-lg shadow-black/5 dark:shadow-black/20 sm:shadow-[0_20px_50px_rgba(0,0,0,0.12)] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md transition-all duration-300 animate-slide-in w-auto max-w-[calc(100vw-2rem)] sm:max-w-sm sm:w-full",
               toast.type === "success"
                 ? "border-emerald-500/20 text-emerald-950 dark:text-emerald-50"
                 : toast.type === "error"
@@ -4028,35 +4028,35 @@ export function AppRoutes() {
                   : "border-zinc-500/20 text-zinc-950 dark:text-zinc-50"
             )}
           >
-            <div className="flex items-start gap-2.5 min-w-0">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
               {toast.type === "success" ? (
-                <span className="text-emerald-500 mt-0.5 shrink-0">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <span className="text-emerald-500 shrink-0">
+                  <svg className="size-4 sm:size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </span>
               ) : toast.type === "error" ? (
-                <span className="text-red-500 mt-0.5 shrink-0">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <span className="text-red-500 shrink-0">
+                  <svg className="size-4 sm:size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                 </span>
               ) : (
-                <span className="text-zinc-500 mt-0.5 shrink-0">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <span className="text-zinc-500 shrink-0">
+                  <svg className="size-4 sm:size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </span>
               )}
-              <p className="text-sm font-semibold leading-5 text-ink break-words">{toast.message}</p>
+              <p className="text-xs sm:text-sm font-medium sm:font-semibold leading-snug sm:leading-5 text-ink break-words">{toast.message}</p>
             </div>
             <button
               type="button"
               onClick={() => removeToast(toast.id)}
-              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 mt-0.5 transition-colors shrink-0"
+              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors shrink-0 p-0.5 -mr-0.5"
               aria-label="Dismiss notification"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+              <svg className="size-3.5 sm:size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
