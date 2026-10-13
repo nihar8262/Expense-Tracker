@@ -1,4 +1,21 @@
+const crypto = require("crypto");
 const { getTools } = require("./assistant-tools");
+
+const HMAC_SECRET = process.env.HMAC_SECRET || process.env.SCHEDULER_SECRET || "expense-tracker-action-secret";
+
+function signActionToken(userId, tool, args) {
+  const payload = `${userId}:${tool}:${JSON.stringify(args)}`;
+  return crypto.createHmac("sha256", HMAC_SECRET).update(payload).digest("hex");
+}
+
+function verifyActionToken(userId, tool, args, token) {
+  if (!token || typeof token !== "string") return false;
+  const expected = signActionToken(userId, tool, args);
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(expected);
+  if (tokenBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
 
 const CURRENCY_SYMBOLS = {
   INR: "₹",
@@ -225,6 +242,13 @@ async function handleAssistantQuery({ messages, confirmedAction, currency }, use
 
   // 1. If there's a confirmed write action, execute it first
   if (confirmedAction) {
+    if (confirmedAction.tool === "create_expense") {
+      if (!verifyActionToken(userId, confirmedAction.tool, confirmedAction.args, confirmedAction.token)) {
+        return {
+          answer: "Security validation error: Action confirmation token is invalid or parameters have been modified."
+        };
+      }
+    }
     const tool = tools.find(t => t.name === confirmedAction.tool);
     if (tool) {
       try {
@@ -306,7 +330,8 @@ async function handleAssistantQuery({ messages, confirmedAction, currency }, use
             ),
             pendingAction: {
               tool: toolName,
-              args: toolArgs
+              args: toolArgs,
+              token: signActionToken(userId, toolName, toolArgs)
             }
           };
         }
@@ -362,6 +387,12 @@ async function handleAssistantQueryStream({ messages, confirmedAction, currency 
   }));
 
   if (confirmedAction) {
+    if (confirmedAction.tool === "create_expense") {
+      if (!verifyActionToken(userId, confirmedAction.tool, confirmedAction.args, confirmedAction.token)) {
+        onChunk("Security validation error: Action confirmation token is invalid or parameters have been modified.");
+        return;
+      }
+    }
     const tool = tools.find(t => t.name === confirmedAction.tool);
     if (tool) {
       try {
@@ -440,7 +471,11 @@ async function handleAssistantQueryStream({ messages, confirmedAction, currency 
           );
           onChunk(defaultText);
           if (onPendingAction) {
-            onPendingAction({ tool: toolName, args: toolArgs });
+            onPendingAction({
+              tool: toolName,
+              args: toolArgs,
+              token: signActionToken(userId, toolName, toolArgs)
+            });
           }
           return;
         }

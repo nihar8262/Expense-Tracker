@@ -507,6 +507,40 @@ function mapNotification(row) {
   };
 }
 
+function calculateLoanDueMinorUnits(loan, asOfDate = new Date()) {
+  const principal = Number(loan.amount_minor ?? 0);
+  const basisPoints = Number(loan.interest_rate_basis_points ?? 0);
+  const interestType = loan.interest_type ?? "percentage";
+  const period = loan.interest_rate_period ?? "monthly";
+  const startStr = loan.interest_start_date ?? loan.lending_date;
+
+  let accruedInterestMinor = 0;
+  if (basisPoints > 0) {
+    if (interestType === "fixed") {
+      accruedInterestMinor = basisPoints;
+    } else if (interestType === "percentage") {
+      const startDate = startStr ? new Date(startStr) : new Date();
+      const now = typeof asOfDate === "string" ? new Date(asOfDate) : asOfDate;
+
+      if (now >= startDate) {
+        if (period === "one-time") {
+          accruedInterestMinor = Math.round((principal * basisPoints) / 10000);
+        } else if (period === "yearly") {
+          const diffMonths = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+          const diffYears = diffMonths / 12;
+          accruedInterestMinor = Math.round((principal * (basisPoints / 10000)) * diffYears);
+        } else {
+          // monthly
+          const months = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+          accruedInterestMinor = Math.round((principal * (basisPoints / 10000)) * months);
+        }
+      }
+    }
+  }
+
+  return principal + accruedInterestMinor;
+}
+
 function readFirebaseAdminCredentials() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   let clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -1699,9 +1733,18 @@ async function updateWalletExpenseForUser(userId, walletId, walletExpenseId, raw
   await ensureSchema(sql);
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
-    const expenseRows = await tx`SELECT id FROM wallet_expenses WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}`;
+    const expenseRows = await tx`
+      SELECT we.id, w.owner_user_id, payer.user_id AS payer_user_id
+      FROM wallet_expenses we
+      INNER JOIN wallets w ON w.id = we.wallet_id
+      LEFT JOIN wallet_members payer ON payer.id = we.paid_by_member_id
+      WHERE we.id = ${walletExpenseId} AND we.wallet_id = ${walletId}
+    `;
     if (!expenseRows[0]) {
       throw new Error("Shared expense not found.");
+    }
+    if (expenseRows[0].owner_user_id !== userId && expenseRows[0].payer_user_id !== userId) {
+      throw new Error("You can only edit or delete expenses that you paid for, unless you are the wallet owner.");
     }
     const memberRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId}`;
     const memberIds = new Set(memberRows.map((row) => row.id));
@@ -1729,10 +1772,20 @@ async function deleteWalletExpenseForUser(userId, walletId, walletExpenseId) {
   await ensureSchema(sql);
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
-    const rows = await tx`DELETE FROM wallet_expenses WHERE id = ${walletExpenseId} AND wallet_id = ${walletId} RETURNING id`;
-    if (!rows[0]) {
+    const expenseRows = await tx`
+      SELECT we.id, w.owner_user_id, payer.user_id AS payer_user_id
+      FROM wallet_expenses we
+      INNER JOIN wallets w ON w.id = we.wallet_id
+      LEFT JOIN wallet_members payer ON payer.id = we.paid_by_member_id
+      WHERE we.id = ${walletExpenseId} AND we.wallet_id = ${walletId}
+    `;
+    if (!expenseRows[0]) {
       throw new Error("Shared expense not found.");
     }
+    if (expenseRows[0].owner_user_id !== userId && expenseRows[0].payer_user_id !== userId) {
+      throw new Error("You can only edit or delete expenses that you paid for, unless you are the wallet owner.");
+    }
+    await tx`DELETE FROM wallet_expenses WHERE id = ${walletExpenseId} AND wallet_id = ${walletId}`;
     return loadWalletDetail(tx, walletId);
   });
   await deleteEmbedding(sql, walletExpenseId, "wallet_expense");
@@ -1763,9 +1816,19 @@ async function updateWalletSettlementForUser(userId, walletId, settlementId, raw
   await ensureSchema(sql);
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
-    const rows = await tx`SELECT id FROM wallet_settlements WHERE id = ${settlementId} AND wallet_id = ${walletId}`;
+    const rows = await tx`
+      SELECT ws.id, w.owner_user_id, from_m.user_id AS from_user_id, to_m.user_id AS to_user_id
+      FROM wallet_settlements ws
+      INNER JOIN wallets w ON w.id = ws.wallet_id
+      LEFT JOIN wallet_members from_m ON from_m.id = ws.from_member_id
+      LEFT JOIN wallet_members to_m ON to_m.id = ws.to_member_id
+      WHERE ws.id = ${settlementId} AND ws.wallet_id = ${walletId}
+    `;
     if (!rows[0]) {
       throw new Error("Settlement not found.");
+    }
+    if (rows[0].owner_user_id !== userId && rows[0].from_user_id !== userId && rows[0].to_user_id !== userId) {
+      throw new Error("You can only edit or delete settlements you are involved in, unless you are the wallet owner.");
     }
     await tx`
       UPDATE wallet_settlements
@@ -1782,10 +1845,21 @@ async function deleteWalletSettlementForUser(userId, walletId, settlementId) {
   await ensureSchema(sql);
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
-    const rows = await tx`DELETE FROM wallet_settlements WHERE id = ${settlementId} AND wallet_id = ${walletId} RETURNING id`;
+    const rows = await tx`
+      SELECT ws.id, w.owner_user_id, from_m.user_id AS from_user_id, to_m.user_id AS to_user_id
+      FROM wallet_settlements ws
+      INNER JOIN wallets w ON w.id = ws.wallet_id
+      LEFT JOIN wallet_members from_m ON from_m.id = ws.from_member_id
+      LEFT JOIN wallet_members to_m ON to_m.id = ws.to_member_id
+      WHERE ws.id = ${settlementId} AND ws.wallet_id = ${walletId}
+    `;
     if (!rows[0]) {
       throw new Error("Settlement not found.");
     }
+    if (rows[0].owner_user_id !== userId && rows[0].from_user_id !== userId && rows[0].to_user_id !== userId) {
+      throw new Error("You can only edit or delete settlements you are involved in, unless you are the wallet owner.");
+    }
+    await tx`DELETE FROM wallet_settlements WHERE id = ${settlementId} AND wallet_id = ${walletId}`;
     return loadWalletDetail(tx, walletId);
   });
   return { status: 200, body: { wallet } };
@@ -1990,9 +2064,28 @@ async function createWalletLoanRepaymentForUser(userId, walletId, loanId, rawBod
       throw new Error("Only the wallet owner can record loan repayments.");
     }
 
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
-    if (!loanRows[0]) {
+    const loanRows = await tx`
+      SELECT id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
+      FROM wallet_loans
+      WHERE id = ${loanId} AND wallet_id = ${walletId}
+    `;
+    const loan = loanRows[0];
+    if (!loan) {
       throw new Error("Loan not found.");
+    }
+    if (loan.status === "settled") {
+      throw new Error("This loan is already settled.");
+    }
+
+    const repSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId}
+    `;
+    const totalRepaid = Number(repSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(loan, result.data.repaymentDate);
+    const remaining = Math.max(0, totalDue - totalRepaid);
+
+    if (result.data.amount > remaining) {
+      throw new Error("Repayment amount exceeds the remaining balance.");
     }
 
     await tx`
@@ -2006,6 +2099,10 @@ async function createWalletLoanRepaymentForUser(userId, walletId, loanId, rawBod
         ${new Date().toISOString()}
       )
     `;
+
+    if (totalRepaid + result.data.amount >= totalDue) {
+      await tx`UPDATE wallet_loans SET status = 'settled' WHERE id = ${loanId}`;
+    }
 
     return loadWalletDetail(tx, walletId);
   });
@@ -2030,8 +2127,13 @@ async function updateWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
       throw new Error("Only the wallet owner can update loan repayments.");
     }
 
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
-    if (!loanRows[0]) {
+    const loanRows = await tx`
+      SELECT id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
+      FROM wallet_loans
+      WHERE id = ${loanId} AND wallet_id = ${walletId}
+    `;
+    const loan = loanRows[0];
+    if (!loan) {
       throw new Error("Loan not found.");
     }
 
@@ -2045,6 +2147,17 @@ async function updateWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
     const updatedDate = result.data.repaymentDate !== undefined ? result.data.repaymentDate : asIsoDate(currentRep.repayment_date);
     const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentRep.notes;
 
+    const otherSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId} AND id <> ${repaymentId}
+    `;
+    const otherRepaid = Number(otherSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(loan, updatedDate);
+    const remaining = Math.max(0, totalDue - otherRepaid);
+
+    if (updatedAmount > remaining) {
+      throw new Error("Repayment amount exceeds the remaining balance.");
+    }
+
     await tx`
       UPDATE wallet_loan_repayments
       SET amount_minor = ${updatedAmount},
@@ -2052,6 +2165,9 @@ async function updateWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
           notes = ${updatedNotes}
       WHERE id = ${repaymentId} AND loan_id = ${loanId}
     `;
+
+    const newStatus = otherRepaid + updatedAmount >= totalDue ? "settled" : "active";
+    await tx`UPDATE wallet_loans SET status = ${newStatus} WHERE id = ${loanId}`;
 
     return loadWalletDetail(tx, walletId);
   });
@@ -2072,8 +2188,13 @@ async function deleteWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
       throw new Error("Only the wallet owner can delete loan repayments.");
     }
 
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
-    if (!loanRows[0]) {
+    const loanRows = await tx`
+      SELECT id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
+      FROM wallet_loans
+      WHERE id = ${loanId} AND wallet_id = ${walletId}
+    `;
+    const loan = loanRows[0];
+    if (!loan) {
       throw new Error("Loan not found.");
     }
 
@@ -2081,6 +2202,16 @@ async function deleteWalletLoanRepaymentForUser(userId, walletId, loanId, repaym
     if (!rows[0]) {
       throw new Error("Repayment not found.");
     }
+
+    const otherSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId}
+    `;
+    const remainingRepaid = Number(otherSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(loan);
+    if (remainingRepaid < totalDue && loan.status === "settled") {
+      await tx`UPDATE wallet_loans SET status = 'active' WHERE id = ${loanId}`;
+    }
+
     return loadWalletDetail(tx, walletId);
   });
   return { status: 200, body: { wallet } };
@@ -2576,21 +2707,37 @@ async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody, use
 
   const loan = await sql.begin(async (tx) => {
     const loanRows = await tx`
-      SELECT id, owner_user_id 
+      SELECT id, owner_user_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
       FROM wallet_loans 
       WHERE id = ${loanId} 
         AND (owner_user_id = ${userId}
              OR (${normalizedEmail}::text IS NOT NULL AND borrower_email IS NOT NULL AND lower(borrower_email) = ${normalizedEmail})
              OR borrower_member_id IN (SELECT id FROM wallet_members WHERE user_id = ${userId}))
     `;
-    if (!loanRows[0]) {
+    const currentLoan = loanRows[0];
+    if (!currentLoan) {
       throw new Error("Loan not found.");
     }
+    if (currentLoan.status === "settled") {
+      throw new Error("This loan is already settled.");
+    }
 
+    const repSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId}
+    `;
+    const totalRepaid = Number(repSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(currentLoan, result.data.repaymentDate);
+    const remaining = Math.max(0, totalDue - totalRepaid);
+
+    if (result.data.amount > remaining) {
+      throw new Error("Repayment amount exceeds the remaining balance.");
+    }
+
+    const repaymentId = randomUUID();
     await tx`
       INSERT INTO wallet_loan_repayments (id, loan_id, amount_minor, repayment_date, notes, created_at)
       VALUES (
-        ${randomUUID()},
+        ${repaymentId},
         ${loanId},
         ${result.data.amount},
         ${result.data.repaymentDate},
@@ -2599,20 +2746,25 @@ async function createStandaloneLoanRepaymentForUser(userId, loanId, rawBody, use
       )
     `;
 
-    if (loanRows[0].owner_user_id && loanRows[0].owner_user_id !== userId) {
+    if (totalRepaid + result.data.amount >= totalDue) {
+      await tx`UPDATE wallet_loans SET status = 'settled' WHERE id = ${loanId}`;
+    }
+
+    if (currentLoan.owner_user_id && currentLoan.owner_user_id !== userId) {
       const repaymentAmountStr = formatMinorUnits(result.data.amount);
       await upsertNotification(tx, {
-        userId: loanRows[0].owner_user_id,
+        userId: currentLoan.owner_user_id,
         type: "loan-repayment",
         title: `Repayment recorded: ${repaymentAmountStr}`,
         message: `A repayment of ${repaymentAmountStr} was recorded for your loan.`,
         scheduledFor: null,
         metadata: {
           loanId,
+          repaymentId,
           amount: repaymentAmountStr,
           repaymentDate: result.data.repaymentDate
         },
-        dedupeKey: `loan-repayment:${loanId}:${randomUUID()}`
+        dedupeKey: `loan-repayment:${loanId}:${repaymentId}`
       });
     }
 
@@ -2627,14 +2779,28 @@ async function deleteStandaloneLoanRepaymentForUser(userId, loanId, repaymentId)
   await ensureSchema(sql);
 
   const loan = await sql.begin(async (tx) => {
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
-    if (!loanRows[0]) {
+    const loanRows = await tx`
+      SELECT id, owner_user_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
+      FROM wallet_loans
+      WHERE id = ${loanId} AND owner_user_id = ${userId}
+    `;
+    const currentLoan = loanRows[0];
+    if (!currentLoan) {
       throw new Error("Loan not found.");
     }
 
     const rows = await tx`DELETE FROM wallet_loan_repayments WHERE id = ${repaymentId} AND loan_id = ${loanId} RETURNING id`;
     if (!rows[0]) {
       throw new Error("Repayment not found.");
+    }
+
+    const otherSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId}
+    `;
+    const remainingRepaid = Number(otherSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(currentLoan);
+    if (remainingRepaid < totalDue && currentLoan.status === "settled") {
+      await tx`UPDATE wallet_loans SET status = 'active' WHERE id = ${loanId}`;
     }
 
     return loadLoanRecord(tx, loanId);
@@ -2652,8 +2818,13 @@ async function updateStandaloneLoanRepaymentForUser(userId, loanId, repaymentId,
   await ensureSchema(sql);
 
   const loan = await sql.begin(async (tx) => {
-    const loanRows = await tx`SELECT id FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
-    if (!loanRows[0]) {
+    const loanRows = await tx`
+      SELECT id, owner_user_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, interest_start_date, status
+      FROM wallet_loans
+      WHERE id = ${loanId} AND owner_user_id = ${userId}
+    `;
+    const currentLoan = loanRows[0];
+    if (!currentLoan) {
       throw new Error("Loan not found.");
     }
 
@@ -2667,6 +2838,17 @@ async function updateStandaloneLoanRepaymentForUser(userId, loanId, repaymentId,
     const updatedDate = result.data.repaymentDate !== undefined ? result.data.repaymentDate : asIsoDate(currentRep.repayment_date);
     const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentRep.notes;
 
+    const otherSumRows = await tx`
+      SELECT COALESCE(SUM(amount_minor), 0) AS total FROM wallet_loan_repayments WHERE loan_id = ${loanId} AND id <> ${repaymentId}
+    `;
+    const otherRepaid = Number(otherSumRows[0]?.total ?? 0);
+    const totalDue = calculateLoanDueMinorUnits(currentLoan, updatedDate);
+    const remaining = Math.max(0, totalDue - otherRepaid);
+
+    if (updatedAmount > remaining) {
+      throw new Error("Repayment amount exceeds the remaining balance.");
+    }
+
     await tx`
       UPDATE wallet_loan_repayments
       SET amount_minor = ${updatedAmount},
@@ -2674,6 +2856,9 @@ async function updateStandaloneLoanRepaymentForUser(userId, loanId, repaymentId,
           notes = ${updatedNotes}
       WHERE id = ${repaymentId} AND loan_id = ${loanId}
     `;
+
+    const newStatus = otherRepaid + updatedAmount >= totalDue ? "settled" : "active";
+    await tx`UPDATE wallet_loans SET status = ${newStatus} WHERE id = ${loanId}`;
 
     return loadLoanRecord(tx, loanId);
   });

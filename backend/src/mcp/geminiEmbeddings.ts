@@ -29,11 +29,12 @@ export async function getEmbedding(text: string): Promise<number[]> {
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY environment variable is not set.");
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
   const responseJson = await fetchWithBackoff(url, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey
     },
     body: JSON.stringify({
       model: "models/gemini-embedding-001",

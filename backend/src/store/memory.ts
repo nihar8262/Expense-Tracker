@@ -521,6 +521,40 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   const bankAccounts = new Map<string, BankAccountRecord>();
   const feedbacks = new Map<string, FeedbackRecord>();
 
+  function calculateLoanDueMinorUnits(loan: StoredWalletLoan, asOfDate: Date | string = new Date()): number {
+    const principal = Number(loan.amountMinor ?? 0);
+    const basisPoints = Number(loan.interestRateBasisPoints ?? 0);
+    const interestType = loan.interestType ?? "percentage";
+    const period = loan.interestRatePeriod ?? "monthly";
+    const startStr = loan.interestStartDate ?? loan.lendingDate;
+
+    let accruedInterestMinor = 0;
+    if (basisPoints > 0) {
+      if (interestType === "fixed") {
+        accruedInterestMinor = basisPoints;
+      } else if (interestType === "percentage") {
+        const startDate = startStr ? new Date(startStr) : new Date();
+        const now = typeof asOfDate === "string" ? new Date(asOfDate) : asOfDate;
+
+        if (now >= startDate) {
+          if (period === "one-time") {
+            accruedInterestMinor = Math.round((principal * basisPoints) / 10000);
+          } else if (period === "yearly") {
+            const diffMonths = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            const diffYears = diffMonths / 12;
+            accruedInterestMinor = Math.round((principal * (basisPoints / 10000)) * diffYears);
+          } else {
+            // monthly
+            const months = Math.max(1, (now.getFullYear() - startDate.getFullYear()) * 12 + (now.getMonth() - startDate.getMonth()) + 1);
+            accruedInterestMinor = Math.round((principal * (basisPoints / 10000)) * months);
+          }
+        }
+      }
+    }
+
+    return principal + accruedInterestMinor;
+  }
+
   function listWalletMembers(walletId: string): StoredWalletMember[] {
     return [...walletMembers.values()]
       .filter((member) => member.walletId === walletId)
@@ -1851,11 +1885,16 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   }
 
   async function updateWalletExpense(userId: string, walletId: string, walletExpenseId: string, input: CreateWalletExpenseInput): Promise<WalletDetailRecord> {
-    assertWalletAccess(userId, walletId);
+    const wallet = assertWalletAccess(userId, walletId);
 
     const existingExpense = walletExpenses.get(walletExpenseId);
     if (!existingExpense || existingExpense.walletId !== walletId) {
       throw new WalletExpenseNotFoundError();
+    }
+
+    const payerMember = walletMembers.get(existingExpense.paidByMemberId);
+    if (wallet.ownerUserId !== userId && payerMember?.userId !== userId) {
+      throw new WalletValidationError("You can only edit or delete expenses that you paid for, unless you are the wallet owner.");
     }
 
     const members = listWalletMembers(walletId);
@@ -1895,11 +1934,16 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   }
 
   async function deleteWalletExpense(userId: string, walletId: string, walletExpenseId: string): Promise<WalletDetailRecord> {
-    assertWalletAccess(userId, walletId);
+    const wallet = assertWalletAccess(userId, walletId);
 
     const existingExpense = walletExpenses.get(walletExpenseId);
     if (!existingExpense || existingExpense.walletId !== walletId) {
       throw new WalletExpenseNotFoundError();
+    }
+
+    const payerMember = walletMembers.get(existingExpense.paidByMemberId);
+    if (wallet.ownerUserId !== userId && payerMember?.userId !== userId) {
+      throw new WalletValidationError("You can only edit or delete expenses that you paid for, unless you are the wallet owner.");
     }
 
     walletExpenses.delete(walletExpenseId);
@@ -1933,11 +1977,17 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   }
 
   async function updateWalletSettlement(userId: string, walletId: string, settlementId: string, input: CreateSettlementInput): Promise<WalletDetailRecord> {
-    assertWalletAccess(userId, walletId);
+    const wallet = assertWalletAccess(userId, walletId);
 
     const existingSettlement = walletSettlements.get(settlementId);
     if (!existingSettlement || existingSettlement.walletId !== walletId) {
       throw new WalletSettlementNotFoundError();
+    }
+
+    const fromMember = walletMembers.get(existingSettlement.fromMemberId);
+    const toMember = walletMembers.get(existingSettlement.toMemberId);
+    if (wallet.ownerUserId !== userId && fromMember?.userId !== userId && toMember?.userId !== userId) {
+      throw new WalletValidationError("You can only edit or delete settlements you are involved in, unless you are the wallet owner.");
     }
 
     const members = listWalletMembers(walletId);
@@ -1959,11 +2009,17 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   }
 
   async function deleteWalletSettlement(userId: string, walletId: string, settlementId: string): Promise<WalletDetailRecord> {
-    assertWalletAccess(userId, walletId);
+    const wallet = assertWalletAccess(userId, walletId);
 
     const existingSettlement = walletSettlements.get(settlementId);
     if (!existingSettlement || existingSettlement.walletId !== walletId) {
       throw new WalletSettlementNotFoundError();
+    }
+
+    const fromMember = walletMembers.get(existingSettlement.fromMemberId);
+    const toMember = walletMembers.get(existingSettlement.toMemberId);
+    if (wallet.ownerUserId !== userId && fromMember?.userId !== userId && toMember?.userId !== userId) {
+      throw new WalletValidationError("You can only edit or delete settlements you are involved in, unless you are the wallet owner.");
     }
 
     walletSettlements.delete(settlementId);
@@ -2135,6 +2191,22 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     if (!existingLoan || existingLoan.walletId !== walletId) {
       throw new WalletLoanNotFoundError();
     }
+    if (existingLoan.status === "settled") {
+      throw new WalletValidationError("This loan is already settled.");
+    }
+
+    let totalRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId) {
+        totalRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan, input.repaymentDate);
+    const remaining = Math.max(0, totalDue - totalRepaid);
+
+    if (input.amount > remaining) {
+      throw new WalletValidationError("Repayment amount exceeds the remaining balance.");
+    }
 
     const repayment: StoredWalletLoanRepayment = {
       id: randomUUID(),
@@ -2146,6 +2218,11 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     };
 
     walletLoanRepayments.set(repayment.id, repayment);
+
+    if (totalRepaid + input.amount >= totalDue) {
+      walletLoans.set(loanId, { ...existingLoan, status: "settled" });
+    }
+
     return buildWalletDetail(walletId);
   }
 
@@ -2167,6 +2244,18 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     }
 
     walletLoanRepayments.delete(repaymentId);
+
+    let remainingRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId) {
+        remainingRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan);
+    if (remainingRepaid < totalDue && existingLoan.status === "settled") {
+      walletLoans.set(loanId, { ...existingLoan, status: "active" });
+    }
+
     return buildWalletDetail(walletId);
   }
 
@@ -2187,14 +2276,35 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       throw new WalletLoanNotFoundError("Repayment not found.");
     }
 
+    const updatedAmount = input.amount !== undefined ? input.amount : existingRepayment.amountMinor;
+    const updatedDate = input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate;
+    const updatedNotes = input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes;
+
+    let otherRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId && rep.id !== repaymentId) {
+        otherRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan, updatedDate);
+    const remaining = Math.max(0, totalDue - otherRepaid);
+
+    if (updatedAmount > remaining) {
+      throw new WalletValidationError("Repayment amount exceeds the remaining balance.");
+    }
+
     const updated: StoredWalletLoanRepayment = {
       ...existingRepayment,
-      amountMinor: input.amount !== undefined ? input.amount : existingRepayment.amountMinor,
-      repaymentDate: input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate,
-      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes
+      amountMinor: updatedAmount,
+      repaymentDate: updatedDate,
+      notes: updatedNotes
     };
 
     walletLoanRepayments.set(repaymentId, updated);
+
+    const newStatus = otherRepaid + updatedAmount >= totalDue ? "settled" : "active";
+    walletLoans.set(loanId, { ...existingLoan, status: newStatus });
+
     return buildWalletDetail(walletId);
   }
 
@@ -2350,6 +2460,9 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     if (!existingLoan) {
       throw new WalletLoanNotFoundError();
     }
+    if (existingLoan.status === "settled") {
+      throw new WalletValidationError("This loan is already settled.");
+    }
 
     const normalizedUserEmail = userEmail?.trim().toLowerCase() || null;
     const isOwner = existingLoan.ownerUserId === userId;
@@ -2362,6 +2475,19 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       throw new WalletLoanNotFoundError();
     }
 
+    let totalRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId) {
+        totalRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan, input.repaymentDate);
+    const remaining = Math.max(0, totalDue - totalRepaid);
+
+    if (input.amount > remaining) {
+      throw new WalletValidationError("Repayment amount exceeds the remaining balance.");
+    }
+
     const repayment: StoredWalletLoanRepayment = {
       id: randomUUID(),
       loanId,
@@ -2372,6 +2498,10 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     };
 
     walletLoanRepayments.set(repayment.id, repayment);
+
+    if (totalRepaid + input.amount >= totalDue) {
+      walletLoans.set(loanId, { ...existingLoan, status: "settled" });
+    }
 
     if (existingLoan.ownerUserId && existingLoan.ownerUserId !== userId) {
       let payerName = userEmail?.split("@")[0] || "A member";
@@ -2400,7 +2530,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       });
     }
 
-    return mapLoanRecord(existingLoan, userId);
+    return mapLoanRecord(walletLoans.get(loanId) ?? existingLoan, userId);
   }
 
   async function deleteStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string): Promise<WalletLoanRecord> {
@@ -2415,7 +2545,19 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     }
 
     walletLoanRepayments.delete(repaymentId);
-    return mapLoanRecord(existingLoan);
+
+    let remainingRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId) {
+        remainingRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan);
+    if (remainingRepaid < totalDue && existingLoan.status === "settled") {
+      walletLoans.set(loanId, { ...existingLoan, status: "active" });
+    }
+
+    return mapLoanRecord(walletLoans.get(loanId) ?? existingLoan);
   }
 
   async function updateStandaloneLoanRepayment(userId: string, loanId: string, repaymentId: string, input: UpdateWalletLoanRepaymentInput): Promise<WalletLoanRecord> {
@@ -2429,15 +2571,36 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       throw new WalletLoanNotFoundError("Repayment not found.");
     }
 
+    const updatedAmount = input.amount !== undefined ? input.amount : existingRepayment.amountMinor;
+    const updatedDate = input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate;
+    const updatedNotes = input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes;
+
+    let otherRepaid = 0;
+    for (const rep of walletLoanRepayments.values()) {
+      if (rep.loanId === loanId && rep.id !== repaymentId) {
+        otherRepaid += rep.amountMinor;
+      }
+    }
+    const totalDue = calculateLoanDueMinorUnits(existingLoan, updatedDate);
+    const remaining = Math.max(0, totalDue - otherRepaid);
+
+    if (updatedAmount > remaining) {
+      throw new WalletValidationError("Repayment amount exceeds the remaining balance.");
+    }
+
     const updated: StoredWalletLoanRepayment = {
       ...existingRepayment,
-      amountMinor: input.amount !== undefined ? input.amount : existingRepayment.amountMinor,
-      repaymentDate: input.repaymentDate !== undefined ? input.repaymentDate : existingRepayment.repaymentDate,
-      notes: input.notes !== undefined ? (input.notes?.trim() || null) : existingRepayment.notes
+      amountMinor: updatedAmount,
+      repaymentDate: updatedDate,
+      notes: updatedNotes
     };
 
     walletLoanRepayments.set(repaymentId, updated);
-    return mapLoanRecord(existingLoan);
+
+    const newStatus = otherRepaid + updatedAmount >= totalDue ? "settled" : "active";
+    walletLoans.set(loanId, { ...existingLoan, status: newStatus });
+
+    return mapLoanRecord(walletLoans.get(loanId) ?? existingLoan);
   }
 
   async function listBillReminders(userId: string): Promise<BillReminderRecord[]> {

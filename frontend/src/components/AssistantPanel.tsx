@@ -18,6 +18,7 @@ type PendingAction = {
     date: string;
     platform?: string;
   };
+  token?: string;
 };
 
 type AssistantPanelProps = {

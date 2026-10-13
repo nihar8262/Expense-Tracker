@@ -1,5 +1,22 @@
+import crypto from "node:crypto";
 import { getTools } from "./tools.js";
 import type { ExpenseStore } from "../store/types.js";
+
+const HMAC_SECRET = process.env.HMAC_SECRET || process.env.SCHEDULER_SECRET || "expense-tracker-action-secret";
+
+export function signActionToken(userId: string, tool: string, args: any): string {
+  const payload = `${userId}:${tool}:${JSON.stringify(args)}`;
+  return crypto.createHmac("sha256", HMAC_SECRET).update(payload).digest("hex");
+}
+
+export function verifyActionToken(userId: string, tool: string, args: any, token?: string | null): boolean {
+  if (!token || typeof token !== "string") return false;
+  const expected = signActionToken(userId, tool, args);
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(expected);
+  if (tokenBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   INR: "₹",
@@ -209,7 +226,7 @@ async function callLLM(messages: any[], toolsList: any[], currencyCode: string =
 }
 
 export async function handleAssistantQuery(
-  body: { messages: any[]; confirmedAction?: { tool: string; args: any }; currency?: string },
+  body: { messages: any[]; confirmedAction?: { tool: string; args: any; token?: string }; currency?: string },
   userId: string,
   store: ExpenseStore
 ) {
@@ -243,6 +260,13 @@ export async function handleAssistantQuery(
 
   // 1. If there's a confirmed write action, execute it first
   if (body.confirmedAction) {
+    if (body.confirmedAction.tool === "create_expense") {
+      if (!verifyActionToken(userId, body.confirmedAction.tool, body.confirmedAction.args, body.confirmedAction.token)) {
+        return {
+          answer: "Security validation error: Action confirmation token is invalid or parameters have been modified."
+        };
+      }
+    }
     const tool = tools.find(t => t.name === body.confirmedAction!.tool);
     if (tool) {
       try {
@@ -324,7 +348,8 @@ export async function handleAssistantQuery(
             ),
             pendingAction: {
               tool: toolName,
-              args: toolArgs
+              args: toolArgs,
+              token: signActionToken(userId, toolName, toolArgs)
             }
           };
         }
@@ -362,11 +387,11 @@ export async function handleAssistantQuery(
 }
 
 export async function handleAssistantQueryStream(
-  body: { messages: any[]; confirmedAction?: { tool: string; args: any }; currency?: string },
+  body: { messages: any[]; confirmedAction?: { tool: string; args: any; token?: string }; currency?: string },
   userId: string,
   store: ExpenseStore,
   onChunk: (chunk: string) => void,
-  onPendingAction?: (action: { tool: string; args: any }) => void
+  onPendingAction?: (action: { tool: string; args: any; token?: string }) => void
 ) {
   let userCurrency = body.currency?.toUpperCase();
   if (!userCurrency) {
@@ -395,6 +420,12 @@ export async function handleAssistantQueryStream(
   }));
 
   if (body.confirmedAction) {
+    if (body.confirmedAction.tool === "create_expense") {
+      if (!verifyActionToken(userId, body.confirmedAction.tool, body.confirmedAction.args, body.confirmedAction.token)) {
+        onChunk("Security validation error: Action confirmation token is invalid or parameters have been modified.");
+        return;
+      }
+    }
     const tool = tools.find(t => t.name === body.confirmedAction!.tool);
     if (tool) {
       try {
@@ -473,7 +504,11 @@ export async function handleAssistantQueryStream(
           );
           onChunk(defaultText);
           if (onPendingAction) {
-            onPendingAction({ tool: toolName, args: toolArgs });
+            onPendingAction({
+              tool: toolName,
+              args: toolArgs,
+              token: signActionToken(userId, toolName, toolArgs)
+            });
           }
           return;
         }
