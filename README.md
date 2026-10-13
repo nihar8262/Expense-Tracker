@@ -26,6 +26,8 @@ A full-stack personal finance application for tracking daily spending, managing 
   - [Bill Reminders](#bill-reminders)
   - [Dashboard](#dashboard)
   - [AI Chatbot & MCP Server](#ai-chatbot--mcp-server)
+  - [Bank Accounts & Cards](#bank-accounts--cards)
+  - [User Feedback & Suggestions](#user-feedback--suggestions)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Scripts](#scripts)
@@ -35,7 +37,7 @@ A full-stack personal finance application for tracking daily spending, managing 
 
 ## Features
 
-- **Personal expenses** — Create, edit, delete, filter by category, and sort by date. Idempotent submission prevents duplicates on retry.
+- **Personal expenses** — Create, edit, delete, filter by category, set price cap thresholds, and sort by date or price. Tag expenses with connected bank accounts/cards. Idempotent submission prevents duplicates on retry.
 - **Budgets** — Set monthly or category-specific spending caps. Track remaining budget with overspend warnings.
 - **Shared wallets** — Create group wallets for trips, homes, or shared budgets. Invite members, split expenses (equal, fixed, percentage), track balances, and record settlements. Features modal-based wallet creation, group picture uploads with automatic client-side WebP compression (up to 15MB cap), top active wallet banner with member initials chips, sub-tab workspace navigation (Overview, Transactions, Budget, Members), and zero-stale-data loading transitions.
 - **Peer Loans & Wallet Lending** — Lend money directly to peers or shared wallet members with flexible interest schedules (monthly, yearly, one-time, fixed amount), customizable start dates, and maturity due dates. Track principal, accrued interest, partial repayments, and outstanding balances. Deferred on-demand loading optimizes initial app startup speed.
@@ -44,12 +46,14 @@ A full-stack personal finance application for tracking daily spending, managing 
 - **Dashboard** — Unified overview with spending trends, category breakdowns, budget tracking, and auto-generated insights. Toggle between personal and wallet data sources with seamless, dedicated loading screens and skeletons that eliminate stale data flicker. Automatically maps and visualizes converted currency amounts seamlessly.
 - **Notifications & alerts** — Budget threshold warnings, overspend alerts, daily logging reminders, bill due alerts, wallet invite notifications, loan issuance notices, and overdue loan alerts. Timezone-aware scheduler ensures notifications deliver relative to the user's chosen local time.
 - **Bill reminders** — Schedule recurring bill reminders (once, weekly, monthly, yearly) with configurable advance notice.
+- **Bank Accounts & Payment Cards** — Add and manage bank accounts, debit cards, and credit cards from the Profile page. Set default accounts, track last 4 digits, and tag expenses to specific payment sources using the `BankPicker` component.
+- **User Feedback & Suggestions** — Built-in feedback modal allowing users to submit feature requests, bug reports, and UX ideas with satisfaction ratings. Users can track the status of their submitted feedback directly in their profile settings.
 - **Social authentication** — Sign in with Google, GitHub, or Facebook via Firebase Auth.
-- **Account management & profile editing** — Profile customization menu supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
+- **Account management & profile editing** — Mobile-optimized profile settings supporting custom usernames (with strict database uniqueness validation), local profile picture uploading (with auto-compression to avoid Firebase Auth attribute limits), OAuth provider avatar restoration, regional default currency and timezone selections, and full account/data deletion.
 - **In-App AI Chatbot** — Interactive finance assistant scoped strictly to user expenses and wallets. Features semantic query searching across your entire transaction history. Prompts are monitored by strict guardrails, tool outputs are recursively sanitized to prevent prompt injections, and conversation histories are bounded to control costs. Incorporates a human-in-the-loop approval confirmation dialog for write operations (such as expense creation) and self-healing rate limit retry handlers.
 - **Receipt Scanning (OCR)** — Upload single or multiple receipt photos to automatically extract details (merchant, amount, category, date, item breakdown description) in real-time, pre-filling a draft transaction form (personal or wallet) for user review. Validated by file magic-byte signatures and redacted for credit card numbers.
-- **Model Context Protocol (MCP) Server** — Connect external tools (Cursor, Claude Desktop, etc.) to your expense tracker data using the standard Streamable HTTP SSE transport. Exposes semantic search (`search_expenses_semantic`) and structured retrieval tools, secured via user-managed SHA-256 hashed personal access tokens.
-- **Responsive design** — Desktop navigation bar with bottom tab navigation on mobile.
+- **Model Context Protocol (MCP) Server** — Connect external tools (Cursor, Claude Desktop, etc.) to your expense tracker data using the standard Streamable HTTP SSE transport. Exposes semantic search (`search_expenses_semantic`) and structured retrieval tools, secured via user-managed SHA-256 hashed personal access tokens with responsive token management cards on mobile.
+- **Mobile-Optimized Responsive Experience** — Compact executive profile layouts, normalized action buttons, non-intrusive floating toasts that never cover bottom navigation tabs, and touch-friendly platform selectors across all pages.
 - **Dark-mode-ready surface system** — Tailwind CSS v4 with CSS custom properties for theming.
 
 ---
@@ -118,6 +122,10 @@ expense-tracker/
 │   ├── expenses.js               #   /api/expenses[/:id]
 │   ├── budgets.js                #   /api/budgets[/:id]
 │   ├── wallets.js                #   /api/wallets[/:id/...]
+│   ├── profile.js                #   /api/profile/banks[/:id]
+│   ├── feedback.js               #   /api/feedback[/:id]
+│   ├── assistant.js              #   /api/assistant/query
+│   ├── mcp.js                    #   /api/mcp
 │   ├── notifications.js          #   /api/notifications[/:id/...]
 │   ├── bill-reminders.js         #   /api/bill-reminders[/:id]
 │   ├── wallet-invites.js         #   /api/wallet-invites[/:id/respond]
@@ -152,12 +160,16 @@ expense-tracker/
 │   │   │   ├── LandingPage.tsx   #   Pre-auth landing
 │   │   │   ├── AuthPage.tsx      #   Sign-in with social providers
 │   │   │   ├── DashboardPage.tsx #   Stats, budgets, trends, insights
-│   │   │   ├── ExpensesPage.tsx  #   CRUD expenses with filters
+│   │   │   ├── ExpensesPage.tsx  #   CRUD expenses with filters & price caps
 │   │   │   ├── WalletsPage.tsx   #   Shared wallets management
+│   │   │   ├── LoansPage.tsx     #   Peer loans & borrower mini statements
+│   │   │   ├── ProfilePage.tsx   #   User settings, banks, feedback & tokens
 │   │   │   └── AlertsPage.tsx    #   Notifications & bill reminders
 │   │   ├── components/
 │   │   │   ├── ui.tsx            #   Design system primitives
 │   │   │   ├── BudgetTrackerSection.tsx
+│   │   │   ├── BankPicker.tsx
+│   │   │   ├── FeedbackModal.tsx
 │   │   │   ├── CategoryIcon.tsx
 │   │   │   ├── NotificationCenter.tsx
 │   │   │   ├── ProfileMenu.tsx
@@ -268,6 +280,10 @@ All endpoints require authentication except `GET /api/health`.
 | PUT      | `/api/bill-reminders/:id`                         | Update bill reminder             |
 | DELETE   | `/api/bill-reminders/:id`                         | Delete bill reminder             |
 | POST     | `/api/assistant/query`                            | In-app AI chatbot query (confirms write actions) |
+| GET/POST | `/api/profile/banks`                              | List / add connected bank accounts               |
+| PATCH/DELETE | `/api/profile/banks/:bankAccountId`           | Update / remove connected bank account           |
+| GET/POST | `/api/feedback`                                   | List / submit user feedback and ideas            |
+| PATCH/DELETE | `/api/feedback/:feedbackId`                   | Update / delete submitted feedback ticket        |
 | GET      | `/api/tokens`                                     | List user's active access tokens |
 | POST     | `/api/tokens`                                     | Generate a new access token (one-time reveal)  |
 | DELETE   | `/api/tokens/:tokenId`                            | Revoke or permanently delete (purge) token    |
@@ -306,7 +322,8 @@ Vercel
 
 ### Expenses
 
-- Full CRUD with category filtering and date sorting (server-driven).
+- Full CRUD with category filtering, date sorting, price cap threshold filters, and amount sorting (ascending/descending).
+- Integrated `BankPicker` allowing expenses to be linked to specific bank accounts or credit/debit cards.
 - Category selector with Font Awesome icons. Built-in categories use curated icons; custom categories have icons auto-assigned at creation time by matching the category name against a keyword map (60+ patterns, powered by `@fortawesome/free-solid-svg-icons`). Custom categories persist in `localStorage` per user.
 - Inline form validation with per-field error messages.
 - Pagination on the expenses list.
@@ -400,6 +417,20 @@ Vercel
 - **Spend trend chart**: Line/bar chart with daily, weekly, or monthly granularity.
 - **Insights**: Auto-generated insights comparing month-over-month spending, budget pressure, and top categories.
 - **Filters**: Category and time range selectors that refine all dashboard computations.
+
+### Bank Accounts & Cards
+
+- **Connected Accounts Management**: Link and maintain multiple bank accounts, debit cards, and credit cards from the Profile page.
+- **Card & Account Metadata**: Store custom account nicknames, banking institution names, account types (Checking, Savings, Credit Card, Debit Card), and masked last 4 digits.
+- **Default Account Designations**: Mark your primary card/account with an active default badge for quick association.
+- **Bank Picker Integration**: Tag personal expenses to specific bank accounts or payment cards during creation and editing via the interactive `BankPicker` selector.
+
+### User Feedback & Suggestions
+
+- **In-App Submission Modal**: Submit ideas, improvements, or report bugs directly without leaving the app.
+- **Categorization & Sentiment**: Tag feedback with category chips (Feature Request, Bug Report, UI/UX Improvement, General) and star satisfaction ratings.
+- **Ticket History & Status**: View submitted suggestions in the Profile dashboard with lifecycle statuses (Pending, Under Review, Planned, Completed).
+- **Resolution Tracking**: Real-time status badges, deletion management, and optional email notifications for rapid administrative response.
 
 ---
 

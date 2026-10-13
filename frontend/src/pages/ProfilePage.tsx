@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { User } from "firebase/auth";
 import type { ReminderPreferences, BankAccount, FeedbackRecord } from "../types";
-import { SurfaceCard, StatusNotice, PageHero, cn } from "../components/ui";
+import { SurfaceCard, StatusNotice, cn } from "../components/ui";
 import {
   listTokens,
   createToken,
@@ -129,31 +129,31 @@ function SearchableSelect({ options, selectedValue, onChange, placeholder, searc
     <div className="relative w-full" ref={containerRef}>
       <button
         type="button"
-        className="w-full rounded-2xl border border-[color:var(--border)] bg-white/80 px-4 py-2.5 text-left text-sm text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-sm flex justify-between items-center"
+        className="w-full rounded-xl sm:rounded-2xl border border-[color:var(--border)] bg-white/80 px-3 py-2 sm:px-4 sm:py-2.5 text-left text-xs sm:text-sm text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-sm flex justify-between items-center cursor-pointer"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span>{selectedOption ? selectedOption.label : placeholder}</span>
-        <span className="text-muted text-xs">▼</span>
+        <span className="truncate pr-2">{selectedOption ? selectedOption.label : placeholder}</span>
+        <span className="text-muted text-[10px] sm:text-xs shrink-0">▼</span>
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 mt-2 z-50 rounded-[20px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(252,251,247,0.95))] p-2 shadow-[0_16px_50px_rgba(40,44,35,0.15)] backdrop-blur-2xl max-h-[220px] flex flex-col">
+        <div className="absolute left-0 right-0 mt-1 sm:mt-2 z-50 rounded-xl sm:rounded-[20px] border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(252,251,247,0.95))] p-1.5 sm:p-2 shadow-[0_16px_50px_rgba(40,44,35,0.15)] backdrop-blur-2xl max-h-[220px] flex flex-col">
           <input
             type="text"
-            className="w-full rounded-xl border border-[color:var(--border)] bg-white/80 px-3 py-1.5 text-sm mb-2 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
+            className="w-full rounded-lg sm:rounded-xl border border-[color:var(--border)] bg-white/80 px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm mb-1.5 sm:mb-2 outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10"
             placeholder={searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onClick={(e) => e.stopPropagation()}
             autoFocus
           />
-          <div className="overflow-y-auto flex-1">
+          <div className="overflow-y-auto flex-1 divide-y divide-zinc-100 dark:divide-zinc-800">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors hover:bg-primary/5 hover:text-primary ${
+                  className={`w-full text-left px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm rounded-lg transition-colors hover:bg-primary/5 hover:text-primary cursor-pointer ${
                     option.value === selectedValue ? "bg-primary/10 text-primary font-semibold" : "text-secondary"
                   }`}
                   onClick={() => {
@@ -166,7 +166,7 @@ function SearchableSelect({ options, selectedValue, onChange, placeholder, searc
                 </button>
               ))
             ) : (
-              <p className="text-center text-xs text-muted py-4">No results found</p>
+              <p className="text-center text-xs text-muted py-3">No results found</p>
             )}
           </div>
         </div>
@@ -477,7 +477,7 @@ export function ProfilePage({
   const avatarFallback = username.slice(0, 1).toUpperCase() || "U";
 
   return (
-    <div className="w-full space-y-4 max-w-4xl mx-auto">
+    <div className="w-full space-y-3 sm:space-y-4 max-w-4xl mx-auto">
       {/* Moving hazard stripe animation block style */}
       <style>{`
         @keyframes stripe-move {
@@ -486,34 +486,45 @@ export function ProfilePage({
         }
       `}</style>
 
-      <PageHero
-        eyebrow="My Account"
-        title="Your Profile & Regional Settings"
-        description="Configure your display name, select default currencies, upload profile pictures, or manage security details."
-      />
+      {/* Sleek Executive Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 pt-0.5 pb-2 sm:pb-3 border-b border-[color:var(--border)] mb-1 sm:mb-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-lg sm:text-2xl font-bold tracking-tight text-ink">
+              Profile & Regional Settings
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+              Account
+            </span>
+          </div>
+          <p className="text-[11px] sm:text-xs text-muted mt-0.5">
+            Configure your display name, default currencies, bank cards, and security credentials.
+          </p>
+        </div>
+      </div>
 
       {/* Main Grid: Card 1 (Personal Profile) & Card 2 (Regional Settings) */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
         {/* Profile Card */}
-        <SurfaceCard className="relative z-10 flex flex-col p-4 sm:p-5 space-y-4 bg-white/60">
+        <SurfaceCard className="relative z-10 flex flex-col p-3.5 sm:p-5 space-y-3 sm:space-y-4 bg-white/60">
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Personal Profile</h2>
-            <p className="text-xs text-secondary mt-0.5">Manage your identity details and custom photo.</p>
+            <h2 className="text-sm sm:text-base font-bold tracking-tight text-ink">Personal Profile</h2>
+            <p className="text-[11px] sm:text-xs text-secondary mt-0.5">Manage your identity details and custom photo.</p>
           </div>
 
-          <form onSubmit={handleProfileSave} className="space-y-4 flex-1 flex flex-col justify-between">
-            <div className="space-y-3">
+          <form onSubmit={handleProfileSave} className="space-y-3 sm:space-y-4 flex-1 flex flex-col justify-between">
+            <div className="space-y-2.5 sm:space-y-3">
               {profileMessage && (
                 <StatusNotice tone={profileMessage.tone}>{profileMessage.text}</StatusNotice>
               )}
 
               {/* Avatar Upload */}
-              <div className="flex flex-col items-center gap-3 p-3 border border-[color:var(--border)] bg-white/40 rounded-2xl">
-                <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-primary/20 shadow-sm flex items-center justify-center bg-primary/5">
+              <div className="flex flex-col items-center gap-2 sm:gap-3 p-2.5 sm:p-3 border border-[color:var(--border)] bg-white/40 rounded-xl sm:rounded-2xl">
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-full overflow-hidden border-2 border-primary/20 shadow-sm flex items-center justify-center bg-primary/5 shrink-0">
                   {customPhotoUrl ? (
                     <img src={customPhotoUrl} alt="Avatar Preview" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                   ) : (
-                    <span className="text-2xl font-bold text-primary/70">{avatarFallback}</span>
+                    <span className="text-xl sm:text-2xl font-bold text-primary/70">{avatarFallback}</span>
                   )}
                   {isCompressing && (
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
@@ -522,7 +533,7 @@ export function ProfilePage({
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2 justify-center">
+                <div className="flex flex-wrap gap-1.5 sm:gap-2 justify-center">
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -532,7 +543,7 @@ export function ProfilePage({
                   />
                   <button
                     type="button"
-                    className="ui-button-secondary text-xs px-2.5 py-1.5"
+                    className="ui-button-secondary !min-h-0 !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-[11px] sm:text-xs font-semibold cursor-pointer shadow-2xs"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isCompressing || isUpdatingProfile}
                   >
@@ -541,7 +552,7 @@ export function ProfilePage({
                   {providerPhotoUrl && (
                     <button
                       type="button"
-                      className="ui-button-secondary text-xs px-2.5 py-1.5"
+                      className="ui-button-secondary !min-h-0 !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-[11px] sm:text-xs font-semibold cursor-pointer shadow-2xs"
                       onClick={() => {
                         setCustomPhotoUrl(providerPhotoUrl);
                         setProfileMessage({ tone: "neutral", text: "Fetched login provider photo. Click 'Update Profile' to save." });
@@ -554,7 +565,7 @@ export function ProfilePage({
                   {customPhotoUrl && (
                     <button
                       type="button"
-                      className="ui-button-secondary text-xs text-red-700 border-none px-2.5 py-1.5"
+                      className="ui-button-secondary !min-h-0 !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-[11px] sm:text-xs font-semibold text-red-600 hover:text-red-700 cursor-pointer shadow-2xs"
                       onClick={() => setCustomPhotoUrl("")}
                       disabled={isCompressing || isUpdatingProfile}
                     >
@@ -563,17 +574,17 @@ export function ProfilePage({
                   )}
                 </div>
                 <p className="text-[10px] text-muted text-center leading-relaxed">
-                  Upload custom images or fetch the original photo from your logged-in provider (Google, GitHub, Facebook).
+                  Upload custom images or fetch the original photo from your logged-in provider.
                 </p>
               </div>
 
               {/* Username Input */}
-              <label className="grid gap-1.5 text-xs font-semibold text-secondary">
+              <label className="grid gap-1 sm:gap-1.5 text-xs font-semibold text-secondary">
                 Username / Display Name
                 <input
                   type="text"
                   placeholder="e.g. John Doe"
-                  className="px-3 py-2 text-sm rounded-xl"
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm rounded-lg sm:rounded-xl"
                   value={username}
                   onChange={(e) => {
                     setUsername(e.target.value);
@@ -583,15 +594,15 @@ export function ProfilePage({
                   required
                 />
                 {usernameError && (
-                  <span className="text-red-600 text-[11px] font-medium mt-1">{usernameError}</span>
+                  <span className="text-red-600 text-[11px] font-medium mt-0.5">{usernameError}</span>
                 )}
               </label>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end pt-1 sm:pt-2">
               <button
                 type="submit"
-                className="ui-button-primary text-xs px-4 py-2"
+                className="ui-button-primary !min-h-0 !py-1.5 sm:!py-2 !px-3.5 sm:!px-4 text-xs font-semibold w-full sm:w-auto shadow-xs cursor-pointer"
                 disabled={isCompressing || isUpdatingProfile}
               >
                 {isUpdatingProfile ? "Saving Profile..." : "Update Profile"}
@@ -601,16 +612,16 @@ export function ProfilePage({
         </SurfaceCard>
 
         {/* Currency & Timezone Settings */}
-        <SurfaceCard className="relative z-20 flex flex-col justify-between p-4 sm:p-5 space-y-4 bg-white/60">
+        <SurfaceCard className="relative z-20 flex flex-col justify-between p-3.5 sm:p-5 space-y-3 sm:space-y-4 bg-white/60">
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Regional Settings</h2>
-            <p className="text-xs text-secondary mt-0.5">Configure your default reporting currency and local timezone.</p>
+            <h2 className="text-sm sm:text-base font-bold tracking-tight text-ink">Regional Settings</h2>
+            <p className="text-[11px] sm:text-xs text-secondary mt-0.5">Configure your default reporting currency and local timezone.</p>
           </div>
 
-          <div className="space-y-4 flex-1 flex flex-col justify-center">
+          <div className="space-y-3 sm:space-y-4 flex-1 flex flex-col justify-center">
             {reminderPreferences ? (
               <>
-                <div className="grid gap-1.5 text-xs font-semibold text-secondary">
+                <div className="grid gap-1 sm:gap-1.5 text-xs font-semibold text-secondary">
                   <span>Default Currency</span>
                   <SearchableSelect
                     options={currencies.map(c => ({ value: c.code, label: `${c.name} - ${c.symbol}` }))}
@@ -622,7 +633,7 @@ export function ProfilePage({
                   <p className="text-[10px] text-muted">All charts, budgets, and expenses will format using this selected currency.</p>
                 </div>
 
-                <div className="grid gap-1.5 text-xs font-semibold text-secondary pt-1">
+                <div className="grid gap-1 sm:gap-1.5 text-xs font-semibold text-secondary pt-0.5">
                   <span>Default Timezone</span>
                   <SearchableSelect
                     options={timezones}
@@ -634,14 +645,14 @@ export function ProfilePage({
                   <p className="text-[10px] text-muted">Used to trigger your daily logging reminder checks at the correct hour in your local time.</p>
                 </div>
 
-                <div className="grid gap-1.5 text-xs font-semibold text-secondary pt-1">
+                <div className="grid gap-1 sm:gap-1.5 text-xs font-semibold text-secondary pt-0.5">
                   <span>Default Landing Page</span>
                   <div className="grid grid-cols-2 gap-2 pt-0.5">
                     <button
                       type="button"
                       onClick={() => handleLandingPageChange("expenses")}
                       className={cn(
-                        "flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-medium transition-all cursor-pointer",
+                        "flex items-center justify-between px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs font-medium transition-all cursor-pointer",
                         defaultLandingPage === "expenses"
                           ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
                           : "border-[color:var(--border)] bg-white/70 text-secondary hover:text-ink hover:bg-white"
@@ -649,7 +660,7 @@ export function ProfilePage({
                     >
                       <span>Expenses</span>
                       {defaultLandingPage === "expenses" && (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-emerald-600 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-600 shrink-0">
                           <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
                         </svg>
                       )}
@@ -658,7 +669,7 @@ export function ProfilePage({
                       type="button"
                       onClick={() => handleLandingPageChange("dashboard")}
                       className={cn(
-                        "flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-medium transition-all cursor-pointer",
+                        "flex items-center justify-between px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs font-medium transition-all cursor-pointer",
                         defaultLandingPage === "dashboard"
                           ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
                           : "border-[color:var(--border)] bg-white/70 text-secondary hover:text-ink hover:bg-white"
@@ -666,7 +677,7 @@ export function ProfilePage({
                     >
                       <span>Dashboard</span>
                       {defaultLandingPage === "dashboard" && (
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-emerald-600 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-600 shrink-0">
                           <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
                         </svg>
                       )}
@@ -681,10 +692,10 @@ export function ProfilePage({
           </div>
 
           {reminderPreferences && (
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end pt-1 sm:pt-2">
               <button
                 type="button"
-                className="ui-button-primary text-xs px-4 py-2"
+                className="ui-button-primary !min-h-0 !py-1.5 sm:!py-2 !px-3.5 sm:!px-4 text-xs font-semibold w-full sm:w-auto shadow-xs cursor-pointer"
                 onClick={onSaveReminderPreferences}
                 disabled={isSavingReminderPreferences}
               >
@@ -696,16 +707,16 @@ export function ProfilePage({
       </div>
 
       {/* Bank Accounts & Cards Management */}
-      <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <SurfaceCard className="relative z-10 p-3.5 sm:p-5 space-y-3 sm:space-y-4 bg-white/60">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Linked Bank Accounts & Cards</h2>
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              <h2 className="text-sm sm:text-base font-bold tracking-tight text-ink">Linked Bank Accounts & Cards</h2>
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] sm:text-xs font-semibold text-primary">
                 {bankAccounts.length}
               </span>
             </div>
-            <p className="text-xs text-secondary mt-0.5">
+            <p className="text-[11px] sm:text-xs text-secondary mt-0.5">
               Add your debit, credit, or RuPay credit cards to seamlessly categorize expenses and track spends by bank.
             </p>
           </div>
@@ -715,9 +726,9 @@ export function ProfilePage({
               setEditingBankAccount(null);
               setBankModalOpen(true);
             }}
-            className="ui-button-primary text-xs px-3.5 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-sm"
+            className="ui-button-primary !min-h-0 !py-1.5 sm:!py-2 !px-3 sm:!px-3.5 text-[11px] sm:text-xs shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-xs cursor-pointer"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+            <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             Add Bank / Card
@@ -729,17 +740,17 @@ export function ProfilePage({
         )}
 
         {isLoadingBanks ? (
-          <div className="py-6 text-center text-xs text-muted animate-pulse">Loading linked accounts...</div>
+          <div className="py-4 sm:py-6 text-center text-xs text-muted animate-pulse">Loading linked accounts...</div>
         ) : bankAccounts.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-[color:var(--border)] rounded-2xl bg-white/30 space-y-2">
-            <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+          <div className="text-center py-5 sm:py-8 border border-dashed border-[color:var(--border)] rounded-xl sm:rounded-2xl bg-white/30 space-y-1.5 sm:space-y-2">
+            <div className="mx-auto h-9 w-9 sm:h-12 sm:w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <svg className="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15A2.25 2.25 0 0 0 2.25 6.75v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
               </svg>
             </div>
             <p className="text-xs font-semibold text-ink">No bank accounts linked yet</p>
-            <p className="text-[11px] text-muted max-w-sm mx-auto">
-              Link your credit cards, debit cards, or bank accounts to quickly select them in expense forms and visualize your bank distribution.
+            <p className="text-[10px] sm:text-[11px] text-muted max-w-sm mx-auto px-2">
+              Link your credit cards, debit cards, or bank accounts to quickly select them in expense forms.
             </p>
             <button
               type="button"
@@ -747,60 +758,60 @@ export function ProfilePage({
                 setEditingBankAccount(null);
                 setBankModalOpen(true);
               }}
-              className="ui-button-secondary text-xs px-3 py-1.5 mt-2"
+              className="ui-button-secondary !min-h-0 !py-1 sm:!py-1.5 !px-3 sm:!px-3.5 text-[11px] sm:text-xs mt-1 font-semibold cursor-pointer shadow-2xs"
             >
               + Link Your First Card / Bank
             </button>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {bankAccounts.map((account) => (
               <div
                 key={account.id}
                 className={cn(
-                  "relative rounded-2xl border bg-white/80 p-4 shadow-sm transition-all hover:shadow-md flex flex-col justify-between space-y-3",
+                  "relative rounded-xl sm:rounded-2xl border bg-white/80 p-3 sm:p-4 shadow-2xs transition-all hover:shadow-sm flex flex-col justify-between space-y-2.5 sm:space-y-3",
                   account.is_default
                     ? "border-primary/40 ring-1 ring-primary/20 bg-gradient-to-br from-white via-white to-primary/5"
                     : "border-[color:var(--border)]"
                 )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <BankLogo bankName={account.bank_name} size="md" />
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <BankLogo bankName={account.bank_name} size="sm" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <strong className="text-sm text-ink font-semibold truncate block">
+                        <strong className="text-xs sm:text-sm text-ink font-semibold truncate block">
                           {account.bank_name}
                         </strong>
                         {account.is_default && (
-                          <span className="rounded-full bg-emerald-600/10 text-emerald-700 text-[10px] font-bold px-1.5 py-0.2">
+                          <span className="rounded-full bg-emerald-600/10 text-emerald-700 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.2">
                             Default
                           </span>
                         )}
                       </div>
                       {account.account_label ? (
-                        <p className="text-xs text-secondary truncate">{account.account_label}</p>
+                        <p className="text-[11px] sm:text-xs text-secondary truncate">{account.account_label}</p>
                       ) : null}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-1 border-t border-[color:var(--border)]/60 text-xs">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     <BankCardBadge type={account.account_type} />
                     {account.last_four_digits ? (
-                      <span className="font-mono text-muted text-[11px] font-medium tracking-wider">
+                      <span className="font-mono text-muted text-[10px] sm:text-[11px] font-medium tracking-wider">
                         •••• {account.last_four_digits}
                       </span>
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1 sm:gap-1.5">
                     {!account.is_default && (
                       <button
                         type="button"
                         onClick={() => void handleSetDefaultBank(account)}
-                        className="text-[11px] text-primary hover:underline font-medium px-1"
+                        className="text-[10px] sm:text-[11px] text-primary hover:underline font-medium px-1 cursor-pointer"
                         title="Set as default payment method"
                       >
                         Set Default
@@ -812,14 +823,14 @@ export function ProfilePage({
                         setEditingBankAccount(account);
                         setBankModalOpen(true);
                       }}
-                      className="text-[11px] text-secondary hover:text-ink font-medium px-1"
+                      className="text-[10px] sm:text-[11px] text-secondary hover:text-ink font-medium px-1 cursor-pointer"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteBankAccount(account)}
-                      className="text-[11px] text-rose-600 hover:text-rose-700 font-medium px-1"
+                      className="text-[10px] sm:text-[11px] text-rose-600 hover:text-rose-700 font-medium px-1 cursor-pointer"
                     >
                       Remove
                     </button>
@@ -832,18 +843,18 @@ export function ProfilePage({
       </SurfaceCard>
 
       {/* User Feedback & Suggestions Section */}
-      <SurfaceCard className="relative z-10 p-4 sm:p-5 bg-gradient-to-r from-emerald-50/70 via-white to-amber-50/50 border border-emerald-500/20 shadow-sm space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="space-y-1">
+      <SurfaceCard className="relative z-10 p-3.5 sm:p-5 bg-gradient-to-r from-emerald-50/70 via-white to-amber-50/50 border border-emerald-500/20 shadow-sm space-y-2.5 sm:space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-4">
+          <div className="space-y-0.5 sm:space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-lg">💬</span>
-              <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">Feedback & Suggestions</h2>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+              <span className="text-base sm:text-lg">💬</span>
+              <h2 className="text-sm sm:text-base font-bold tracking-tight text-ink">Feedback & Suggestions</h2>
+              <span className="text-[9px] sm:text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
                 {feedbacks.length}/5 daily submissions
               </span>
             </div>
-            <p className="text-xs text-secondary max-w-xl leading-relaxed">
-              Have an idea for a feature, spotted an issue, or love using the app? Share your suggestions directly with our development team. You can edit your submissions within 24 hours.
+            <p className="text-[11px] sm:text-xs text-secondary max-w-xl leading-relaxed">
+              Have an idea for a feature or spotted an issue? Share your suggestions directly with our development team.
             </p>
           </div>
           <button
@@ -853,9 +864,9 @@ export function ProfilePage({
               setFeedbackModalOpen(true);
             }}
             disabled={feedbacks.length >= 5}
-            className="ui-button-primary text-xs px-4 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-sm disabled:opacity-50"
+            className="ui-button-primary !min-h-0 !py-1.5 sm:!py-2 !px-3 sm:!px-4 text-[11px] sm:text-xs shrink-0 flex items-center gap-1.5 self-start sm:self-auto font-semibold shadow-xs cursor-pointer disabled:opacity-50"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
             </svg>
             {feedbacks.length >= 5 ? "Daily Limit Reached (5/5)" : "Give Feedback"}
@@ -864,14 +875,14 @@ export function ProfilePage({
 
         {/* Recent feedbacks submitted within 24h (editable) */}
         {isLoadingFeedbacks && feedbacks.length === 0 ? (
-          <div className="pt-2 text-[11px] text-muted animate-pulse">Checking recent feedback...</div>
+          <div className="pt-1.5 text-[10px] sm:text-[11px] text-muted animate-pulse">Checking recent feedback...</div>
         ) : feedbacks.length > 0 ? (
-          <div className="pt-3 border-t border-[color:var(--border)]/60 space-y-2">
+          <div className="pt-2 sm:pt-3 border-t border-[color:var(--border)]/60 space-y-2">
             <div className="flex items-center justify-between text-xs text-muted">
-              <span className="font-semibold text-ink text-[11px] uppercase tracking-wider">
+              <span className="font-semibold text-ink text-[10px] sm:text-[11px] uppercase tracking-wider">
                 Your Recent Submissions (Editable for 24h)
               </span>
-              <span className="text-[11px]">
+              <span className="text-[10px] sm:text-[11px]">
                 {feedbacks.length} active
               </span>
             </div>
@@ -882,11 +893,11 @@ export function ProfilePage({
                 return (
                   <div
                     key={fb.id}
-                    className="p-3 rounded-xl border border-[color:var(--border)] bg-white/70 shadow-2xs flex flex-col justify-between gap-2"
+                    className="p-2.5 sm:p-3 rounded-lg sm:rounded-xl border border-[color:var(--border)] bg-white/70 shadow-2xs flex flex-col justify-between gap-1.5 sm:gap-2"
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700">
+                        <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700">
                           {fb.category === "feature" ? "Feature Idea" : fb.category === "bug" ? "Bug Report" : "General Feedback"}
                         </span>
                         {fb.rating && (
@@ -895,14 +906,14 @@ export function ProfilePage({
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-ink mt-1.5 line-clamp-2 leading-relaxed">
+                      <p className="text-[11px] sm:text-xs text-ink mt-1 line-clamp-2 leading-relaxed">
                         {fb.message}
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1 text-[10px] text-muted border-t border-[color:var(--border)]/40">
+                    <div className="flex items-center justify-between pt-1 text-[9px] sm:text-[10px] text-muted border-t border-[color:var(--border)]/40">
                       <span>{hoursRemaining > 0 ? `Editable for ~${hoursRemaining}h` : "Submitted"}</span>
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         {hoursRemaining > 0 && (
                           <button
                             type="button"
@@ -934,20 +945,20 @@ export function ProfilePage({
       </SurfaceCard>
 
       {/* AI Tools Access (MCP) Section */}
-      <SurfaceCard className="relative z-10 p-4 sm:p-5 space-y-4 bg-white/60">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <SurfaceCard className="relative z-10 p-3.5 sm:p-5 space-y-3 sm:space-y-4 bg-white/60">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-ink">AI Tools Access (MCP)</h2>
-            <p className="text-xs text-secondary mt-0.5">
-              Generate and manage personal access tokens to connect external AI tools (like Claude Desktop, Cursor, or Claude Code) to your Expense-Tracker data.
+            <h2 className="text-sm sm:text-base font-bold tracking-tight text-ink">AI Tools Access (MCP)</h2>
+            <p className="text-[11px] sm:text-xs text-secondary mt-0.5">
+              Generate personal access tokens to connect AI tools (like Claude Desktop, Cursor, or Claude Code) to your Expense-Tracker data.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setGuideModalOpen(true)}
-            className="ui-button-secondary text-xs px-3.5 py-2 shrink-0 flex items-center gap-1.5 self-start sm:self-auto border-primary/30 hover:border-primary/60 text-primary bg-primary/5 hover:bg-primary/10 transition-colors font-semibold shadow-sm"
+            className="ui-button-secondary !min-h-0 !py-1.5 sm:!py-2 !px-3 sm:!px-3.5 text-[11px] sm:text-xs shrink-0 flex items-center gap-1.5 self-start sm:self-auto border-primary/30 hover:border-primary/60 text-primary bg-primary/5 hover:bg-primary/10 transition-colors font-semibold shadow-xs cursor-pointer"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             Connect AI Agents (Guide)
@@ -958,14 +969,14 @@ export function ProfilePage({
           <StatusNotice tone="error">{tokenError}</StatusNotice>
         )}
 
-        <form onSubmit={handleGenerateToken} className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-end">
-            <label className="flex-1 w-full grid gap-1.5 text-xs font-semibold text-secondary">
+        <form onSubmit={handleGenerateToken} className="space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch sm:items-end">
+            <label className="flex-1 w-full grid gap-1 sm:gap-1.5 text-xs font-semibold text-secondary">
               Token Label / Name
               <input
                 type="text"
                 placeholder="e.g. Claude Desktop, Work Laptop"
-                className="px-3 py-2 text-sm rounded-xl"
+                className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm rounded-lg sm:rounded-xl"
                 value={newTokenLabel}
                 onChange={(e) => setNewTokenLabel(e.target.value)}
                 maxLength={50}
@@ -975,7 +986,7 @@ export function ProfilePage({
             </label>
             <button
               type="submit"
-              className="ui-button-primary text-xs px-4 py-2 shrink-0 h-10 w-full sm:w-auto"
+              className="ui-button-primary !min-h-0 !py-1.5 sm:!py-2 !px-3.5 sm:!px-4 text-xs font-semibold shrink-0 sm:h-10 w-full sm:w-auto shadow-xs cursor-pointer"
               disabled={isGenerating || !newTokenLabel.trim()}
             >
               {isGenerating ? "Generating..." : "Generate Token"}
@@ -983,98 +994,151 @@ export function ProfilePage({
           </div>
         </form>
 
-        <div className="pt-2">
+        <div className="pt-1 sm:pt-2">
           <h3 className="text-xs font-bold text-secondary mb-2">Active Tokens</h3>
           {isLoadingTokens ? (
             <p className="text-xs text-muted py-2 animate-pulse">Loading tokens...</p>
           ) : tokens.length === 0 ? (
-            <div className="text-center py-6 border border-dashed border-[color:var(--border)] rounded-2xl bg-white/20">
+            <div className="text-center py-5 sm:py-6 border border-dashed border-[color:var(--border)] rounded-xl sm:rounded-2xl bg-white/20">
               <p className="text-xs text-muted">No active API tokens found.</p>
-              <p className="text-[10px] text-muted/80 mt-1">Generate a token above to connect external tools.</p>
+              <p className="text-[10px] text-muted/80 mt-0.5">Generate a token above to connect external tools.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-[color:var(--border)] text-muted font-semibold">
-                    <th className="py-2.5 pr-4">Label</th>
-                    <th className="py-2.5 pr-4">Token</th>
-                    <th className="py-2.5 pr-4">Created</th>
-                    <th className="py-2.5 pr-4">Last Used</th>
-                    <th className="py-2.5 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[color:var(--border)]">
-                  {tokens.map((tok) => {
-                    const isRevoked = tok.revoked_at !== null;
-                    return (
-                      <tr key={tok.id} className={isRevoked ? "text-muted/60 opacity-60" : "text-ink"}>
-                        <td className="py-3 pr-4 font-semibold">{tok.label}</td>
-                        <td className="py-3 pr-4 font-mono select-all">
-                          {tok.token_prefix}••••••••••••{tok.token_suffix}
-                        </td>
-                        <td className="py-3 pr-4">
-                          {new Date(tok.created_at).toLocaleDateString(undefined, {
-                            dateStyle: "medium"
-                          })}
-                        </td>
-                        <td className="py-3 pr-4">
-                          {tok.last_used_at
-                            ? new Date(tok.last_used_at).toLocaleString(undefined, {
-                                dateStyle: "medium",
-                                timeStyle: "short"
-                              })
-                            : "Never used"}
-                        </td>
-                        <td className="py-3 text-right">
-                          {isRevoked ? (
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="text-[10px] bg-muted/10 text-muted px-2 py-1 rounded-md font-medium">
-                                Revoked on {new Date(tok.revoked_at!).toLocaleDateString(undefined, { dateStyle: "short" })}
-                              </span>
+            <>
+              {/* Mobile Token Cards */}
+              <div className="sm:hidden space-y-2">
+                {tokens.map((tok) => {
+                  const isRevoked = tok.revoked_at !== null;
+                  return (
+                    <div
+                      key={tok.id}
+                      className={cn(
+                        "p-2.5 rounded-xl border bg-white/80 space-y-1.5 shadow-2xs",
+                        isRevoked ? "border-zinc-200/60 opacity-60" : "border-[color:var(--border)]"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <strong className="text-xs font-semibold text-ink truncate">{tok.label}</strong>
+                        {isRevoked ? (
+                          <span className="text-[9px] bg-muted/10 text-muted px-1.5 py-0.5 rounded font-medium">Revoked</span>
+                        ) : (
+                          <span className="text-[9px] bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold">Active</span>
+                        )}
+                      </div>
+                      <p className="font-mono text-[11px] text-muted select-all">
+                        {tok.token_prefix}••••••••••••{tok.token_suffix}
+                      </p>
+                      <div className="flex items-center justify-between pt-1 border-t border-[color:var(--border)]/50 text-[10px] text-muted">
+                        <span>Created {new Date(tok.created_at).toLocaleDateString(undefined, { dateStyle: "short" })}</span>
+                        {isRevoked ? (
+                          <button
+                            type="button"
+                            className="ui-button-secondary !min-h-0 !py-0.5 !px-2 text-[10px] text-red-600 border-red-200 cursor-pointer"
+                            onClick={() => handleDeleteToken(tok.id)}
+                            disabled={revokingTokenId === tok.id}
+                          >
+                            {revokingTokenId === tok.id ? "..." : "Delete"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="ui-button-secondary !min-h-0 !py-0.5 !px-2 text-[10px] text-red-600 border-red-200 cursor-pointer"
+                            onClick={() => handleRevokeToken(tok.id)}
+                            disabled={revokingTokenId === tok.id}
+                          >
+                            {revokingTokenId === tok.id ? "..." : "Revoke"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[color:var(--border)] text-muted font-semibold">
+                      <th className="py-2.5 pr-4">Label</th>
+                      <th className="py-2.5 pr-4">Token</th>
+                      <th className="py-2.5 pr-4">Created</th>
+                      <th className="py-2.5 pr-4">Last Used</th>
+                      <th className="py-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[color:var(--border)]">
+                    {tokens.map((tok) => {
+                      const isRevoked = tok.revoked_at !== null;
+                      return (
+                        <tr key={tok.id} className={isRevoked ? "text-muted/60 opacity-60" : "text-ink"}>
+                          <td className="py-2.5 pr-4 font-semibold">{tok.label}</td>
+                          <td className="py-2.5 pr-4 font-mono select-all">
+                            {tok.token_prefix}••••••••••••{tok.token_suffix}
+                          </td>
+                          <td className="py-2.5 pr-4">
+                            {new Date(tok.created_at).toLocaleDateString(undefined, {
+                              dateStyle: "medium"
+                            })}
+                          </td>
+                          <td className="py-2.5 pr-4">
+                            {tok.last_used_at
+                              ? new Date(tok.last_used_at).toLocaleString(undefined, {
+                                  dateStyle: "medium",
+                                  timeStyle: "short"
+                                })
+                              : "Never used"}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            {isRevoked ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <span className="text-[10px] bg-muted/10 text-muted px-2 py-0.5 rounded-md font-medium">
+                                  Revoked on {new Date(tok.revoked_at!).toLocaleDateString(undefined, { dateStyle: "short" })}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="ui-button-secondary !min-h-0 text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2 py-1 cursor-pointer"
+                                  onClick={() => handleDeleteToken(tok.id)}
+                                  disabled={revokingTokenId === tok.id}
+                                >
+                                  {revokingTokenId === tok.id ? "Deleting..." : "Delete"}
+                                </button>
+                              </div>
+                            ) : (
                               <button
                                 type="button"
-                                className="ui-button-secondary text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2.5 py-1"
-                                onClick={() => handleDeleteToken(tok.id)}
+                                className="ui-button-secondary !min-h-0 text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2 py-1 cursor-pointer"
+                                onClick={() => handleRevokeToken(tok.id)}
                                 disabled={revokingTokenId === tok.id}
                               >
-                                {revokingTokenId === tok.id ? "Deleting..." : "Delete"}
+                                {revokingTokenId === tok.id ? "Revoking..." : "Revoke"}
                               </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              className="ui-button-secondary text-[11px] text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 px-2.5 py-1"
-                              onClick={() => handleRevokeToken(tok.id)}
-                              disabled={revokingTokenId === tok.id}
-                            >
-                              {revokingTokenId === tok.id ? "Revoking..." : "Revoke"}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </SurfaceCard>
 
-      {/* Danger Zone Row (Z-Index is set lower so timezone dropdown can overlay it perfectly) */}
+      {/* Danger Zone Row */}
       <div className="relative z-0">
-        <SurfaceCard className="border border-red-500/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.7),rgba(254,242,242,0.3))] shadow-[0_12px_40px_rgba(239,68,68,0.04)] p-4 sm:p-5 flex flex-col justify-between space-y-4">
+        <SurfaceCard className="border border-red-500/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.7),rgba(254,242,242,0.3))] shadow-[0_12px_40px_rgba(239,68,68,0.04)] p-3.5 sm:p-5 flex flex-col justify-between space-y-3 sm:space-y-4">
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-red-950 flex items-center gap-2">
+            <h2 className="text-sm sm:text-base font-bold tracking-tight text-red-950 flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-full bg-red-600 animate-pulse" />
               Danger Zone
             </h2>
-            <p className="text-xs text-red-800/80 mt-0.5">Actions here are permanent and cannot be reversed.</p>
+            <p className="text-[11px] sm:text-xs text-red-800/80 mt-0.5">Actions here are permanent and cannot be reversed.</p>
           </div>
 
           {/* Animated Danger Graphic */}
-          <div className="flex items-center gap-4 bg-red-500/5 border border-red-500/10 rounded-2xl p-3 overflow-hidden relative">
+          <div className="flex items-center gap-3 sm:gap-4 bg-red-500/5 border border-red-500/10 rounded-xl sm:rounded-2xl p-2.5 sm:p-3 overflow-hidden relative">
             <div
               className="absolute top-0 left-0 right-0 h-1"
               style={{
@@ -1084,23 +1148,23 @@ export function ProfilePage({
               }}
             />
 
-            <div className="relative flex items-center justify-center h-12 w-12 bg-red-500/10 border border-red-500/20 rounded-full shrink-0">
+            <div className="relative flex items-center justify-center h-9 w-9 sm:h-12 sm:w-12 bg-red-500/10 border border-red-500/20 rounded-full shrink-0">
               <div className="absolute inset-0 bg-red-500/10 rounded-full animate-ping" style={{ animationDuration: '3s' }} />
-              <svg className="h-6 w-6 text-red-600 animate-[bounce_3s_infinite]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+              <svg className="h-5 w-5 sm:h-6 sm:w-6 text-red-600 animate-[bounce_3s_infinite]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
 
             <div className="space-y-0.5 min-w-0">
               <h3 className="text-xs font-bold text-red-950">Delete Account</h3>
-              <p className="text-[11px] text-red-800/80 leading-relaxed">This deletes all expenses, budgets, shared wallet connections, and removes your authorization permanently.</p>
+              <p className="text-[10px] sm:text-[11px] text-red-800/80 leading-relaxed">This deletes all expenses, budgets, shared wallet connections, and removes your authorization permanently.</p>
             </div>
           </div>
 
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-end pt-0.5 sm:pt-1">
             <button
               type="button"
-              className="ui-button-danger text-xs px-4 py-2 justify-center w-full sm:w-auto"
+              className="ui-button-danger !min-h-0 !py-1.5 sm:!py-2 !px-4 text-xs font-semibold justify-center w-full sm:w-auto shadow-xs cursor-pointer"
               disabled={isDeletingAccount}
               onClick={onOpenDeleteAccountModal}
             >
