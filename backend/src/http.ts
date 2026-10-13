@@ -1743,6 +1743,16 @@ export async function handleDeleteBankAccount(bankAccountId: string, userId: str
   }
 }
 
+function escapeHtml(str: string | null | undefined): string {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export async function handleCreateFeedback(rawBody: unknown, userId: string, userEmail: string | null, store: ExpenseStore): Promise<HandlerResponse> {
   const result = createFeedbackSchema.safeParse(rawBody);
   if (!result.success) {
@@ -1781,11 +1791,11 @@ export async function handleCreateFeedback(rawBody: unknown, userId: string, use
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #0f172a; margin-top: 0; margin-bottom: 12px; font-size: 20px;">New Feedback Received</h2>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 16px 0;">
-                  <p style="margin: 0 0 10px;"><strong>Category:</strong> <span style="text-transform: capitalize; padding: 3px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 13px; font-weight: 600;">${result.data.category}</span></p>
-                  <p style="margin: 0 0 10px;"><strong>Submitted By:</strong> ${result.data.userName ? `${result.data.userName} (${userEmail || "No email"})` : (userEmail || "User")}</p>
+                  <p style="margin: 0 0 10px;"><strong>Category:</strong> <span style="text-transform: capitalize; padding: 3px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 13px; font-weight: 600;">${escapeHtml(result.data.category)}</span></p>
+                  <p style="margin: 0 0 10px;"><strong>Submitted By:</strong> ${escapeHtml(result.data.userName ? `${result.data.userName} (${userEmail || "No email"})` : (userEmail || "User"))}</p>
                   ${result.data.rating ? `<p style="margin: 0 0 10px;"><strong>Rating:</strong> ${"⭐".repeat(result.data.rating)} (${result.data.rating}/5)</p>` : ""}
                   <p style="margin: 12px 0 6px;"><strong>Message:</strong></p>
-                  <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; white-space: pre-wrap; font-size: 14px;">${result.data.message}</div>
+                  <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; white-space: pre-wrap; font-size: 14px;">${escapeHtml(result.data.message)}</div>
                 </div>
                 <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">This automated alert was dispatched by Expense Tracker via the Resend API.</p>
               </div>

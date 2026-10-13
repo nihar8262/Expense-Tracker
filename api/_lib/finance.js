@@ -65,12 +65,14 @@ function parsePercentageToBasisPoints(value) {
 }
 
 function formatMinorUnits(value) {
-  const whole = Math.trunc(value / 100);
-  const fraction = Math.abs(value % 100)
+  const isNegative = value < 0;
+  const absValue = Math.abs(Math.round(value));
+  const whole = Math.floor(absValue / 100);
+  const fraction = (absValue % 100)
     .toString()
     .padStart(2, "0");
 
-  return `${whole}.${fraction}`;
+  return `${isNegative ? "-" : ""}${whole}.${fraction}`;
 }
 
 function isValidIsoDate(value) {
@@ -1296,6 +1298,45 @@ async function leaveWalletForUser(userId, walletId) {
 
     if (membership.member_role === "owner") {
       return { status: 400, body: { error: "The wallet owner can delete the group instead of exiting it." } };
+    }
+
+    const balanceRows = await tx`
+      SELECT COALESCE(SUM(balance_changes.amount_minor), 0)::bigint AS net_amount_minor
+      FROM (
+        SELECT paid_by_member_id AS member_id, amount_minor
+        FROM wallet_expenses
+        WHERE wallet_id = ${walletId}
+        UNION ALL
+        SELECT wallet_expense_splits.member_id, -wallet_expense_splits.amount_minor AS amount_minor
+        FROM wallet_expense_splits
+        INNER JOIN wallet_expenses ON wallet_expenses.id = wallet_expense_splits.wallet_expense_id
+        WHERE wallet_expenses.wallet_id = ${walletId}
+        UNION ALL
+        SELECT from_member_id AS member_id, amount_minor
+        FROM wallet_settlements
+        WHERE wallet_id = ${walletId}
+        UNION ALL
+        SELECT to_member_id AS member_id, -amount_minor AS amount_minor
+        FROM wallet_settlements
+        WHERE wallet_id = ${walletId}
+      ) AS balance_changes
+      WHERE balance_changes.member_id = ${membership.id}
+    `;
+
+    const netBalanceMinor = Number(balanceRows[0]?.net_amount_minor || 0);
+    if (netBalanceMinor < 0) {
+      return { status: 400, body: { error: "You cannot leave this wallet while you have an outstanding balance. Please settle your debts first." } };
+    }
+
+    const activeLoanRows = await tx`
+      SELECT COUNT(*)::int AS count
+      FROM wallet_loans
+      WHERE wallet_id = ${walletId}
+        AND borrower_member_id = ${membership.id}
+        AND status = 'active'
+    `;
+    if (Number(activeLoanRows[0]?.count || 0) > 0) {
+      return { status: 400, body: { error: "You cannot leave this wallet while you have active borrowed loans. Please settle your loans first." } };
     }
 
     const historyRows = await tx`
@@ -3094,6 +3135,15 @@ async function deleteUserData(userId) {
     }
     if (hasTable("user_bank_accounts")) {
       await tx`DELETE FROM user_bank_accounts WHERE user_id = ${userId}`;
+    }
+    if (hasTable("user_feedbacks")) {
+      await tx`DELETE FROM user_feedbacks WHERE user_id = ${userId}`;
+    }
+    if (hasTable("content_embeddings")) {
+      await tx`DELETE FROM content_embeddings WHERE user_id = ${userId}`;
+    }
+    if (hasTable("mcp_access_tokens")) {
+      await tx`DELETE FROM mcp_access_tokens WHERE user_id = ${userId}`;
     }
   });
 }

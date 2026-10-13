@@ -1193,7 +1193,7 @@ describe("expenses API", () => {
     expect(runChecksResponse.body.created_notifications.some((n: any) => n.type === "budget-threshold")).toBe(true);
   });
 
-  it("converts wallet amounts on currency preference change", async () => {
+  it("preserves historical expense and budget amounts when wallet currency setting is updated", async () => {
     const app = buildApp();
 
     // 1. Create a wallet with default INR
@@ -1250,11 +1250,61 @@ describe("expenses API", () => {
     expect(updateResponse.status).toBe(200);
     expect(updateResponse.body.wallet.wallet.currency).toBe("USD");
 
-    // 5. Verify amounts have converted (INR to USD rate is around 0.012)
-    const convertedWallet = updateResponse.body.wallet;
-    expect(convertedWallet.expenses[0].amount).not.toBe("100.00");
-    expect(convertedWallet.budgets[0].amount).not.toBe("300.00");
-    expect(Number(convertedWallet.expenses[0].amount)).toBeLessThan(10);
-    expect(Number(convertedWallet.budgets[0].amount)).toBeLessThan(10);
+    // 5. Verify amounts remain preserved to avoid silent data mutation
+    const updatedWallet = updateResponse.body.wallet;
+    expect(updatedWallet.expenses[0].amount).toBe("100.00");
+    expect(updatedWallet.budgets[0].amount).toBe("300.00");
+  });
+
+  it("prevents leaving a wallet when member has an outstanding balance or debt", async () => {
+    const app = buildApp();
+
+    // 1. User one creates wallet with member user-two
+    const walletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Debt Test Wallet",
+        description: "Testing leave restriction",
+        defaultSplitRule: "equal",
+        currency: "INR",
+        members: [{ displayName: "User Two", email: "user-two@example.com" }]
+      });
+
+    const walletId = walletResponse.body.wallet.wallet.id;
+    const ownerMember = walletResponse.body.wallet.members.find((m: any) => m.role === "owner");
+    const otherMember = walletResponse.body.wallet.members.find((m: any) => m.email === "user-two@example.com");
+
+    // Accept invite for user-two
+    await request(app)
+      .post(`/api/wallet-invites/${otherMember.id}/respond`)
+      .set("Authorization", "Bearer user-two")
+      .send({ action: "accept" });
+
+    // 2. User one creates an expense paid by user-one, split with user-two
+    // User-two now owes 50.00 INR
+    await request(app)
+      .post(`/api/wallets/${walletId}/expenses`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        paidByMemberId: ownerMember.id,
+        amount: "100.00",
+        category: "Food",
+        description: "Dinner",
+        date: "2026-07-02",
+        splitRule: "equal",
+        splits: [
+          { memberId: ownerMember.id, amount: "50.00" },
+          { memberId: otherMember.id, amount: "50.00" }
+        ]
+      });
+
+    // 3. User-two tries to leave the wallet without settling
+    const leaveResponse = await request(app)
+      .post(`/api/wallets/${walletId}/leave`)
+      .set("Authorization", "Bearer user-two");
+
+    expect(leaveResponse.status).toBe(400);
+    expect(leaveResponse.body.error).toContain("outstanding balance");
   });
 });

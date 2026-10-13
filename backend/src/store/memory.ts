@@ -1374,79 +1374,6 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       throw new WalletValidationError("Only the wallet owner can edit this group.");
     }
 
-    const oldCurrency = wallet.currency.toUpperCase();
-    const newCurrency = (input.currency || "INR").toUpperCase();
-
-    if (oldCurrency !== newCurrency) {
-      const BASE_RATES_TO_USD: Record<string, number> = {
-        USD: 1.0,
-        EUR: 1.08,
-        GBP: 1.27,
-        INR: 0.012,
-        JPY: 0.0064,
-        CAD: 0.73,
-        AUD: 0.66,
-        CHF: 1.11,
-        CNY: 0.14,
-        SGD: 0.74,
-        NZD: 0.61
-      };
-
-      const getExchangeRate = (from: string, to: string, dateStr: string): number => {
-        const fromUpper = from.toUpperCase();
-        const toUpper = to.toUpperCase();
-        if (fromUpper === toUpper) return 1.0;
-
-        const isDirect = fromUpper < toUpper;
-        const first = isDirect ? fromUpper : toUpper;
-        const second = isDirect ? toUpper : fromUpper;
-
-        const firstRate = BASE_RATES_TO_USD[first] || 1.0;
-        const secondRate = BASE_RATES_TO_USD[second] || 1.0;
-        const baseRate = firstRate / secondRate;
-
-        const clean = dateStr.replace(/[^0-9]/g, "");
-        const num = parseInt(clean, 10);
-        const dateHash = isNaN(num) ? 0 : num;
-        const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
-        const rate = baseRate * fluctuation;
-
-        return isDirect ? rate : 1.0 / rate;
-      };
-
-      // 1. Convert budgets
-      for (const bud of walletBudgets.values()) {
-        if (bud.walletId === walletId) {
-          const dateStr = `${bud.month}-01`;
-          const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-          bud.amountMinor = Math.round(bud.amountMinor * rate);
-        }
-      }
-
-      // 2. Convert expenses & splits
-      for (const we of walletExpenses.values()) {
-        if (we.walletId === walletId) {
-          const rate = getExchangeRate(oldCurrency, newCurrency, we.date);
-          we.amountMinor = Math.round(we.amountMinor * rate);
-
-          const splits = walletExpenseSplits.get(we.id);
-          if (splits) {
-            for (const split of splits) {
-              split.amountMinor = Math.round(split.amountMinor * rate);
-            }
-          }
-        }
-      }
-
-      // 3. Convert settlements
-      for (const setl of walletSettlements.values()) {
-        if (setl.walletId === walletId) {
-          const rate = getExchangeRate(oldCurrency, newCurrency, setl.date);
-          setl.amountMinor = Math.round(setl.amountMinor * rate);
-        }
-      }
-    }
-
     wallet.name = input.name.trim();
     wallet.description = input.description?.trim() || null;
     wallet.defaultSplitRule = input.defaultSplitRule;
@@ -1823,6 +1750,37 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
 
     if (membership.role === "owner") {
       throw new WalletValidationError("The wallet owner can delete the group instead of exiting it.");
+    }
+
+    let netBalanceMinor = 0;
+    for (const expense of [...walletExpenses.values()].filter((item) => item.walletId === walletId)) {
+      if (expense.paidByMemberId === membership.id) {
+        netBalanceMinor += expense.amountMinor;
+      }
+      for (const split of walletExpenseSplits.get(expense.id) ?? []) {
+        if (split.memberId === membership.id) {
+          netBalanceMinor -= split.amountMinor;
+        }
+      }
+    }
+    for (const settlement of [...walletSettlements.values()].filter((item) => item.walletId === walletId)) {
+      if (settlement.fromMemberId === membership.id) {
+        netBalanceMinor += settlement.amountMinor;
+      }
+      if (settlement.toMemberId === membership.id) {
+        netBalanceMinor -= settlement.amountMinor;
+      }
+    }
+
+    if (netBalanceMinor < 0) {
+      throw new WalletValidationError("You cannot leave this wallet while you have an outstanding balance. Please settle your debts first.");
+    }
+
+    const hasActiveLoan = [...walletLoans.values()].some(
+      (loan) => loan.walletId === walletId && loan.borrowerMemberId === membership.id && loan.status === "active"
+    );
+    if (hasActiveLoan) {
+      throw new WalletValidationError("You cannot leave this wallet while you have active borrowed loans. Please settle your loans first.");
     }
 
     if (memberHasWalletHistory(membership.id)) {
@@ -2601,121 +2559,6 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
 
     const defaultCurrency = input.defaultCurrency ?? DEFAULT_REMINDER_PREFERENCES.defaultCurrency;
     const defaultTimezone = input.defaultTimezone ?? DEFAULT_REMINDER_PREFERENCES.defaultTimezone;
-
-    // Convert in-memory records to the new currency preference
-    if (existing && existing.defaultCurrency && existing.defaultCurrency.toUpperCase() !== defaultCurrency.toUpperCase()) {
-      const oldCurrency = existing.defaultCurrency.toUpperCase();
-      const newCurrency = defaultCurrency.toUpperCase();
-
-      const BASE_RATES_TO_USD: Record<string, number> = {
-        USD: 1.0,
-        EUR: 1.08,
-        GBP: 1.27,
-        INR: 0.012,
-        JPY: 0.0064,
-        CAD: 0.73,
-        AUD: 0.66,
-        CHF: 1.11,
-        CNY: 0.14,
-        SGD: 0.74,
-        NZD: 0.61
-      };
-
-      const getExchangeRate = (from: string, to: string, dateStr: string): number => {
-        const fromUpper = from.toUpperCase();
-        const toUpper = to.toUpperCase();
-        if (fromUpper === toUpper) return 1.0;
-
-        const isDirect = fromUpper < toUpper;
-        const first = isDirect ? fromUpper : toUpper;
-        const second = isDirect ? toUpper : fromUpper;
-
-        const firstRate = BASE_RATES_TO_USD[first] || 1.0;
-        const secondRate = BASE_RATES_TO_USD[second] || 1.0;
-        const baseRate = firstRate / secondRate;
-
-        const clean = dateStr.replace(/[^0-9]/g, "");
-        const num = parseInt(clean, 10);
-        const dateHash = isNaN(num) ? 0 : num;
-        const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
-        const rate = baseRate * fluctuation;
-
-        return isDirect ? rate : 1.0 / rate;
-      };
-
-      // 1. Personal Expenses
-      for (const [id, exp] of expenses.entries()) {
-        if (exp.userId === userId) {
-          const rate = getExchangeRate(oldCurrency, newCurrency, exp.date);
-          exp.amountMinor = Math.round(exp.amountMinor * rate);
-          expenses.set(id, exp);
-        }
-      }
-
-      // 2. Personal Budgets
-      for (const [id, bud] of budgets.entries()) {
-        if (bud.userId === userId) {
-          const rate = getExchangeRate(oldCurrency, newCurrency, `${bud.month}-01`);
-          bud.amountMinor = Math.round(bud.amountMinor * rate);
-          budgets.set(id, bud);
-        }
-      }
-
-      // 3. Personal Bill Reminders
-      for (const [id, bill] of billReminders.entries()) {
-        if (bill.userId === userId) {
-          if (bill.amountMinor === null || bill.amountMinor === undefined) continue;
-          const rate = getExchangeRate(oldCurrency, newCurrency, bill.dueDate);
-          bill.amountMinor = Math.round(bill.amountMinor * rate);
-          billReminders.set(id, bill);
-        }
-      }
-
-      // 4. Wallet details (Budgets, Expenses, Settlements, Splits) where user is member
-      const walletIds = [...walletMembers.values()]
-        .filter((m) => m.userId === userId)
-        .map((m) => m.walletId);
-
-      if (walletIds.length > 0) {
-        // Wallet Budgets
-        for (const [id, wb] of walletBudgets.entries()) {
-          if (walletIds.includes(wb.walletId)) {
-            const rate = getExchangeRate(oldCurrency, newCurrency, `${wb.month}-01`);
-            wb.amountMinor = Math.round(wb.amountMinor * rate);
-            walletBudgets.set(id, wb);
-          }
-        }
-
-        // Wallet Expenses & Splits
-        for (const [id, we] of walletExpenses.entries()) {
-          if (walletIds.includes(we.walletId)) {
-            const rate = getExchangeRate(oldCurrency, newCurrency, we.date);
-            we.amountMinor = Math.round(we.amountMinor * rate);
-            walletExpenses.set(id, we);
-
-            const splits = walletExpenseSplits.get(we.id);
-            if (splits) {
-              const updatedSplits = splits.map((split) => {
-                return {
-                  ...split,
-                  amountMinor: Math.round(split.amountMinor * rate)
-                };
-              });
-              walletExpenseSplits.set(we.id, updatedSplits);
-            }
-          }
-        }
-
-        // Wallet Settlements
-        for (const [id, setl] of walletSettlements.entries()) {
-          if (walletIds.includes(setl.walletId)) {
-            const rate = getExchangeRate(oldCurrency, newCurrency, setl.date);
-            setl.amountMinor = Math.round(setl.amountMinor * rate);
-            walletSettlements.set(id, setl);
-          }
-        }
-      }
-    }
 
     const nextPreferences: StoredReminderPreferences = {
       userId,

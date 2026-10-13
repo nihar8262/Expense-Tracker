@@ -23,10 +23,12 @@ export function parseAmountToMinorUnits(value: number | string): number {
 }
 
 export function formatMinorUnits(value: number): string {
-  const whole = Math.trunc(value / 100);
-  const fraction = Math.abs(value % 100)
+  const isNegative = value < 0;
+  const absValue = Math.abs(Math.round(value));
+  const whole = Math.floor(absValue / 100);
+  const fraction = (absValue % 100)
     .toString()
     .padStart(2, "0");
 
-  return `${whole}.${fraction}`;
+  return `${isNegative ? "-" : ""}${whole}.${fraction}`;
 }

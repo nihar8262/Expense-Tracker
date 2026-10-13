@@ -26,12 +26,14 @@ function parseAmountToMinorUnits(value) {
 }
 
 function formatMinorUnits(value) {
-  const whole = Math.trunc(value / 100);
-  const fraction = Math.abs(value % 100)
+  const isNegative = value < 0;
+  const absValue = Math.abs(Math.round(value));
+  const whole = Math.floor(absValue / 100);
+  const fraction = (absValue % 100)
     .toString()
     .padStart(2, "0");
 
-  return `${whole}.${fraction}`;
+  return `${isNegative ? "-" : ""}${whole}.${fraction}`;
 }
 
 function isValidIsoDate(value) {
@@ -149,7 +151,7 @@ async function ensureSchema(sql) {
   await schemaReady;
 }
 
-async function getExistingExpense(tx, idempotencyKey, requestHash) {
+async function getExistingExpense(tx, idempotencyKey, requestHash, userId) {
   await tx`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
 
   const existingRequests = await tx`
@@ -173,7 +175,7 @@ async function getExistingExpense(tx, idempotencyKey, requestHash) {
   const expenses = await tx`
     SELECT id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
     FROM expenses
-    WHERE id = ${existingRequest.expense_id}
+    WHERE id = ${existingRequest.expense_id} AND user_id = ${userId}
   `;
 
   if (!expenses[0]) {
@@ -409,7 +411,7 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
     const created = await sql.begin(async (tx) => {
       const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
       const requestHash = createExpenseRequestHash(result.data);
-      const existing = await getExistingExpense(tx, scopedIdempotencyKey, requestHash);
+      const existing = await getExistingExpense(tx, scopedIdempotencyKey, requestHash, userId);
 
       if (existing) {
         return existing;

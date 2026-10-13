@@ -1,5 +1,5 @@
 const { randomUUID } = require("node:crypto");
-const postgres = require("postgres");
+const { getSqlClient } = require("./db");
 const { z } = require("zod");
 
 function parseAmountToMinorUnits(value) {
@@ -25,12 +25,14 @@ function parseAmountToMinorUnits(value) {
 }
 
 function formatMinorUnits(value) {
-  const whole = Math.trunc(value / 100);
-  const fraction = Math.abs(value % 100)
+  const isNegative = value < 0;
+  const absValue = Math.abs(Math.round(value));
+  const whole = Math.floor(absValue / 100);
+  const fraction = (absValue % 100)
     .toString()
     .padStart(2, "0");
 
-  return `${whole}.${fraction}`;
+  return `${isNegative ? "-" : ""}${whole}.${fraction}`;
 }
 
 function isValidIsoMonth(value) {
@@ -93,29 +95,7 @@ function mapBudget(row) {
   };
 }
 
-let sqlClient;
 let schemaReady;
-
-function getSqlClient() {
-  if (sqlClient) {
-    return sqlClient;
-  }
-
-  const connectionString = process.env.DATABASE_URL;
-
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required.");
-  }
-
-  sqlClient = postgres(connectionString, {
-    prepare: false,
-    max: 1,
-    idle_timeout: 20,
-    connect_timeout: 10
-  });
-
-  return sqlClient;
-}
 
 async function ensureSchema(sql) {
   if (!schemaReady) {

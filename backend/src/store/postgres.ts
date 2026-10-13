@@ -1023,7 +1023,7 @@ async function ensureSchema(sql: Sql): Promise<void> {
   await globalThis.__expenseTrackerSchemaReady__;
 }
 
-async function getExistingExpense(tx: DbClient, idempotencyKey: string, requestHash: string): Promise<CreateExpenseResult | null> {
+async function getExistingExpense(tx: DbClient, idempotencyKey: string, requestHash: string, userId: string): Promise<CreateExpenseResult | null> {
   await tx`SELECT pg_advisory_xact_lock(hashtext(${idempotencyKey}))`;
 
   const existingRequests = await tx<IdempotencyRow[]>`
@@ -1045,7 +1045,7 @@ async function getExistingExpense(tx: DbClient, idempotencyKey: string, requestH
   const expenseRows = await tx<ExpenseRow[]>`
     SELECT id, amount_minor, category, description, expense_date, created_at, platform
     FROM expenses
-    WHERE id = ${existingRequest.expense_id}
+    WHERE id = ${existingRequest.expense_id} AND user_id = ${userId}
   `;
 
   const expense = expenseRows[0];
@@ -1638,7 +1638,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       const res = await sql.begin(async (tx) => {
         const scopedIdempotencyKey = `${userId}:${idempotencyKey}`;
         const requestHash = createExpenseRequestHash(input);
-        const existingExpense = await getExistingExpense(tx, scopedIdempotencyKey, requestHash);
+        const existingExpense = await getExistingExpense(tx, scopedIdempotencyKey, requestHash, userId);
 
         if (existingExpense) {
           return existingExpense;
@@ -2115,92 +2115,6 @@ export function createPostgresExpenseStore(): ExpenseStore {
           throw new WalletValidationError("Only the wallet owner can edit this group.");
         }
 
-        const oldCurrency = wallet.currency.toUpperCase();
-        const newCurrency = (input.currency || "INR").toUpperCase();
-
-        if (oldCurrency !== newCurrency) {
-          const BASE_RATES_TO_USD: Record<string, number> = {
-            USD: 1.0,
-            EUR: 1.08,
-            GBP: 1.27,
-            INR: 0.012,
-            JPY: 0.0064,
-            CAD: 0.73,
-            AUD: 0.66,
-            CHF: 1.11,
-            CNY: 0.14,
-            SGD: 0.74,
-            NZD: 0.61
-          };
-
-          const getExchangeRate = (from: string, to: string, dateStr: string): number => {
-            const fromUpper = from.toUpperCase();
-            const toUpper = to.toUpperCase();
-            if (fromUpper === toUpper) return 1.0;
-
-            const isDirect = fromUpper < toUpper;
-            const first = isDirect ? fromUpper : toUpper;
-            const second = isDirect ? toUpper : fromUpper;
-
-            const firstRate = BASE_RATES_TO_USD[first] || 1.0;
-            const secondRate = BASE_RATES_TO_USD[second] || 1.0;
-            const baseRate = firstRate / secondRate;
-
-            const clean = dateStr.replace(/[^0-9]/g, "");
-            const num = parseInt(clean, 10);
-            const dateHash = isNaN(num) ? 0 : num;
-            const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
-            const rate = baseRate * fluctuation;
-
-            return isDirect ? rate : 1.0 / rate;
-          };
-
-          // 1. Convert wallet budgets
-          const budgetsList = await tx<{ id: string, budget_month: string, amount_minor: number | string }[]>`
-            SELECT id, budget_month, amount_minor FROM wallet_budgets WHERE wallet_id = ${walletId}
-          `;
-          for (const bud of budgetsList) {
-            const dateStr = `${bud.budget_month}-01`;
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(bud.amount_minor) * rate);
-            await tx`UPDATE wallet_budgets SET amount_minor = ${newAmount} WHERE id = ${bud.id}`;
-          }
-
-          // 2. Convert wallet expenses & splits
-          const expensesList = await tx<{ id: string, expense_date: string | Date, amount_minor: number | string }[]>`
-            SELECT id, expense_date, amount_minor FROM wallet_expenses WHERE wallet_id = ${walletId}
-          `;
-          for (const we of expensesList) {
-            const dateStr = we.expense_date instanceof Date ? we.expense_date.toISOString().slice(0, 10) : String(we.expense_date);
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(we.amount_minor) * rate);
-            await tx`UPDATE wallet_expenses SET amount_minor = ${newAmount} WHERE id = ${we.id}`;
-
-            const splitsList = await tx<{ member_id: string, amount_minor: number | string }[]>`
-              SELECT member_id, amount_minor FROM wallet_expense_splits WHERE wallet_expense_id = ${we.id}
-            `;
-            for (const split of splitsList) {
-              const splitAmount = Math.round(Number(split.amount_minor) * rate);
-              await tx`
-                UPDATE wallet_expense_splits 
-                SET amount_minor = ${splitAmount} 
-                WHERE wallet_expense_id = ${we.id} AND member_id = ${split.member_id}
-              `;
-            }
-          }
-
-          // 3. Convert wallet settlements
-          const settlementsList = await tx<{ id: string, settlement_date: string | Date, amount_minor: number | string }[]>`
-            SELECT id, settlement_date, amount_minor FROM wallet_settlements WHERE wallet_id = ${walletId}
-          `;
-          for (const setl of settlementsList) {
-            const dateStr = setl.settlement_date instanceof Date ? setl.settlement_date.toISOString().slice(0, 10) : String(setl.settlement_date);
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(setl.amount_minor) * rate);
-            await tx`UPDATE wallet_settlements SET amount_minor = ${newAmount} WHERE id = ${setl.id}`;
-          }
-        }
-
         if (input.pictureUrl !== undefined) {
           await tx`
             UPDATE wallets
@@ -2651,6 +2565,45 @@ export function createPostgresExpenseStore(): ExpenseStore {
 
         if (membership.member_role === "owner") {
           throw new WalletValidationError("The wallet owner can delete the group instead of exiting it.");
+        }
+
+        const balanceRows = await tx<{ net_amount_minor: string | number }[]>`
+          SELECT COALESCE(SUM(balance_changes.amount_minor), 0)::bigint AS net_amount_minor
+          FROM (
+            SELECT paid_by_member_id AS member_id, amount_minor
+            FROM wallet_expenses
+            WHERE wallet_id = ${walletId}
+            UNION ALL
+            SELECT wallet_expense_splits.member_id, -wallet_expense_splits.amount_minor AS amount_minor
+            FROM wallet_expense_splits
+            INNER JOIN wallet_expenses ON wallet_expenses.id = wallet_expense_splits.wallet_expense_id
+            WHERE wallet_expenses.wallet_id = ${walletId}
+            UNION ALL
+            SELECT from_member_id AS member_id, amount_minor
+            FROM wallet_settlements
+            WHERE wallet_id = ${walletId}
+            UNION ALL
+            SELECT to_member_id AS member_id, -amount_minor AS amount_minor
+            FROM wallet_settlements
+            WHERE wallet_id = ${walletId}
+          ) AS balance_changes
+          WHERE balance_changes.member_id = ${membership.id}
+        `;
+
+        const netBalanceMinor = Number(balanceRows[0]?.net_amount_minor ?? 0);
+        if (netBalanceMinor < 0) {
+          throw new WalletValidationError("You cannot leave this wallet while you have an outstanding balance. Please settle your debts first.");
+        }
+
+        const activeLoanRows = await tx<{ count: string | number }[]>`
+          SELECT COUNT(*)::int AS count
+          FROM wallet_loans
+          WHERE wallet_id = ${walletId}
+            AND borrower_member_id = ${membership.id}
+            AND status = 'active'
+        `;
+        if (Number(activeLoanRows[0]?.count ?? 0) > 0) {
+          throw new WalletValidationError("You cannot leave this wallet while you have active borrowed loans. Please settle your loans first.");
         }
 
         const historyRows = await tx<{
@@ -3730,137 +3683,6 @@ export function createPostgresExpenseStore(): ExpenseStore {
       const defaultCurrency = input.defaultCurrency ?? DEFAULT_REMINDER_PREFERENCES.defaultCurrency;
       const defaultTimezone = input.defaultTimezone ?? DEFAULT_REMINDER_PREFERENCES.defaultTimezone;
 
-      // Perform currency conversion for all stored transactions/budgets/bills/settlements if default currency changes
-      if (existing && existing.default_currency && existing.default_currency.toUpperCase() !== defaultCurrency.toUpperCase()) {
-        const oldCurrency = existing.default_currency.toUpperCase();
-        const newCurrency = defaultCurrency.toUpperCase();
-
-        const BASE_RATES_TO_USD: Record<string, number> = {
-          USD: 1.0,
-          EUR: 1.08,
-          GBP: 1.27,
-          INR: 0.012,
-          JPY: 0.0064,
-          CAD: 0.73,
-          AUD: 0.66,
-          CHF: 1.11,
-          CNY: 0.14,
-          SGD: 0.74,
-          NZD: 0.61
-        };
-
-        const getExchangeRate = (from: string, to: string, dateStr: string): number => {
-          const fromUpper = from.toUpperCase();
-          const toUpper = to.toUpperCase();
-          if (fromUpper === toUpper) return 1.0;
-
-          const isDirect = fromUpper < toUpper;
-          const first = isDirect ? fromUpper : toUpper;
-          const second = isDirect ? toUpper : fromUpper;
-
-          const firstRate = BASE_RATES_TO_USD[first] || 1.0;
-          const secondRate = BASE_RATES_TO_USD[second] || 1.0;
-          const baseRate = firstRate / secondRate;
-
-          const clean = dateStr.replace(/[^0-9]/g, "");
-          const num = parseInt(clean, 10);
-          const dateHash = isNaN(num) ? 0 : num;
-          const fluctuation = 1 + ((dateHash % 100) - 50) / 2500;
-          const rate = baseRate * fluctuation;
-
-          return isDirect ? rate : 1.0 / rate;
-        };
-
-        await sql.begin(async (tx) => {
-          // 1. Personal Expenses
-          const expensesList = await tx<{ id: string, expense_date: string | Date, amount_minor: number | string }[]>`
-            SELECT id, expense_date, amount_minor FROM expenses WHERE user_id = ${userId}
-          `;
-          for (const exp of expensesList) {
-            const dateStr = exp.expense_date instanceof Date ? exp.expense_date.toISOString().slice(0, 10) : String(exp.expense_date);
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(exp.amount_minor) * rate);
-            await tx`UPDATE expenses SET amount_minor = ${newAmount} WHERE id = ${exp.id}`;
-          }
-
-          // 2. Personal Budgets
-          const budgetsList = await tx<{ id: string, budget_month: string, amount_minor: number | string }[]>`
-            SELECT id, budget_month, amount_minor FROM budgets WHERE user_id = ${userId}
-          `;
-          for (const bud of budgetsList) {
-            const dateStr = `${bud.budget_month}-01`;
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(bud.amount_minor) * rate);
-            await tx`UPDATE budgets SET amount_minor = ${newAmount} WHERE id = ${bud.id}`;
-          }
-
-          // 3. Personal Bill Reminders
-          const billsList = await tx<{ id: string, due_date: string | Date, amount_minor: number | string | null }[]>`
-            SELECT id, due_date, amount_minor FROM bill_reminders WHERE user_id = ${userId}
-          `;
-          for (const bill of billsList) {
-            if (bill.amount_minor === null || bill.amount_minor === undefined) continue;
-            const dateStr = bill.due_date instanceof Date ? bill.due_date.toISOString().slice(0, 10) : String(bill.due_date);
-            const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-            const newAmount = Math.round(Number(bill.amount_minor) * rate);
-            await tx`UPDATE bill_reminders SET amount_minor = ${newAmount} WHERE id = ${bill.id}`;
-          }
-
-          // 4. Wallets details (Budgets, Expenses, Settlements, Splits) where user is member
-          const userWallets = await tx<{ wallet_id: string }[]>`
-            SELECT DISTINCT wallet_id FROM wallet_members WHERE user_id = ${userId}
-          `;
-          const walletIds = userWallets.map(w => w.wallet_id);
-
-          if (walletIds.length > 0) {
-            // Wallet Budgets
-            const walletBudgetsList = await tx<{ id: string, budget_month: string, amount_minor: number | string }[]>`
-              SELECT id, budget_month, amount_minor FROM wallet_budgets WHERE wallet_id IN (${walletIds})
-            `;
-            for (const wb of walletBudgetsList) {
-              const dateStr = `${wb.budget_month}-01`;
-              const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-              const newAmount = Math.round(Number(wb.amount_minor) * rate);
-              await tx`UPDATE wallet_budgets SET amount_minor = ${newAmount} WHERE id = ${wb.id}`;
-            }
-
-            // Wallet Expenses & Splits
-            const walletExpensesList = await tx<{ id: string, expense_date: string | Date, amount_minor: number | string }[]>`
-              SELECT id, expense_date, amount_minor FROM wallet_expenses WHERE wallet_id IN (${walletIds})
-            `;
-            for (const we of walletExpensesList) {
-              const dateStr = we.expense_date instanceof Date ? we.expense_date.toISOString().slice(0, 10) : String(we.expense_date);
-              const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-              const newAmount = Math.round(Number(we.amount_minor) * rate);
-              await tx`UPDATE wallet_expenses SET amount_minor = ${newAmount} WHERE id = ${we.id}`;
-
-              const splitsList = await tx<{ member_id: string, amount_minor: number | string }[]>`
-                SELECT member_id, amount_minor FROM wallet_expense_splits WHERE wallet_expense_id = ${we.id}
-              `;
-              for (const split of splitsList) {
-                const splitAmount = Math.round(Number(split.amount_minor) * rate);
-                await tx`
-                  UPDATE wallet_expense_splits 
-                  SET amount_minor = ${splitAmount} 
-                  WHERE wallet_expense_id = ${we.id} AND member_id = ${split.member_id}
-                `;
-              }
-            }
-
-            // Wallet Settlements
-            const settlementsList = await tx<{ id: string, settlement_date: string | Date, amount_minor: number | string }[]>`
-              SELECT id, settlement_date, amount_minor FROM wallet_settlements WHERE wallet_id IN (${walletIds})
-            `;
-            for (const setl of settlementsList) {
-              const dateStr = setl.settlement_date instanceof Date ? setl.settlement_date.toISOString().slice(0, 10) : String(setl.settlement_date);
-              const rate = getExchangeRate(oldCurrency, newCurrency, dateStr);
-              const newAmount = Math.round(Number(setl.amount_minor) * rate);
-              await tx`UPDATE wallet_settlements SET amount_minor = ${newAmount} WHERE id = ${setl.id}`;
-            }
-          }
-        });
-      }
-
       const rows = await sql<ReminderPreferencesRow[]>`
         INSERT INTO reminder_preferences (user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, default_currency, default_timezone, display_name, photo_url, updated_at)
         VALUES (${userId}, ${input.dailyLoggingEnabled}, ${input.dailyLoggingHour}, ${input.budgetAlertsEnabled}, ${input.budgetAlertThreshold}, ${defaultCurrency}, ${defaultTimezone}, ${displayName}, ${photoUrl}, ${new Date().toISOString()})
@@ -4320,6 +4142,12 @@ export function createPostgresExpenseStore(): ExpenseStore {
         }
         if (hasTable("user_feedbacks")) {
           await tx`DELETE FROM user_feedbacks WHERE user_id = ${userId}`;
+        }
+        if (hasTable("content_embeddings")) {
+          await tx`DELETE FROM content_embeddings WHERE user_id = ${userId}`;
+        }
+        if (hasTable("mcp_access_tokens")) {
+          await tx`DELETE FROM mcp_access_tokens WHERE user_id = ${userId}`;
         }
       });
     },
