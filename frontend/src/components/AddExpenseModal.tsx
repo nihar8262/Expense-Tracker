@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, type FormEvent, type KeyboardEvent } from "react";
-import type { CategoryOption, ExpenseForm } from "../types";
+import type { BankAccount, CategoryOption, ExpenseForm } from "../types";
 import { ModalFrame, SurfaceCard, StatusNotice, cn } from "./ui";
 import { FilterDropdown } from "./FilterDropdown";
 import { CategoryIcon } from "./CategoryIcon";
@@ -27,6 +27,7 @@ type AddExpenseModalProps = {
   onEditCancel?: () => void;
   statusMessage?: string;
   errorMessage?: string;
+  userAccounts?: BankAccount[];
 };
 
 function getTodayValue(): string {
@@ -57,7 +58,8 @@ export function AddExpenseModal({
   editingExpenseId,
   onEditCancel,
   statusMessage,
-  errorMessage
+  errorMessage,
+  userAccounts
 }: AddExpenseModalProps) {
   const [showValidation, setShowValidation] = useState(false);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -298,6 +300,7 @@ export function AddExpenseModal({
               <BankPicker
                 selectedBankAccountId={form.bankAccountId ?? null}
                 selectedBankName={form.bankName ?? null}
+                userAccounts={userAccounts}
                 onChange={(bankAccountId, bankName) =>
                   onFormChange((current) => ({
                     ...current,

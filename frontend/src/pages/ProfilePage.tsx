@@ -269,6 +269,9 @@ export function ProfilePage({
     try {
       const data = await listBankAccounts(currentUser);
       setBankAccounts(data);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bank-accounts-changed", { detail: data }));
+      }
     } catch (err: any) {
       console.error(err);
       setBankError(err.message || "Failed to load bank accounts.");

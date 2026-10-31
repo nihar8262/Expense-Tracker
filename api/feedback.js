@@ -22,7 +22,7 @@ module.exports = async function handler(request, response) {
 
   if (request.method === "POST") {
     try {
-      const result = await createFeedback(request.body, user.id, user.email);
+      const result = await createFeedback(request.body, user.id, null);
       return sendResult(response, result);
     } catch (err) {
       console.error("Failed to record feedback:", err);

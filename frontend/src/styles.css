@@ -125,7 +125,7 @@
   }
 
   html {
-    @apply scroll-smooth font-sans;
+    @apply scroll-smooth font-sans overflow-x-hidden;
   }
 
   body {
@@ -134,7 +134,7 @@
   }
 
   #root {
-    @apply min-h-screen;
+    @apply min-h-screen overflow-x-hidden;
   }
 
   button,

@@ -8,7 +8,7 @@ import { EmptyState, ItemActionButtons, ModalFrame, StatusNotice, SurfaceCard, c
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { Plus, Trash2, RotateCcw, X, Receipt } from "lucide-react";
-import type { CategoryOption, Expense, ExpenseForm, ExpenseSortOption, TimeRangeFilter } from "../types";
+import type { BankAccount, CategoryOption, Expense, ExpenseForm, ExpenseSortOption, TimeRangeFilter } from "../types";
 import { formatBudgetMonth } from "../utils/format";
 
 type ExpensesPageProps = {
@@ -61,6 +61,7 @@ type ExpensesPageProps = {
   onDeleteExpense: (expenseId: string) => Promise<void>;
   onClearFilters: () => void;
   currencySymbol?: string;
+  userAccounts?: BankAccount[];
 };
 
 function getTodayValue(): string {
@@ -122,7 +123,8 @@ export function ExpensesPage({
   onEditStart,
   onDeleteExpense,
   onClearFilters,
-  currencySymbol = "₹"
+  currencySymbol = "₹",
+  userAccounts
 }: ExpensesPageProps) {
   const [isExpenseFormOpen, setIsExpenseFormOpen] = useState(Boolean(editingExpenseId));
   const [showValidation, setShowValidation] = useState(false);
@@ -408,6 +410,7 @@ export function ExpensesPage({
               <BankPicker
                 selectedBankAccountId={form.bankAccountId ?? null}
                 selectedBankName={form.bankName ?? null}
+                userAccounts={userAccounts}
                 onChange={(bankAccountId, bankName) =>
                   onFormChange((current) => ({
                     ...current,

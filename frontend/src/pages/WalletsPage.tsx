@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
 import { BankPicker, BankLogo } from "../components/BankPicker";
 import { PLATFORMS } from "../lib/platforms";
-import { FilterDropdown } from "../components/FilterDropdown";
+import { FilterDropdown, type FilterOption } from "../components/FilterDropdown";
 import {
   EmptyState,
   ItemActionButtons,
@@ -15,11 +15,12 @@ import {
   SurfaceCard,
   cn,
 } from "../components/ui";
-import { Users, CreditCard, Plus, X, ArrowUpRight, ArrowDownLeft, FileText, Clock, CheckCircle2, AlertCircle, TrendingUp, TrendingDown, Scale } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, LogOut, Users, CreditCard, Plus, X, ArrowUpRight, ArrowDownLeft, FileText, Clock, CheckCircle2, AlertCircle, TrendingUp, TrendingDown, Scale } from "lucide-react";
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { BorrowerMiniStatementModal } from "../components/BorrowerMiniStatementModal";
 import { compressGroupImage } from "../utils/imageCompressor";
 import type {
+  BankAccount,
   BudgetForm,
   BudgetHistoryRange,
   BudgetSummary,
@@ -131,7 +132,7 @@ type WalletsPageProps = {
   statusMessage: string;
   errorMessage: string;
   formatCurrency: (amount: string, customCurrency?: string) => string;
-  onSelectWallet: (walletId: string) => void;
+  onSelectWallet: (walletId: string | null) => void;
   onCreateWallet: (input: {
     name: string;
     description: string;
@@ -274,6 +275,8 @@ type WalletsPageProps = {
   onDeleteStandaloneLoanRepayment?: (loanId: string, repaymentId: string) => Promise<boolean>;
   currencySymbol?: string;
   onLoadMoreExpenses?: () => Promise<void>;
+  userBankAccounts?: BankAccount[];
+  defaultBankAccount?: BankAccount | null;
 };
 
 function getTodayIsoDate(baseDate = new Date()): string {
@@ -390,29 +393,6 @@ function getMemberGradient(name: string): string {
   return gradients[Math.abs(hash) % gradients.length]!;
 }
 
-function parseMemberEntries(
-  rawValue: string,
-): Array<{ displayName: string; email?: string }> {
-  return rawValue
-    .split(/\n|,/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const emailMatch = entry.match(/^(.*)<([^>]+)>$/);
-
-      if (!emailMatch) {
-        return { displayName: entry };
-      }
-
-      const displayName = emailMatch[1]?.trim();
-      const email = emailMatch[2]?.trim();
-      return {
-        displayName: displayName || email || entry,
-        email: email || undefined,
-      };
-    });
-}
-
 export function WalletsPage({
   wallets,
   selectedWallet,
@@ -459,13 +439,21 @@ export function WalletsPage({
   onUpdateStandaloneLoanRepayment,
   onDeleteStandaloneLoanRepayment,
   currencySymbol = "₹",
-  onLoadMoreExpenses
+  onLoadMoreExpenses,
+  userBankAccounts = [],
+  defaultBankAccount: passedDefaultBank
 }: WalletsPageProps) {
+  const effectiveDefaultBank = useMemo(() => {
+    if (passedDefaultBank) return passedDefaultBank;
+    return userBankAccounts.find((a) => a.is_default) || (userBankAccounts.length === 1 ? userBankAccounts[0] : null);
+  }, [passedDefaultBank, userBankAccounts]);
   const [walletName, setWalletName] = useState("");
   const [walletDescription, setWalletDescription] = useState("");
-  const [walletMembersText, setWalletMembersText] = useState("");
   const [walletSplitRule, setWalletSplitRule] = useState<SplitRule>("equal");
   const [walletCurrency, setWalletCurrency] = useState("INR");
+  const [createWalletMembers, setCreateWalletMembers] = useState<Array<{ displayName: string; email: string }>>([
+    { displayName: "", email: "" },
+  ]);
   const [isCreateWalletModalOpen, setIsCreateWalletModalOpen] = useState(false);
   const [walletPictureUrl, setWalletPictureUrl] = useState<string | null>(null);
   const [walletPictureStats, setWalletPictureStats] = useState<string | null>(null);
@@ -475,9 +463,12 @@ export function WalletsPage({
   const [isWalletEditModalOpen, setIsWalletEditModalOpen] = useState(false);
   const [editWalletName, setEditWalletName] = useState("");
   const [editWalletDescription, setEditWalletDescription] = useState("");
-  const [editWalletMembersText, setEditWalletMembersText] = useState("");
   const [editWalletSplitRule, setEditWalletSplitRule] = useState<SplitRule>("equal");
   const [editWalletCurrency, setEditWalletCurrency] = useState("INR");
+  const [editWalletMembers, setEditWalletMembers] = useState<Array<{ displayName: string; email: string }>>([
+    { displayName: "", email: "" },
+  ]);
+  const [walletConfirmAction, setWalletConfirmAction] = useState<"delete" | "leave" | null>(null);
   const [editWalletPictureUrl, setEditWalletPictureUrl] = useState<string | null>(null);
   const [editWalletPictureStats, setEditWalletPictureStats] = useState<string | null>(null);
   const [isCompressingEditPicture, setIsCompressingEditPicture] = useState(false);
@@ -504,8 +495,19 @@ export function WalletsPage({
     string | null
   >(null);
   const [expensePlatform, setExpensePlatform] = useState<string | null>(null);
-  const [expenseBankAccountId, setExpenseBankAccountId] = useState<string | null>(null);
-  const [expenseBankName, setExpenseBankName] = useState<string | null>(null);
+  const [expenseBankAccountId, setExpenseBankAccountId] = useState<string | null>(() => effectiveDefaultBank?.id ?? null);
+  const [expenseBankName, setExpenseBankName] = useState<string | null>(() => effectiveDefaultBank ? (effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name) : null);
+  const hasAutoSelectedWalletBankRef = useRef(false);
+
+  useEffect(() => {
+    if (effectiveDefaultBank && !hasAutoSelectedWalletBankRef.current && !editingWalletExpenseId) {
+      hasAutoSelectedWalletBankRef.current = true;
+      if (!expenseBankAccountId) {
+        setExpenseBankAccountId(effectiveDefaultBank.id);
+        setExpenseBankName(effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name);
+      }
+    }
+  }, [effectiveDefaultBank, editingWalletExpenseId, expenseBankAccountId]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     type: "single" | "selected";
     expenseId?: string;
@@ -584,7 +586,28 @@ export function WalletsPage({
   }, [editingSettlementId]);
 
   // View Mode: Shared Wallets vs Peer Loans
-  const [viewMode, setViewMode] = useState<"wallets" | "loans">("wallets");
+  const [viewMode, setViewMode] = useState<"wallets" | "loans">(() => {
+    if (typeof window !== "undefined") {
+      const tab = new URLSearchParams(window.location.search).get("tab")?.toLowerCase();
+      if (tab === "loan" || tab === "loans") return "loans";
+    }
+    return "wallets";
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        const tab = new URLSearchParams(window.location.search).get("tab")?.toLowerCase();
+        if (tab === "loan" || tab === "loans") {
+          setViewMode("loans");
+        } else if (tab === "sharedwallet" || tab === "wallets") {
+          setViewMode("wallets");
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (viewMode === "loans" && onLoadLoans) {
@@ -623,6 +646,7 @@ export function WalletsPage({
   const [loanInterestStartDate, setLoanInterestStartDate] = useState("");
   const [loanDueDate, setLoanDueDate] = useState("");
   const [loanNotes, setLoanNotes] = useState("");
+  const [isBorrowerSuggestionsOpen, setIsBorrowerSuggestionsOpen] = useState(false);
   const [loanBankAccountId, setLoanBankAccountId] = useState<string | null>(null);
   const [loanBankName, setLoanBankName] = useState<string | null>(null);
   const [showLoanValidation, setShowLoanValidation] = useState(false);
@@ -842,6 +866,41 @@ export function WalletsPage({
   const lentLoansList = useMemo(() => {
     return standaloneLoansList.filter((loan) => (loan.loan_type || "lent") !== "borrowed");
   }, [standaloneLoansList]);
+
+  const existingLoanContacts = useMemo(() => {
+    const map = new Map<string, { name: string; email: string | null }>();
+    for (const l of loans) {
+      const bName = getLoanBorrowerName(l);
+      const bEmail = getLoanBorrowerEmail(l);
+      if (bName && bName.trim() && !isRawUserId(bName) && bName !== "Borrower" && bName !== "Loan Owner") {
+        const clean = bName.trim();
+        const key = clean.toLowerCase();
+        if (!map.has(key) || (!map.get(key)!.email && bEmail)) {
+          map.set(key, { name: clean, email: bEmail || null });
+        }
+      }
+    }
+    if (selectedWallet?.members) {
+      for (const m of selectedWallet.members) {
+        if (m.display_name && m.display_name.trim() && !isRawUserId(m.display_name)) {
+          const clean = m.display_name.trim();
+          const key = clean.toLowerCase();
+          if (!map.has(key) || (!map.get(key)!.email && m.email)) {
+            map.set(key, { name: clean, email: m.email || null });
+          }
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [loans, selectedWallet]);
+
+  const filteredBorrowerSuggestions = useMemo(() => {
+    const query = loanBorrowerName.trim().toLowerCase();
+    if (!query) return existingLoanContacts;
+    return existingLoanContacts.filter(
+      (c) => c.name.toLowerCase().includes(query) || (c.email && c.email.toLowerCase().includes(query))
+    );
+  }, [existingLoanContacts, loanBorrowerName]);
 
   const borrowedLoansList = useMemo(() => {
     return standaloneLoansList.filter((loan) => loan.loan_type === "borrowed");
@@ -1092,6 +1151,25 @@ export function WalletsPage({
   );
   const isWalletOwner = currentWalletMember?.role === "owner";
 
+  const walletDropdownOptions = useMemo<FilterOption[]>(() => {
+    return wallets.map((w) => ({
+      value: w.id,
+      label: w.name,
+      badge: w.currency || "INR",
+      icon: w.picture_url ? (
+        <img
+          src={w.picture_url}
+          alt={w.name}
+          className="h-5 w-5 rounded-md object-cover ring-1 ring-black/10 shrink-0"
+        />
+      ) : (
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-[10px] font-bold text-white shrink-0 shadow-2xs">
+          {w.name.slice(0, 1).toUpperCase()}
+        </span>
+      ),
+    }));
+  }, [wallets]);
+
   const targetWalletSummary = useMemo(
     () => wallets.find((w) => w.id === selectedWalletId) ?? null,
     [wallets, selectedWalletId],
@@ -1116,14 +1194,28 @@ export function WalletsPage({
 
     return selectedWallet.budgets
       .map((budget: WalletBudget) => {
-        const spent = selectedWallet.expenses
-          .filter((expense) => expense.date.slice(0, 7) === budget.month)
-          .filter((expense) =>
-            budget.scope === "category"
-              ? expense.category === budget.category
-              : true,
-          )
-          .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        let spent = 0;
+        if (selectedWallet.walletAggregation) {
+          if (budget.scope === "monthly") {
+            const m = selectedWallet.walletAggregation.monthly_totals?.find((entry) => entry.month === budget.month);
+            spent = m ? Number(m.total) : 0;
+          } else {
+            const c = selectedWallet.walletAggregation.budget_totals?.find(
+              (entry) => entry.month === budget.month && (entry.category ?? "").trim().toLowerCase() === (budget.category ?? "").trim().toLowerCase()
+            );
+            spent = c ? Number(c.total) : 0;
+          }
+        } else {
+          spent = selectedWallet.expenses
+            .filter((expense) => expense.date.slice(0, 7) === budget.month)
+            .filter((expense) =>
+              budget.scope === "category"
+                ? expense.category.trim().toLowerCase() === (budget.category ?? "").trim().toLowerCase()
+                : true,
+            )
+            .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        }
+
         const totalBudgetAmount = Number(budget.amount);
         const remaining = totalBudgetAmount - spent;
 
@@ -1165,14 +1257,20 @@ export function WalletsPage({
   );
 
   const currentMonthWalletBudgetOverview = useMemo(() => {
-    const totalBudgetAmount = currentMonthWalletBudgetSummaries.reduce(
-      (sum, budget) => sum + Number(budget.amount),
-      0,
-    );
-    const totalSpentAmount = currentMonthWalletBudgetSummaries.reduce(
-      (sum, budget) => sum + budget.spent,
-      0,
-    );
+    const monthlyBudget = currentMonthWalletBudgetSummaries.find((budget) => budget.scope === "monthly");
+    const categoryBudgets = currentMonthWalletBudgetSummaries.filter((budget) => budget.scope === "category");
+
+    let totalBudgetAmount = 0;
+    let totalSpentAmount = 0;
+
+    if (monthlyBudget) {
+      totalBudgetAmount = Number(monthlyBudget.amount);
+      totalSpentAmount = monthlyBudget.spent;
+    } else {
+      totalBudgetAmount = categoryBudgets.reduce((sum, budget) => sum + Number(budget.amount), 0);
+      totalSpentAmount = categoryBudgets.reduce((sum, budget) => sum + budget.spent, 0);
+    }
+
     const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
 
     return {
@@ -1459,7 +1557,9 @@ export function WalletsPage({
       return;
     }
 
-    const members = parseMemberEntries(walletMembersText);
+    const members = createWalletMembers
+      .map((m) => ({ displayName: m.displayName.trim(), email: m.email.trim() || undefined }))
+      .filter((m) => m.displayName.length > 0);
 
     const created = await onCreateWallet({
       name: walletName,
@@ -1473,12 +1573,12 @@ export function WalletsPage({
     if (created) {
       setWalletName("");
       setWalletDescription("");
-      setWalletMembersText("");
       setWalletSplitRule("equal");
       setWalletCurrency("INR");
       setWalletPictureUrl(null);
       setWalletPictureStats(null);
       setPictureError(null);
+      setCreateWalletMembers([{ displayName: "", email: "" }]);
       setShowCreateWalletValidation(false);
       setIsCreateWalletModalOpen(false);
     }
@@ -1495,15 +1595,11 @@ export function WalletsPage({
     setEditPictureError(null);
 
     const otherMembers = selectedWallet.members.filter((m) => m.role !== "owner");
-    const membersText = otherMembers
-      .map((m) => {
-        if (m.email) {
-          return `${m.display_name} <${m.email}>`;
-        }
-        return m.display_name;
-      })
-      .join("\n");
-    setEditWalletMembersText(membersText);
+    const membersList = otherMembers.map((m) => ({
+      displayName: m.display_name,
+      email: m.email || "",
+    }));
+    setEditWalletMembers(membersList.length > 0 ? membersList : [{ displayName: "", email: "" }]);
 
     setShowEditWalletValidation(false);
     setIsWalletEditModalOpen(true);
@@ -1532,7 +1628,9 @@ export function WalletsPage({
 
     if (!selectedWallet) return;
 
-    const members = parseMemberEntries(editWalletMembersText);
+    const members = editWalletMembers
+      .map((m) => ({ displayName: m.displayName.trim(), email: m.email.trim() || undefined }))
+      .filter((m) => m.displayName.length > 0);
 
     const updated = await onUpdateWallet(selectedWallet.wallet.id, {
       name: editWalletName,
@@ -1678,8 +1776,8 @@ export function WalletsPage({
       setAlreadySettledMemberIds([]);
       setEditingWalletExpenseId(null);
       setExpensePlatform(null);
-      setExpenseBankAccountId(null);
-      setExpenseBankName(null);
+      setExpenseBankAccountId(effectiveDefaultBank?.id ?? null);
+      setExpenseBankName(effectiveDefaultBank ? (effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name) : null);
       setShowExpenseValidation(false);
       setIsMobileExpenseModalOpen(false);
       setIsGroupExpenseFormOpen(false);
@@ -1988,40 +2086,14 @@ export function WalletsPage({
     }
   }
 
-  async function handleDeleteWalletClick() {
-    if (
-      !selectedWallet ||
-      !window.confirm(
-        `Delete ${selectedWallet.wallet.name} and all its shared data?`,
-      )
-    ) {
-      return;
-    }
-
-    setIsDeletingWallet(true);
-    try {
-      await onDeleteWallet(selectedWallet.wallet.id);
-    } finally {
-      setIsDeletingWallet(false);
-    }
+  function handleDeleteWalletClick() {
+    if (!selectedWallet) return;
+    setWalletConfirmAction("delete");
   }
 
-  async function handleLeaveWalletClick() {
-    if (
-      !selectedWallet ||
-      !window.confirm(
-        `Exit ${selectedWallet.wallet.name}? You will lose access to this group.`,
-      )
-    ) {
-      return;
-    }
-
-    setIsLeavingWallet(true);
-    try {
-      await onLeaveWallet(selectedWallet.wallet.id);
-    } finally {
-      setIsLeavingWallet(false);
-    }
+  function handleLeaveWalletClick() {
+    if (!selectedWallet) return;
+    setWalletConfirmAction("leave");
   }
 
   function handleOpenCreateLoan(type?: string | unknown) {
@@ -2045,8 +2117,9 @@ export function WalletsPage({
     setLoanInterestStartDate(getTodayIsoDate());
     setLoanDueDate("");
     setLoanNotes("");
-    setLoanBankAccountId(null);
-    setLoanBankName(null);
+    setLoanBankAccountId(effectiveDefaultBank?.id ?? null);
+    setLoanBankName(effectiveDefaultBank ? (effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name) : null);
+    setIsBorrowerSuggestionsOpen(false);
     setShowLoanValidation(false);
     setIsLoanModalOpen(true);
   }
@@ -2067,6 +2140,7 @@ export function WalletsPage({
     setLoanNotes(loan.notes || "");
     setLoanBankAccountId(loan.bank_account_id ?? null);
     setLoanBankName(loan.bank_name ?? null);
+    setIsBorrowerSuggestionsOpen(false);
     setShowLoanValidation(false);
     setIsLoanModalOpen(true);
   }
@@ -2272,6 +2346,8 @@ export function WalletsPage({
     setExpenseDescription("");
     setExpenseDate(getTodayIsoDate());
     setSplitValues({});
+    setExpenseBankAccountId(effectiveDefaultBank?.id ?? null);
+    setExpenseBankName(effectiveDefaultBank ? (effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name) : null);
     setIsGroupExpenseFormOpen(false);
   }
 
@@ -2393,6 +2469,7 @@ export function WalletsPage({
           <BankPicker
             selectedBankAccountId={expenseBankAccountId ?? null}
             selectedBankName={expenseBankName ?? null}
+            userAccounts={userBankAccounts}
             onChange={(bankAccountId, bankName) => {
               setExpenseBankAccountId(bankAccountId);
               setExpenseBankName(bankName);
@@ -2665,7 +2742,7 @@ export function WalletsPage({
             <h1 className="font-display text-xl sm:text-3xl font-bold tracking-tight text-ink">
               {viewMode === "wallets" ? "Shared Wallets" : "Peer Lending & Loans"}
             </h1>
-            <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+            <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs lg:text-sm font-semibold bg-primary/10 text-primary border border-primary/20">
               {viewMode === "wallets" ? (
                 <>
                   <Users className="size-3" />
@@ -2679,7 +2756,7 @@ export function WalletsPage({
               )}
             </span>
           </div>
-          <p className="text-[11px] sm:text-xs text-muted mt-0.5">
+          <p className="text-[11px] sm:text-xs lg:text-sm text-muted mt-0.5">
             {viewMode === "wallets"
               ? "Track group spending, balances, split rules, and settlements."
               : "Track peer loans, custom interest schedules, and repayments directly."}
@@ -2691,9 +2768,19 @@ export function WalletsPage({
           <div className="inline-flex p-0.5 sm:p-1 rounded-xl bg-zinc-100/90 dark:bg-zinc-800/80 border border-[color:var(--border)] shadow-inner">
             <button
               type="button"
-              onClick={() => setViewMode("wallets")}
+              onClick={() => {
+                setViewMode("wallets");
+                if (typeof window !== "undefined") {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("tab", "sharedwallet");
+                  if (selectedWallet?.wallet.id) {
+                    url.searchParams.set("walletId", selectedWallet.wallet.id);
+                  }
+                  window.history.replaceState({}, "", url.toString());
+                }
+              }}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer",
+                "flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs lg:text-sm font-semibold transition-all duration-200 cursor-pointer",
                 viewMode === "wallets"
                   ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs scale-[1.01]"
                   : "text-secondary hover:text-ink"
@@ -2707,9 +2794,15 @@ export function WalletsPage({
               onClick={() => {
                 setViewMode("loans");
                 void onLoadLoans?.();
+                if (typeof window !== "undefined") {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("tab", "loan");
+                  url.searchParams.delete("walletId");
+                  window.history.replaceState({}, "", url.toString());
+                }
               }}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer",
+                "flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs lg:text-sm font-semibold transition-all duration-200 cursor-pointer",
                 viewMode === "loans"
                   ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs scale-[1.01]"
                   : "text-secondary hover:text-ink"
@@ -2801,14 +2894,166 @@ export function WalletsPage({
 
       {viewMode === "wallets" && (
         <div className="space-y-6">
-          {/* Top Active Shared Wallet Banner */}
+          {!selectedWalletId ? (
+            /* --- DIRECTORY HUB VIEW --- */
+            <div className="space-y-4 sm:space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg sm:text-2xl font-bold tracking-tight text-ink">
+                    Your Shared Wallets
+                  </h2>
+                  <p className="text-xs sm:text-sm text-secondary mt-0.5">
+                    Select a group wallet to view its full ledger, balances, and budgets, or create a new group.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateWalletModalOpen(true)}
+                  className="ui-button-primary !py-2 !px-3.5 text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs cursor-pointer self-start sm:self-auto"
+                >
+                  <Plus className="size-4" />
+                  <span>Create Wallet</span>
+                </button>
+              </div>
+
+              {isLoading && wallets.length === 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[1, 2, 3].map((i) => (
+                    <SurfaceCard key={i} className="p-5 space-y-3 animate-pulse border-[color:var(--border)]">
+                      <div className="flex items-center gap-3">
+                        <div className="h-12 w-12 rounded-xl bg-zinc-200 dark:bg-zinc-700" />
+                        <div className="space-y-2 flex-1">
+                          <div className="h-4 w-24 bg-zinc-200 dark:bg-zinc-700 rounded" />
+                          <div className="h-3 w-16 bg-zinc-200 dark:bg-zinc-700 rounded" />
+                        </div>
+                      </div>
+                      <div className="h-3 w-full bg-zinc-200 dark:bg-zinc-700 rounded" />
+                    </SurfaceCard>
+                  ))} 
+                </div>
+              ) : wallets.length === 0 ? (
+                <EmptyState
+                  title="No shared wallets yet"
+                  description="Create your first shared wallet to start tracking group spending, shared budgets, and settlements."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateWalletModalOpen(true)}
+                      className="ui-button-primary mt-2 cursor-pointer"
+                    >
+                      Create Shared Wallet
+                    </button>
+                  }
+                />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                  {wallets.map((wallet) => (
+                    <div
+                      key={wallet.id}
+                      onClick={() => onSelectWallet(wallet.id)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onSelectWallet(wallet.id);
+                        } 
+                      }}
+                      className="group relative flex flex-col justify-between rounded-2xl border border-[color:var(--border)] bg-card/95 hover:bg-card p-4 sm:p-5 shadow-xs hover:shadow-md hover:border-primary/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2.5">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {wallet.picture_url ? (
+                              <img
+                                src={wallet.picture_url}
+                                alt={wallet.name}
+                                className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl object-cover ring-2 ring-primary/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform"
+                              />
+                            ) : (
+                              <div className="flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-sm sm:text-base font-bold font-display text-white shadow-2xs group-hover:scale-105 transition-transform">
+                                {wallet.name.slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-sm sm:text-base font-bold text-ink group-hover:text-primary transition-colors">
+                                {wallet.name}
+                              </h3>
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary">
+                                {wallet.currency || "INR"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-secondary line-clamp-2 min-h-[2.25rem]">
+                          {wallet.description || "No description provided for this group."}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-[color:var(--border)] flex items-center justify-between text-xs text-muted">
+                        <span className="capitalize font-medium text-[11px] sm:text-xs">
+                          {wallet.default_split_rule} split
+                        </span>
+                        <span className="inline-flex items-center gap-1 font-semibold text-primary group-hover:translate-x-0.5 transition-transform">
+                          <span>Open Ledger</span>
+                          <ArrowUpRight className="size-3.5" />
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+
+
+                </div>
+              )}
+            </div>
+          ) : (
+            /* --- DRILLDOWN DETAIL VIEW --- */
+            <div className="space-y-4 sm:space-y-5">
+              {/* Top Navigation Bar: Back Button + Custom Wallet Selector Dropdown */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pb-1">
+                <button
+                  type="button"
+                  onClick={() => onSelectWallet(null)}
+                  className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3.5 sm:py-2 rounded-xl border border-[color:var(--border)] bg-card text-[11px] sm:text-sm font-bold text-ink hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shadow-2xs cursor-pointer shrink-0"
+                >
+                  <ArrowLeft className="size-4 text-primary" />
+                  <span>All Wallets</span>
+                </button>
+
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-2xs font-semibold text-muted shrink-0 hidden sm:inline">
+                    Switch:
+                  </span>
+                  <div className="w-48 sm:w-60">
+                    <FilterDropdown
+                      options={walletDropdownOptions}
+                      value={selectedWalletId || ""}
+                      onChange={(val) => onSelectWallet(val)}
+                      placeholder="Select wallet"
+                      align="right"
+                      buttonClassName="!py-1.5 !text-xs font-semibold"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateWalletModalOpen(true)}
+                    className="inline-flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-primary/20 bg-primary/10 text-[11px] sm:text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shrink-0 cursor-pointer shadow-2xs"
+                    title="Create new shared wallet"
+                  >
+                    <Plus className="size-3.5" />
+                    <span className="hidden sm:inline">New</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Wallet Banner */}
           {displayWallet && (
             <SurfaceCard className="relative overflow-hidden border-primary/20 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(246,249,247,0.9))] p-3.5 sm:p-5 shadow-xs backdrop-blur-xl">
-              <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-start lg:justify-between">
-                {/* Left side: Avatar + Details */}
-                <div className="flex flex-col gap-2 sm:gap-3 min-w-0 flex-1">
-                  {/* Group Avatar and Name & Description aligned side-by-side */}
-                  <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+              <div className="flex flex-col gap-3 min-w-0">
+                {/* Group Avatar and Name & Description with Top-Right Icon Actions */}
+                <div className="flex items-start justify-between gap-2.5 sm:gap-3.5 min-w-0">
+                  <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
                     {displayWallet.picture_url ? (
                       <img
                         src={displayWallet.picture_url}
@@ -2822,15 +3067,56 @@ export function WalletsPage({
                     )}
 
                     <div className="min-w-0 flex-1">
-                      <h2 className="text-base sm:text-xl font-bold text-ink tracking-tight truncate">
+                      <h2 className="text-sm sm:text-xl font-bold text-ink tracking-tight truncate">
                         {displayWallet.name}
                       </h2>
 
-                      <p className="text-[11px] sm:text-xs text-secondary line-clamp-1 mt-0.5">
+                      <p className="text-[10px] sm:text-xs lg:text-sm text-secondary line-clamp-1 mt-0.5">
                         {displayWallet.description || "No description provided for this group yet."}
                       </p>
                     </div>
                   </div>
+
+                  {/* Top-Right Icon Actions */}
+                  {!isSwitchingWallet && selectedWallet && (
+                    <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 self-start">
+                      {isWalletOwner ? (
+                        <>
+                          <button
+                            type="button"
+                            className="flex h-8 w-8 items-center justify-center rounded-xl border border-[color:var(--border)] bg-white/90 dark:bg-zinc-800/90 text-secondary hover:text-ink hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:border-primary/40 transition-colors shadow-2xs cursor-pointer"
+                            onClick={handleStartWalletEdit}
+                            title="Edit group"
+                            aria-label="Edit group"
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            className="flex h-8 w-8 items-center justify-center rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/80 transition-colors shadow-2xs cursor-pointer"
+                            onClick={() => void handleDeleteWalletClick()}
+                            disabled={isSubmitting || isDeletingWallet}
+                            title="Delete group"
+                            aria-label="Delete group"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </>
+                      ) : currentWalletMember ? (
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/80 transition-colors shadow-2xs cursor-pointer"
+                          onClick={() => void handleLeaveWalletClick()}
+                          disabled={isSubmitting || isLeavingWallet}
+                          title="Exit group"
+                          aria-label="Exit group"
+                        >
+                          <LogOut className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
 
                   {/* Badges row */}
                   <div className="flex flex-wrap items-center gap-1 sm:gap-2">
@@ -2898,162 +3184,13 @@ export function WalletsPage({
                         </div>
                       </div>
                     ) : null}
-                  </div>
-
-                {/* Right side: Actions */}
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0 self-start">
-                  {!isSwitchingWallet && selectedWallet && (
-                    <>
-                      {isWalletOwner ? (
-                        <>
-                          <button
-                            type="button"
-                            className="ui-button-secondary !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-xs"
-                            onClick={handleStartWalletEdit}
-                          >
-                            Edit group
-                          </button>
-                          <button
-                            type="button"
-                            className="ui-button-danger !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-xs"
-                            onClick={() => void handleDeleteWalletClick()}
-                            disabled={isSubmitting || isDeletingWallet}
-                          >
-                            {isDeletingWallet ? "Deleting..." : "Delete group"}
-                          </button>
-                        </>
-                      ) : currentWalletMember ? (
-                        <button
-                          type="button"
-                          className="ui-button-danger !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-xs"
-                          onClick={() => void handleLeaveWalletClick()}
-                          disabled={isSubmitting || isLeavingWallet}
-                        >
-                          {isLeavingWallet ? "Leaving..." : "Exit group"}
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </div>
               </div>
 
-              {/* Wallet quick switcher if multiple wallets exist */}
-              {wallets.length > 1 && (
-                <div className="mt-3 pt-2.5 border-t border-[color:var(--border)] flex items-center gap-2 overflow-x-auto pb-0.5">
-                  <span className="text-2xs font-semibold text-muted shrink-0">Switch:</span>
-                  {wallets.map((w) => (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={() => onSelectWallet(w.id)}
-                      className={cn(
-                        "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 transition-all cursor-pointer",
-                        w.id === selectedWalletId
-                          ? "bg-primary text-white shadow-2xs font-semibold"
-                          : "bg-white/80 dark:bg-zinc-800 text-secondary border border-[color:var(--border)] hover:bg-white hover:text-ink"
-                      )}
-                    >
-                      {w.picture_url ? (
-                        <img src={w.picture_url} alt="" className="h-3.5 w-3.5 rounded-full object-cover" />
-                      ) : (
-                        <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary/20 text-[9px] font-bold text-primary">
-                          {w.name.slice(0, 1).toUpperCase()}
-                        </span>
-                      )}
-                      <span>{w.name}</span>
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateWalletModalOpen(true)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold text-primary hover:bg-primary/10 transition-colors shrink-0 cursor-pointer"
-                  >
-                    + New
-                  </button>
-                </div>
-              )}
+
             </SurfaceCard>
           )}
 
-          <section className="grid gap-4 xl:grid-cols-[minmax(260px,0.32fr)_minmax(0,0.68fr)]">
-            <SurfaceCard className="space-y-3 sm:space-y-3.5 p-3.5 sm:p-5 xl:sticky xl:top-28 xl:self-start">
-              <SectionHeader
-                eyebrow="Your wallets"
-                title="Groups & Ledgers"
-                description="Switch between wallets or create a new group."
-                actions={
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateWalletModalOpen(true)}
-                    className="ui-button-primary !min-h-7 sm:!min-h-8 !px-2.5 sm:!px-3 !py-1 text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
-                  >
-                    <Plus className="size-3" />
-                    <span>New Wallet</span>
-                  </button>
-                }
-              />
-
-              {wallets.length === 0 ? (
-                <EmptyState
-                  title="No wallets yet"
-                  description="Create your first shared wallet to start tracking group spending, shared budgets, and settlements."
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => setIsCreateWalletModalOpen(true)}
-                      className="ui-button-primary mt-2 cursor-pointer"
-                    >
-                      Create Shared Wallet
-                    </button>
-                  }
-                />
-              ) : (
-                <div className="grid gap-2">
-                  {wallets.map((wallet) => (
-                    <button
-                      key={wallet.id}
-                      type="button"
-                      className={cn(
-                        "flex items-start gap-2 sm:gap-2.5 rounded-xl border p-2 sm:p-3 text-left shadow-2xs transition-all duration-200 cursor-pointer",
-                        wallet.id === selectedWalletId
-                          ? "border-primary/35 bg-success-tint/70 text-ink ring-1 ring-primary/20 shadow-2xs"
-                          : "border-[color:var(--border)] bg-card text-secondary hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:border-primary/25",
-                      )}
-                      onClick={() => onSelectWallet(wallet.id)}
-                    >
-                      {wallet.picture_url ? (
-                        <img
-                          src={wallet.picture_url}
-                          alt={wallet.name}
-                          className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl object-cover ring-1 ring-black/10 shrink-0 mt-0.5"
-                        />
-                      ) : (
-                        <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,var(--primary),var(--gold))] text-[11px] sm:text-xs font-bold text-white shadow-2xs mt-0.5">
-                          {wallet.name.slice(0, 2).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <strong className="truncate block text-xs sm:text-sm font-bold text-ink">
-                            {wallet.name}
-                          </strong>
-                          <span className="text-[10px] sm:text-[11px] font-semibold text-primary shrink-0">
-                            {wallet.currency || "INR"}
-                          </span>
-                        </div>
-                        <span className="mt-0.5 block text-[10px] sm:text-2xs line-clamp-1 text-secondary">
-                          {wallet.description || "No description"}
-                        </span>
-                        <div className="mt-1 flex items-center gap-1.5 text-[9px] sm:text-[10px] font-semibold text-muted">
-                          <span className="capitalize">{wallet.default_split_rule} split</span>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </SurfaceCard>
-
+              {/* Full Width Ledger / Detail Panels */}
             <section className="grid gap-5">
               {isSwitchingWallet ? (
                 <div className="space-y-5">
@@ -3104,7 +3241,7 @@ export function WalletsPage({
                         aria-selected={walletSubTab === "overview"}
                         aria-controls="panel-overview"
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          "rounded-full px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-xs lg:text-sm font-semibold transition-colors cursor-pointer",
                           walletSubTab === "overview"
                             ? "bg-primary text-white shadow-xs"
                             : "text-secondary hover:bg-zinc-100 hover:text-ink",
@@ -3120,7 +3257,7 @@ export function WalletsPage({
                         aria-selected={walletSubTab === "transactions"}
                         aria-controls="panel-transactions"
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          "rounded-full px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-xs lg:text-sm font-semibold transition-colors cursor-pointer",
                           walletSubTab === "transactions"
                             ? "bg-primary text-white shadow-xs"
                             : "text-secondary hover:bg-zinc-100 hover:text-ink",
@@ -3136,7 +3273,7 @@ export function WalletsPage({
                         aria-selected={walletSubTab === "budget"}
                         aria-controls="panel-budget"
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          "rounded-full px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-xs lg:text-sm font-semibold transition-colors cursor-pointer",
                           walletSubTab === "budget"
                             ? "bg-primary text-white shadow-xs"
                             : "text-secondary hover:bg-zinc-100 hover:text-ink",
@@ -3152,7 +3289,7 @@ export function WalletsPage({
                         aria-selected={walletSubTab === "members"}
                         aria-controls="panel-members"
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          "rounded-full px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-xs lg:text-sm font-semibold transition-colors cursor-pointer",
                           walletSubTab === "members"
                             ? "bg-primary text-white shadow-xs"
                             : "text-secondary hover:bg-zinc-100 hover:text-ink",
@@ -3168,7 +3305,7 @@ export function WalletsPage({
                         aria-selected={walletSubTab === "all"}
                         aria-controls="panel-all"
                         className={cn(
-                          "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer",
+                          "rounded-full px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-xs lg:text-sm font-semibold transition-colors cursor-pointer",
                           walletSubTab === "all"
                             ? "bg-primary text-white shadow-xs"
                             : "text-secondary hover:bg-zinc-100 hover:text-ink",
@@ -3184,13 +3321,20 @@ export function WalletsPage({
                       <button
                         type="button"
                         className={cn(
-                          "ui-button-sm text-xs cursor-pointer flex items-center gap-1.5 transition-all",
+                          "ui-button-sm !py-1 sm:!py-1.5 !px-2 sm:!px-3 text-[11px] sm:text-xs lg:text-sm cursor-pointer flex items-center gap-1 sm:gap-1.5 transition-all",
                           isGroupExpenseFormOpen
                             ? "ui-button-secondary border-primary/30 text-primary font-semibold"
                             : "ui-button-primary"
                         )}
                         onClick={() => {
-                          setIsGroupExpenseFormOpen((prev) => !prev);
+                          setIsGroupExpenseFormOpen((prev) => {
+                            const next = !prev;
+                            if (next && !editingWalletExpenseId && !expenseBankAccountId && effectiveDefaultBank) {
+                              setExpenseBankAccountId(effectiveDefaultBank.id);
+                              setExpenseBankName(effectiveDefaultBank.account_label || effectiveDefaultBank.bank_name);
+                            }
+                            return next;
+                          });
                           if (!isGroupExpenseFormOpen) {
                             setTimeout(() => {
                               document.getElementById("wallet-transaction-forms")?.scrollIntoView({ behavior: "smooth" });
@@ -3213,7 +3357,7 @@ export function WalletsPage({
                       <button
                         type="button"
                         className={cn(
-                          "ui-button-sm text-xs cursor-pointer flex items-center gap-1.5 transition-all",
+                          "ui-button-sm !py-1 sm:!py-1.5 !px-2 sm:!px-3 text-[11px] sm:text-xs lg:text-sm cursor-pointer flex items-center gap-1 sm:gap-1.5 transition-all",
                           isGroupPaybackFormOpen
                             ? "ui-button-secondary border-primary/30 text-primary font-semibold"
                             : "ui-button-secondary"
@@ -3266,7 +3410,7 @@ export function WalletsPage({
                               )}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <strong className="text-sm font-bold text-ink truncate">
+                                <strong className="text-xs sm:text-sm font-bold text-ink truncate">
                                   {balance.member_name}
                                 </strong>
                                 <span className={cn(
@@ -3284,7 +3428,7 @@ export function WalletsPage({
                                       : "Settled"}
                                 </span>
                               </div>
-                              <h3 className="mt-2 text-xl sm:text-2xl font-bold tracking-tight text-ink">
+                              <h3 className="mt-1.5 text-base sm:text-2xl font-bold tracking-tight text-ink">
                                 {formatCurrency(Math.abs(numericBalance).toFixed(2), selectedWallet.wallet.currency)}
                               </h3>
                             </article>
@@ -3338,7 +3482,7 @@ export function WalletsPage({
                               actions={
                                 <button
                                   type="button"
-                                  className="ui-button-secondary ui-button-sm text-xs cursor-pointer"
+                                  className="ui-button-secondary !py-1 sm:!py-1.5 !px-2 sm:!px-3 text-[11px] sm:text-xs lg:text-sm cursor-pointer"
                                   onClick={() => setIsSettlementModalOpen(true)}
                                 >
                                   Payback history
@@ -3372,7 +3516,7 @@ export function WalletsPage({
                   actions={
                     <button
                       type="button"
-                      className="ui-button-secondary !py-1.5 !px-3 text-xs"
+                      className="ui-button-secondary !py-1 sm:!py-1.5 !px-2 sm:!px-3 text-[11px] sm:text-xs lg:text-sm"
                       onClick={() => setIsExpenseModalOpen(true)}
                     >
                       Filter expenses
@@ -3597,7 +3741,7 @@ export function WalletsPage({
                                 <strong className="block text-sm font-semibold text-ink truncate">
                                   {expense.description}
                                 </strong>
-                                <p className="text-2xs text-secondary leading-none">
+                                <p className="text-[10px] sm:text-xs md:text-sm text-secondary leading-none">
                                   {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
                                 </p>
                               </div>
@@ -3607,9 +3751,11 @@ export function WalletsPage({
                                 <strong className="block text-base sm:text-lg font-bold tracking-tight text-ink">
                                   {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
                                 </strong>
-                                <span className="text-2xs font-medium text-secondary">
-                                  {expense.split_rule} split
-                                </span>
+                                {expense.split_rule && expense.split_rule !== "equal" ? (
+                                  <span className="text-2xs font-medium text-secondary capitalize">
+                                    {expense.split_rule} split
+                                  </span>
+                                ) : null}
                               </div>
                               <div className="pl-2 border-l border-[color:var(--border)]/60">
                                 <ItemActionButtons
@@ -3674,15 +3820,19 @@ export function WalletsPage({
                           </div>
 
                           <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2">
-                            <div className="flex flex-wrap items-center gap-1.5 text-2xs text-secondary">
-                              <span className="rounded-full border border-[color:var(--border)] bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-secondary">{expense.category}</span>
-                              <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
-                              <span>•</span>
-                              <span>{expense.date}</span>
-                              <span>•</span>
-                              <span className="text-2xs font-medium text-secondary">
-                                {expense.split_rule} split
-                              </span>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] sm:text-2xs text-secondary">
+                              <span className="rounded-full border border-[color:var(--border)] bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-secondary">{expense.category}</span>
+                              <span className="text-[10px] sm:text-2xs">paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
+                              <span className="opacity-60">•</span>
+                              <span className="text-[10px] sm:text-2xs">{expense.date}</span>
+                              {expense.split_rule && expense.split_rule !== "equal" ? (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-2xs font-medium text-secondary capitalize">
+                                    {expense.split_rule} split
+                                  </span>
+                                </>
+                              ) : null}
                             </div>
                             <ItemActionButtons
                               description={expense.description}
@@ -4160,7 +4310,7 @@ export function WalletsPage({
                                     <strong className="block truncate text-base font-semibold text-ink">
                                       {expense.description}
                                     </strong>
-                                    <p className="text-xs text-secondary leading-none">
+                                    <p className="text-[10px] sm:text-xs md:text-sm text-secondary leading-none">
                                       {expense.category} · paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span> · {expense.date}
                                     </p>
                                   </div>
@@ -4170,9 +4320,11 @@ export function WalletsPage({
                                     <strong className="block text-xl font-bold tracking-tight text-ink">
                                       {formatCurrency(expense.amount, selectedWallet?.wallet.currency)}
                                     </strong>
-                                    <span className="text-xs font-medium text-secondary">
-                                      {expense.split_rule} split
-                                    </span>
+                                    {expense.split_rule && expense.split_rule !== "equal" ? (
+                                      <span className="text-xs font-medium text-secondary capitalize">
+                                        {expense.split_rule} split
+                                      </span>
+                                    ) : null}
                                   </div>
                                   <div className="pl-2 border-l border-[color:var(--border)]/60">
                                     <ItemActionButtons
@@ -4234,15 +4386,19 @@ export function WalletsPage({
                               </div>
 
                               <div className="flex items-center justify-between gap-2 border-t border-zinc-100 dark:border-zinc-800/60 pt-2.5">
-                                <div className="flex flex-wrap items-center gap-2 text-xs text-secondary">
-                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2.5 py-0.5 text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
-                                  <span>paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
-                                  <span>•</span>
-                                  <span>{expense.date}</span>
-                                  <span>•</span>
-                                  <span className="text-xs font-medium text-secondary">
-                                    {expense.split_rule} split
-                                  </span>
+                                <div className="flex flex-wrap items-center gap-1.5 text-[10px] sm:text-xs text-secondary">
+                                  <span className="rounded-full border border-[color:var(--border)] bg-white/80 px-2 py-0.5 text-[9px] sm:text-2xs font-semibold uppercase tracking-[0.15em] text-secondary">{expense.category}</span>
+                                  <span className="text-[10px] sm:text-xs">paid by <span className="font-medium text-ink">{expense.paid_by_member_name?.split(" ")[0]}</span></span>
+                                  <span className="opacity-60">•</span>
+                                  <span className="text-[10px] sm:text-xs">{expense.date}</span>
+                                  {expense.split_rule && expense.split_rule !== "equal" ? (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-xs font-medium text-secondary capitalize">
+                                        {expense.split_rule} split
+                                      </span>
+                                    </>
+                                  ) : null}
                                 </div>
                                 <ItemActionButtons
                                   description={expense.description}
@@ -4383,12 +4539,13 @@ export function WalletsPage({
             </>
           )}
         </section>
-      </section>
+            </div>
+          )}
         </div>
       )}
 
       {viewMode === "loans" && (
-        <section className="space-y-6">
+        <section className="space-y-4 sm:space-y-6 max-w-full overflow-x-hidden">
           {isLoansLoading ? (
             <SurfaceCard className="relative overflow-hidden border-emerald-500/20 p-12 text-center flex flex-col items-center justify-center min-h-[380px] shadow-sm bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(244,249,246,0.85))] dark:bg-zinc-900/90">
               <div className="relative flex items-center justify-center mb-4">
@@ -4409,13 +4566,13 @@ export function WalletsPage({
           ) : (
             <>
               {/* Top Mode Navigation: Lent vs Borrowed vs Unified Mini-Statement */}
-              <div className="flex items-center justify-between gap-2 border-b border-[color:var(--border)] pb-2.5 sm:pb-3">
-                <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800/70 rounded-xl border border-[color:var(--border)] shrink-0 sm:shrink min-w-0 overflow-x-auto no-scrollbar">
+              <div className="flex items-center justify-between gap-1.5 sm:gap-2 border-b border-[color:var(--border)] pb-2 sm:pb-3 max-w-full">
+                <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800/70 rounded-xl border border-[color:var(--border)] shrink min-w-0 overflow-x-auto no-scrollbar">
                   <button
                     type="button"
                     onClick={() => setLoanTab("lent")}
                     className={cn(
-                      "flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      "flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
                       loanTab === "lent"
                         ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
                         : "text-secondary hover:text-ink"
@@ -4424,7 +4581,7 @@ export function WalletsPage({
                     <ArrowUpRight className="size-3 sm:size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                     <span className="hidden sm:inline">Money Lent</span>
                     <span className="sm:hidden">Lent</span>
-                    <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 text-[10px] sm:text-2xs text-emerald-800 dark:text-emerald-300 font-semibold">
+                    <span className="rounded-full bg-emerald-100 dark:bg-emerald-950/80 px-1 py-0.2 text-[9px] sm:text-2xs text-emerald-800 dark:text-emerald-300 font-semibold">
                       {lentLoansList.length}
                     </span>
                   </button>
@@ -4433,7 +4590,7 @@ export function WalletsPage({
                     type="button"
                     onClick={() => setLoanTab("borrowed")}
                     className={cn(
-                      "flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      "flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
                       loanTab === "borrowed"
                         ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-2xs"
                         : "text-secondary hover:text-ink"
@@ -4441,8 +4598,8 @@ export function WalletsPage({
                   >
                     <ArrowDownLeft className="size-3 sm:size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
                     <span className="hidden sm:inline">Money Borrowed</span>
-                    <span className="sm:hidden">Borrowed</span>
-                    <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-1.5 py-0.2 text-[10px] sm:text-2xs text-amber-800 dark:text-amber-300 font-semibold">
+                    <span className="sm:hidden">Borrow</span>
+                    <span className="rounded-full bg-amber-100 dark:bg-amber-950/80 px-1 py-0.2 text-[9px] sm:text-2xs text-amber-800 dark:text-amber-300 font-semibold">
                       {borrowedLoansList.length}
                     </span>
                   </button>
@@ -4451,7 +4608,7 @@ export function WalletsPage({
                     type="button"
                     onClick={() => setLoanTab("statement")}
                     className={cn(
-                      "flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                      "flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
                       loanTab === "statement"
                         ? "bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                         : "text-secondary hover:text-ink"
@@ -4459,39 +4616,39 @@ export function WalletsPage({
                   >
                     <FileText className="size-3 sm:size-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
                     <span className="hidden sm:inline">Mini-Statement</span>
-                    <span className="sm:hidden">Statement</span>
-                    <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-1.5 py-0.2 text-[10px] sm:text-2xs text-indigo-800 dark:text-indigo-300 font-semibold">
+                    <span className="sm:hidden">Stmt</span>
+                    <span className="rounded-full bg-indigo-100 dark:bg-indigo-950/80 px-1 py-0.2 text-[9px] sm:text-2xs text-indigo-800 dark:text-indigo-300 font-semibold">
                       {unifiedStatementItems.length}
                     </span>
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   {loanTab === "lent" && (
                     <button
                       type="button"
-                      className="ui-button-primary !py-0.5 sm:!py-1.5 !px-1.5 sm:!px-3 text-xs font-semibold flex items-center gap-1 sm:gap-1.5 cursor-pointer shadow-xs"
+                      className="ui-button-primary !min-h-0 !h-7 sm:!h-8 !py-0 !px-2 sm:!px-3 text-[11px] sm:text-xs font-semibold flex items-center gap-1 sm:gap-1.5 rounded-lg cursor-pointer shadow-xs"
                       onClick={() => handleOpenCreateLoan("lent")}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
                         <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
                       </svg>
                       <span className="hidden sm:inline">Lend Money</span>
-                      <span className="sm:hidden">Lend</span>
+                      <span className="sm:hidden"> Lend</span>
                     </button>
                   )}
 
                   {loanTab === "borrowed" && (
                     <button
                       type="button"
-                      className="ui-button-primary !py-1 sm:!py-1.5 !px-2 sm:!px-3 text-xs font-semibold flex items-center gap-1 sm:gap-1.5 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs"
+                      className="ui-button-primary !min-h-0 !h-7 sm:!h-8 !py-0 !px-2 sm:!px-3 text-[11px] sm:text-xs font-semibold flex items-center gap-1 sm:gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs"
                       onClick={() => handleOpenCreateLoan("borrowed")}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
                         <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
                       </svg>
                       <span className="hidden sm:inline">Record Borrowed</span>
-                      <span className="sm:hidden">Borrow</span>
+                      <span className="sm:hidden"> Borrow</span>
                     </button>
                   )}
 
@@ -4499,14 +4656,14 @@ export function WalletsPage({
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        className="ui-button-secondary ui-button-sm !py-1 sm:!py-1.5 !px-2 sm:!px-2.5 text-xs flex items-center gap-1 cursor-pointer"
+                        className="ui-button-secondary !min-h-0 !h-7 sm:!h-8 !py-0 !px-1.5 sm:!px-2.5 text-[10px] sm:text-xs font-semibold rounded-lg flex items-center gap-0.5 cursor-pointer shadow-2xs"
                         onClick={() => handleOpenCreateLoan("lent")}
                       >
                         <span>+ Lend</span>
                       </button>
                       <button
                         type="button"
-                        className="ui-button-secondary ui-button-sm !py-1 sm:!py-1.5 !px-2 sm:!px-2.5 text-xs flex items-center gap-1 cursor-pointer"
+                        className="ui-button-secondary !min-h-0 !h-7 sm:!h-8 !py-0 !px-1.5 sm:!px-2.5 text-[10px] sm:text-xs font-semibold rounded-lg flex items-center gap-0.5 cursor-pointer shadow-2xs"
                         onClick={() => handleOpenCreateLoan("borrowed")}
                       >
                         <span>+ Borrow</span>
@@ -4523,7 +4680,7 @@ export function WalletsPage({
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           <span className="sm:hidden">Principal</span>
                           <span className="hidden sm:inline">{loanTab === "borrowed" ? "Principal Borrowed" : "Principal Lent"}</span>
                         </p>
@@ -4540,17 +4697,17 @@ export function WalletsPage({
                           )}
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-ink truncate">
                         {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalBorrowed : lentLoansAggregate.totalLent).toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         Across {loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans} {loanTab === "borrowed" ? "loan" : "loan"}{(loanTab === "borrowed" ? borrowedLoansAggregate.totalLoans : lentLoansAggregate.totalLoans) !== 1 ? "s" : ""}
                       </span>
                     </SurfaceCard>
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           <span className="sm:hidden">Interest</span>
                           <span className="hidden sm:inline">{loanTab === "borrowed" ? "Interest Payable" : "Interest Accrued"}</span>
                         </p>
@@ -4558,17 +4715,17 @@ export function WalletsPage({
                           <Clock className="size-3 sm:size-3.5" />
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
                         {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalInterest : lentLoansAggregate.totalInterest).toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         Calculated per terms
                       </span>
                     </SurfaceCard>
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           <span className="sm:hidden">{loanTab === "borrowed" ? "Paid Back" : "Collected"}</span>
                           <span className="hidden sm:inline">{loanTab === "borrowed" ? "Total Paid Back" : "Total Collected"}</span>
                         </p>
@@ -4576,17 +4733,17 @@ export function WalletsPage({
                           <CheckCircle2 className="size-3 sm:size-3.5" />
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 truncate">
                         {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalPaidBack : lentLoansAggregate.totalRepaid).toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         {loanTab === "borrowed" ? "Paid to lenders" : "Installments received"}
                       </span>
                     </SurfaceCard>
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           <span className="sm:hidden">{loanTab === "borrowed" ? "To Pay" : "To Collect"}</span>
                           <span className="hidden sm:inline">{loanTab === "borrowed" ? "Remaining to Pay" : "To Collect"}</span>
                         </p>
@@ -4600,12 +4757,12 @@ export function WalletsPage({
                         </span>
                       </div>
                       <strong className={cn(
-                        "mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight truncate",
+                        "mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight truncate",
                         loanTab === "borrowed" ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
                       )}>
                         {formatCurrency((loanTab === "borrowed" ? borrowedLoansAggregate.totalRemaining : lentLoansAggregate.totalRemaining).toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         {loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount} active loan{(loanTab === "borrowed" ? borrowedLoansAggregate.activeCount : lentLoansAggregate.activeCount) !== 1 ? "s" : ""}
                       </span>
                     </SurfaceCard>
@@ -4636,7 +4793,7 @@ export function WalletsPage({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar">
+                      <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar max-w-full">
                         <button
                           type="button"
                           onClick={() => setStandaloneFilterStatus("all")}
@@ -4718,7 +4875,7 @@ export function WalletsPage({
                         <button
                           type="button"
                           className={cn(
-                            "ui-button-primary mt-1 inline-flex items-center gap-1.5 cursor-pointer !py-1.5 !px-3 text-xs font-semibold",
+                            "ui-button-primary mt-1 inline-flex items-center gap-1.5 cursor-pointer !min-h-0 !py-1.5 !px-3 text-xs font-semibold",
                             loanTab === "borrowed" && "bg-amber-600 hover:bg-amber-700 text-white"
                           )}
                           onClick={() => handleOpenCreateLoan(loanTab === "borrowed" ? "borrowed" : "lent")}
@@ -4928,14 +5085,14 @@ export function WalletsPage({
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"
-                                  className="ui-button-ghost ui-button-sm !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
+                                  className="ui-button-ghost ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
                                   onClick={() => setSelectedLoanForDetails(loan)}
                                 >
                                   Timeline ({loan.repayments?.length || 0})
                                 </button>
                                 <button
                                   type="button"
-                                  className="ui-button-secondary ui-button-sm !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs flex items-center gap-1 cursor-pointer"
+                                  className="ui-button-secondary ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs flex items-center gap-1 cursor-pointer"
                                   onClick={() => {
                                     const bKey = loan.borrower_member_id
                                       ? `member:${loan.borrower_member_id}`
@@ -4953,7 +5110,7 @@ export function WalletsPage({
                                 {!isFullyPaid && (
                                   <button
                                     type="button"
-                                    className="ui-button-primary ui-button-sm !py-0.5 sm:!py-1 !px-2 sm:!px-2.5 text-[11px] sm:text-xs cursor-pointer"
+                                    className="ui-button-primary ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-2 sm:!px-2.5 text-[11px] sm:text-xs cursor-pointer"
                                     onClick={() => handleOpenRepaymentModal(loan)}
                                   >
                                     {isBorrowed ? "+ Pay Back" : "+ Repay"}
@@ -4965,14 +5122,14 @@ export function WalletsPage({
                                   <>
                                     <button
                                       type="button"
-                                      className="ui-button-secondary ui-button-sm !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
+                                      className="ui-button-secondary ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
                                       onClick={() => handleOpenEditLoan(loan)}
                                     >
                                       Edit
                                     </button>
                                     <button
                                       type="button"
-                                      className="ui-button-danger ui-button-sm !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
+                                      className="ui-button-danger ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
                                       disabled={deletingLoanIds.includes(loan.id)}
                                       onClick={() => void handleDeleteLoanClick(loan)}
                                     >
@@ -5016,11 +5173,11 @@ export function WalletsPage({
                         )}>
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1 min-w-0">
-                              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                              <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                                 Net Balance
                               </p>
                               <span className={cn(
-                                "rounded-full px-1.5 py-0.2 text-[9px] sm:text-2xs font-bold uppercase truncate shrink-0",
+                                "rounded-full px-1 py-0.2 text-[8px] sm:text-2xs font-bold uppercase truncate shrink-0",
                                 isNetReceivable
                                   ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
                                   : isBalanced
@@ -5048,7 +5205,7 @@ export function WalletsPage({
                             </span>
                           </div>
                           <strong className={cn(
-                            "mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-extrabold tracking-tight truncate",
+                            "mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-extrabold tracking-tight truncate",
                             isNetReceivable
                               ? "text-emerald-700 dark:text-emerald-400"
                               : isBalanced
@@ -5061,7 +5218,7 @@ export function WalletsPage({
                                 ? formatCurrency((0).toFixed(2))
                                 : `-${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
                           </strong>
-                          <div className="mt-0.5 flex flex-col gap-0.5 text-[10px] sm:text-2xs text-secondary">
+                          <div className="mt-0.5 flex flex-col gap-0.5 text-[9px] sm:text-2xs text-secondary">
                             <span className="truncate">
                               {isNetReceivable
                                 ? `Surplus: ${formatCurrency(Math.abs(netBalance).toFixed(2))}`
@@ -5069,7 +5226,7 @@ export function WalletsPage({
                                   ? "Evenly matched"
                                   : `Deficit: ${formatCurrency(Math.abs(netBalance).toFixed(2))}`}
                             </span>
-                            <span className="text-[10px] sm:text-2xs opacity-80 truncate">
+                            <span className="text-[9px] sm:text-2xs opacity-80 truncate">
                               {formatCurrency(lentLoansAggregate.totalRemaining.toFixed(2))} to collect · {formatCurrency(borrowedLoansAggregate.totalRemaining.toFixed(2))} to pay
                             </span>
                           </div>
@@ -5079,58 +5236,58 @@ export function WalletsPage({
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           Total Lent
                         </p>
                         <span className="flex h-5 w-5 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 shrink-0">
                           <ArrowUpRight className="size-3 sm:size-3.5" />
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-ink truncate">
                         {formatCurrency(lentLoansAggregate.totalLent.toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         {lentLoansAggregate.totalLoans} loan{lentLoansAggregate.totalLoans !== 1 ? "s" : ""} issued
                       </span>
                     </SurfaceCard>
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           Total Borrowed
                         </p>
                         <span className="flex h-5 w-5 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 shrink-0">
                           <ArrowDownLeft className="size-3 sm:size-3.5" />
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-ink truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-ink truncate">
                         {formatCurrency(borrowedLoansAggregate.totalBorrowed.toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         {borrowedLoansAggregate.totalLoans} loan{borrowedLoansAggregate.totalLoans !== 1 ? "s" : ""} taken
                       </span>
                     </SurfaceCard>
 
                     <SurfaceCard className="relative overflow-hidden p-2.5 sm:p-3.5 rounded-xl">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
+                        <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-tight sm:tracking-wider text-secondary truncate">
                           Total Settled
                         </p>
                         <span className="flex h-5 w-5 sm:h-7 sm:w-7 items-center justify-center rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400 shrink-0">
                           <CheckCircle2 className="size-3 sm:size-3.5" />
                         </span>
                       </div>
-                      <strong className="mt-1 sm:mt-2 block text-sm sm:text-lg lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
+                      <strong className="mt-1 sm:mt-2 block text-xs sm:text-base lg:text-xl font-bold tracking-tight text-purple-600 dark:text-purple-400 truncate">
                         {formatCurrency((lentLoansAggregate.totalRepaid + borrowedLoansAggregate.totalPaidBack).toFixed(2))}
                       </strong>
-                      <span className="mt-0.5 block text-[10px] sm:text-2xs text-secondary truncate">
+                      <span className="mt-0.5 block text-[9px] sm:text-2xs text-secondary truncate">
                         Lent &amp; borrowed settled
                       </span>
                     </SurfaceCard>
                   </div>
 
                   {/* Statement Search and Type Filter */}
-                  <SurfaceCard className="p-2.5 sm:p-3 rounded-xl">
+                  <SurfaceCard className="p-2 sm:p-2.5 rounded-xl">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div className="relative flex-1">
                         <input
@@ -5154,12 +5311,12 @@ export function WalletsPage({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar">
+                      <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg border border-[color:var(--border)] shrink-0 overflow-x-auto no-scrollbar max-w-full">
                         <button
                           type="button"
                           onClick={() => setStatementFilterType("all")}
                           className={cn(
-                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            "px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                             statementFilterType === "all"
                               ? "bg-white dark:bg-zinc-900 text-ink shadow-2xs"
                               : "text-secondary hover:text-ink"
@@ -5171,7 +5328,7 @@ export function WalletsPage({
                           type="button"
                           onClick={() => setStatementFilterType("lent")}
                           className={cn(
-                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            "px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                             statementFilterType === "lent"
                               ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
                               : "text-secondary hover:text-ink"
@@ -5183,7 +5340,7 @@ export function WalletsPage({
                           type="button"
                           onClick={() => setStatementFilterType("borrowed")}
                           className={cn(
-                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            "px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                             statementFilterType === "borrowed"
                               ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-2xs"
                               : "text-secondary hover:text-ink"
@@ -5195,7 +5352,7 @@ export function WalletsPage({
                           type="button"
                           onClick={() => setStatementFilterType("repayments")}
                           className={cn(
-                            "px-2.5 py-1 rounded-md text-2xs sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
+                            "px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap",
                             statementFilterType === "repayments"
                               ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow-2xs"
                               : "text-secondary hover:text-ink"
@@ -5222,12 +5379,12 @@ export function WalletsPage({
                     </SurfaceCard>
                   ) : (
                     <SurfaceCard className="overflow-hidden p-0 rounded-xl">
-                      <div className="border-b border-[color:var(--border)] px-4 py-3 flex items-center justify-between">
+                      <div className="border-b border-[color:var(--border)] px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between gap-2">
                         <div>
-                          <h3 className="font-bold text-sm sm:text-base text-ink">Unified Loans Statement</h3>
-                          <p className="text-2xs sm:text-xs text-secondary">Chronological record of money lent, borrowed, and repaid</p>
+                          <h3 className="font-bold text-xs sm:text-sm text-ink truncate">Unified Loans Statement</h3>
+                          <p className="text-[10px] sm:text-xs text-secondary truncate">Chronological record of money lent, borrowed, and repaid</p>
                         </div>
-                        <span className="text-2xs sm:text-xs text-secondary font-medium">
+                        <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[10px] sm:text-xs text-secondary font-semibold shrink-0">
                           {filteredStatementItems.length} record{filteredStatementItems.length !== 1 ? "s" : ""}
                         </span>
                       </div>
@@ -5247,11 +5404,11 @@ export function WalletsPage({
                           return (
                             <div
                               key={entry.id}
-                              className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:px-4 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors gap-2 sm:gap-3"
+                              className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:px-4 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors gap-1.5 sm:gap-3"
                             >
                               <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
                                 <span className={cn(
-                                  "flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg shadow-2xs font-semibold",
+                                  "flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg shadow-2xs font-semibold",
                                   isCredit
                                     ? "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300"
                                     : "bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300"
@@ -5269,7 +5426,7 @@ export function WalletsPage({
                                       {entry.counterparty}
                                     </strong>
                                     <span className={cn(
-                                      "rounded-md px-1.5 py-0.2 text-2xs font-bold uppercase tracking-wider",
+                                      "rounded-md px-1.5 py-0.2 text-[9px] sm:text-2xs font-bold uppercase tracking-wider shrink-0",
                                       isLent && "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300",
                                       isBorrowed && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
                                       isRepReceived && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300",
@@ -5279,24 +5436,24 @@ export function WalletsPage({
                                     </span>
                                   </div>
 
-                                  <p className="text-2xs sm:text-xs text-secondary mt-0.5 truncate">
+                                  <p className="text-[10px] sm:text-xs text-secondary mt-0.5 truncate">
                                     {entry.notes || (isLent ? "Loan principal disbursed to borrower" : isBorrowed ? "Borrowed principal received from lender" : isRepReceived ? "Repayment collected from borrower" : "Payment sent to lender")}
                                     {entry.counterpartyEmail && ` • ${entry.counterpartyEmail}`}
                                   </p>
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-10 sm:pl-0">
+                              <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 shrink-0 pl-9 sm:pl-0">
                                 <div className="text-left sm:text-right">
                                   <div className="flex items-center sm:justify-end gap-1">
                                     <p className={cn(
-                                      "text-xs sm:text-sm font-extrabold",
+                                      "text-[11px] sm:text-xs font-bold",
                                       isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                                     )}>
                                       {isCredit ? "+" : "-"}{formatCurrency(entry.amount.toFixed(2))}
                                     </p>
                                     <span className={cn(
-                                      "text-2xs font-bold px-1 py-0.2 rounded uppercase tracking-wider",
+                                      "text-[9px] sm:text-2xs font-bold px-1 py-0.2 rounded uppercase tracking-wider",
                                       isCredit
                                         ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
                                         : "bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300"
@@ -5304,14 +5461,14 @@ export function WalletsPage({
                                       {isCredit ? "Credit" : "Debit"}
                                     </span>
                                   </div>
-                                  <span className="text-2xs text-secondary">
+                                  <span className="text-[10px] sm:text-2xs text-secondary">
                                     {entry.date}
                                   </span>
                                 </div>
 
                                 <button
                                   type="button"
-                                  className="ui-button-ghost ui-button-sm !py-1 !px-2 text-2xs sm:text-xs cursor-pointer"
+                                  className="ui-button-ghost !min-h-0 !h-6 sm:!h-7 !py-0 !px-2 text-[10px] sm:text-xs rounded-md cursor-pointer"
                                   onClick={() => setSelectedLoanForDetails(entry.loan)}
                                 >
                                   Timeline
@@ -5397,6 +5554,7 @@ export function WalletsPage({
           onClose={() => {
             if (!isSubmitting) {
               setIsCreateWalletModalOpen(false);
+              setCreateWalletMembers([{ displayName: "", email: "" }]);
               setShowCreateWalletValidation(false);
             }
           }}
@@ -5487,15 +5645,74 @@ export function WalletsPage({
               ]}
             />
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Members
-              <textarea
-                value={walletMembersText}
-                onChange={(event) => setWalletMembersText(event.target.value)}
-                rows={4}
-                placeholder="One name per line or comma separated"
-              />
-            </label>
+            {/* Members Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-secondary">Group Members (Optional)</span>
+                <span className="text-2xs text-muted">You are automatically added as Owner</span>
+              </div>
+
+              <div className="space-y-2.5">
+                {createWalletMembers.map((member, idx) => (
+                  <div
+                    key={idx}
+                    className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 sm:p-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={member.displayName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCreateWalletMembers((prev) =>
+                            prev.map((m, i) => (i === idx ? { ...m, displayName: val } : m))
+                          );
+                        }}
+                        placeholder={`Member ${idx + 1} Name (e.g. Rahul Sharma)`}
+                        className="w-full text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="email"
+                        value={member.email}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCreateWalletMembers((prev) =>
+                            prev.map((m, i) => (i === idx ? { ...m, email: val } : m))
+                          );
+                        }}
+                        placeholder="Email for invitation (optional)"
+                        className="w-full text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      />
+                    </div>
+                    {createWalletMembers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreateWalletMembers((prev) => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="self-end sm:self-center p-1.5 text-secondary hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shrink-0"
+                        title="Remove member"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateWalletMembers((prev) => [...prev, { displayName: "", email: "" }]);
+                }}
+                className="w-full py-2 px-3 border border-dashed border-[color:var(--border)] rounded-xl text-xs font-semibold text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="size-3.5" />
+                <span>Add Another Member</span>
+              </button>
+            </div>
 
             <div className="flex justify-end gap-2 mt-4">
               <button
@@ -5613,15 +5830,74 @@ export function WalletsPage({
               ]}
             />
 
-            <label className="grid gap-2 text-sm font-medium text-secondary">
-              Members
-              <textarea
-                value={editWalletMembersText}
-                onChange={(event) => setEditWalletMembersText(event.target.value)}
-                rows={4}
-                placeholder="One name per line or comma separated"
-              />
-            </label>
+            {/* Members Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs sm:text-sm font-medium text-secondary">Group Members</span>
+                <span className="text-2xs text-muted">Group Owner is preserved</span>
+              </div>
+
+              <div className="space-y-2.5">
+                {editWalletMembers.map((member, idx) => (
+                  <div
+                    key={idx}
+                    className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 sm:p-3 rounded-2xl border border-[color:var(--border)] bg-zinc-50/70 dark:bg-zinc-800/40"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={member.displayName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditWalletMembers((prev) =>
+                            prev.map((m, i) => (i === idx ? { ...m, displayName: val } : m))
+                          );
+                        }}
+                        placeholder={`Member ${idx + 1} Name (e.g. Rahul Sharma)`}
+                        className="w-full text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="email"
+                        value={member.email}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditWalletMembers((prev) =>
+                            prev.map((m, i) => (i === idx ? { ...m, email: val } : m))
+                          );
+                        }}
+                        placeholder="Email for invitation (optional)"
+                        className="w-full text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      />
+                    </div>
+                    {editWalletMembers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditWalletMembers((prev) => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="self-end sm:self-center p-1.5 text-secondary hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shrink-0"
+                        title="Remove member"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditWalletMembers((prev) => [...prev, { displayName: "", email: "" }]);
+                }}
+                className="w-full py-2 px-3 border border-dashed border-[color:var(--border)] rounded-xl text-xs font-semibold text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="size-3.5" />
+                <span>Add Another Member</span>
+              </button>
+            </div>
 
             <div className="flex justify-end gap-2 mt-4">
               <button
@@ -5642,6 +5918,78 @@ export function WalletsPage({
               </button>
             </div>
           </form>
+        </ModalFrame>
+      ) : null}
+
+      {walletConfirmAction && selectedWallet ? (
+        <ModalFrame
+          onClose={() => {
+            if (!isDeletingWallet && !isLeavingWallet) {
+              setWalletConfirmAction(null);
+            }
+          }}
+          className="max-w-[420px] p-4 sm:p-6"
+        >
+          <div className="space-y-3.5 sm:space-y-4">
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 shrink-0">
+                <Trash2 className="size-4 sm:size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-xs sm:text-base text-ink">
+                  {walletConfirmAction === "delete" ? "Delete Shared Wallet?" : "Exit Shared Wallet?"}
+                </h3>
+                <p className="text-[10px] sm:text-xs text-muted truncate">
+                  {selectedWallet.wallet.name}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-[11px] sm:text-sm text-secondary leading-relaxed">
+              {walletConfirmAction === "delete"
+                ? `Are you sure you want to delete "${selectedWallet.wallet.name}"? All shared expenses, settlement records, budgets, and member balances will be permanently removed.`
+                : `Are you sure you want to exit "${selectedWallet.wallet.name}"? You will lose access to this group ledger and its transaction history.`}
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="ui-button-secondary !py-1 sm:!py-1.5 !px-2.5 sm:!px-3 text-[11px] sm:text-xs"
+                onClick={() => setWalletConfirmAction(null)}
+                disabled={isDeletingWallet || isLeavingWallet}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ui-button-danger !py-1 sm:!py-1.5 !px-3 sm:!px-3.5 text-[11px] sm:text-xs font-semibold"
+                disabled={isDeletingWallet || isLeavingWallet}
+                onClick={async () => {
+                  if (walletConfirmAction === "delete") {
+                    setIsDeletingWallet(true);
+                    try {
+                      await onDeleteWallet(selectedWallet.wallet.id);
+                      setWalletConfirmAction(null);
+                    } finally {
+                      setIsDeletingWallet(false);
+                    }
+                  } else {
+                    setIsLeavingWallet(true);
+                    try {
+                      await onLeaveWallet(selectedWallet.wallet.id);
+                      setWalletConfirmAction(null);
+                    } finally {
+                      setIsLeavingWallet(false);
+                    }
+                  }
+                }}
+              >
+                {walletConfirmAction === "delete"
+                  ? (isDeletingWallet ? "Deleting..." : "Delete Wallet")
+                  : (isLeavingWallet ? "Leaving..." : "Exit Group")}
+              </button>
+            </div>
+          </div>
         </ModalFrame>
       ) : null}
 
@@ -5753,23 +6101,98 @@ export function WalletsPage({
             {/* Borrower or Lender */}
             {viewMode === "loans" || !selectedWallet || (editingLoan && editingLoan.borrower_name) ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-medium text-secondary">
-                  <span className="required-mark">
-                    {loanType === "borrowed" ? "Lender / Creditor Full Name" : "Borrower Full Name"}
-                  </span>
-                  <input
-                    value={loanBorrowerName}
-                    onChange={(e) => setLoanBorrowerName(e.target.value)}
-                    placeholder={loanType === "borrowed" ? "e.g. Sarah Connor" : "e.g. Alex Johnson"}
-                    disabled={Boolean(editingLoan)}
-                    required
-                  />
-                  {showLoanValidation && loanErrors.borrower && (
-                    <span className="text-sm text-[color:var(--danger-text)]">
-                      {loanErrors.borrower}
-                    </span>
+                <div className="relative">
+                  <label className="grid gap-2 text-sm font-medium text-secondary">
+                    <div className="flex items-center justify-between">
+                      <span className="required-mark">
+                        {loanType === "borrowed" ? "Lender / Creditor Full Name" : "Borrower Full Name"}
+                      </span>
+                      {existingLoanContacts.length > 0 && !editingLoan && (
+                        <button
+                          type="button"
+                          className="text-2xs text-primary hover:underline cursor-pointer"
+                          onClick={() => setIsBorrowerSuggestionsOpen((prev) => !prev)}
+                        >
+                          {isBorrowerSuggestionsOpen ? "Hide contacts" : `Contacts (${existingLoanContacts.length})`}
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      value={loanBorrowerName}
+                      onChange={(e) => {
+                        setLoanBorrowerName(e.target.value);
+                        setIsBorrowerSuggestionsOpen(true);
+                      }}
+                      onFocus={() => {
+                        if (existingLoanContacts.length > 0) {
+                          setIsBorrowerSuggestionsOpen(true);
+                        }
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setIsBorrowerSuggestionsOpen(false), 200);
+                      }}
+                      placeholder={loanType === "borrowed" ? "e.g. Sarah Connor" : "e.g. Alex Johnson"}
+                      disabled={Boolean(editingLoan)}
+                      required
+                      autoComplete="off"
+                    />
+                    {showLoanValidation && loanErrors.borrower && (
+                      <span className="text-sm text-[color:var(--danger-text)]">
+                        {loanErrors.borrower}
+                      </span>
+                    )}
+                  </label>
+
+                  {/* Existing Contacts Autocomplete Dropdown */}
+                  {isBorrowerSuggestionsOpen && !editingLoan && filteredBorrowerSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-900 shadow-xl max-h-48 overflow-y-auto divide-y divide-[color:var(--border)]">
+                      <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-secondary bg-zinc-50 dark:bg-zinc-800/60 sticky top-0 flex items-center justify-between">
+                        <span>Existing Contacts</span>
+                        <button
+                          type="button"
+                          className="text-secondary hover:text-ink cursor-pointer"
+                          onClick={() => setIsBorrowerSuggestionsOpen(false)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {filteredBorrowerSuggestions.map((contact) => (
+                        <button
+                          key={contact.name}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 flex items-center justify-between gap-2 transition-colors cursor-pointer group"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setLoanBorrowerName(contact.name);
+                            if (contact.email && !loanBorrowerEmail) {
+                              setLoanBorrowerEmail(contact.email);
+                            }
+                            setIsBorrowerSuggestionsOpen(false);
+                          }}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 text-[11px] font-bold text-ink group-hover:bg-emerald-100 dark:group-hover:bg-emerald-900/60 group-hover:text-emerald-700">
+                              {contact.name.charAt(0).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-ink truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                                {contact.name}
+                              </p>
+                              {contact.email && (
+                                <p className="text-[10px] text-secondary truncate">
+                                  {contact.email}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-secondary group-hover:text-emerald-600 shrink-0 font-medium">
+                            Select ↵
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   )}
-                </label>
+                </div>
                 <label className="grid gap-2 text-sm font-medium text-secondary">
                   {loanType === "borrowed" ? "Lender Email (Optional)" : "Borrower Email (Optional)"}
                   <input
@@ -6109,42 +6532,42 @@ export function WalletsPage({
             onClose={() => setSelectedLoanForDetails(null)}
             className="flex max-h-[92vh] max-w-[620px] flex-col p-0 overflow-hidden"
           >
-            <div className="border-b border-[color:var(--border)] px-6 py-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="section-eyebrow">
+            <div className="border-b border-[color:var(--border)] px-4 py-3.5 sm:px-6 sm:py-5">
+              <div className="flex items-start justify-between gap-2 sm:gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="section-eyebrow text-[10px] sm:text-xs">
                       {liveLoan.loan_type === "borrowed" ? "Borrowed Loan Timeline" : "Lent Loan Timeline"}
                     </span>
                     {isOverpaid && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-2xs font-bold shadow-sm animate-pulse">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-600 text-white px-2 py-0.5 text-[10px] sm:text-2xs font-bold shadow-sm animate-pulse">
                         ⚠️ Overpaid by {formatCurrency(overpaidAmount.toFixed(2), loanCurrency)}
                       </span>
                     )}
                   </div>
-                  <h2 className="mt-1 font-display text-2xl font-bold text-ink">
+                  <h2 className="mt-1 font-display text-base sm:text-2xl font-bold text-ink truncate">
                     {liveLoan.loan_type === "borrowed" ? `Loan from ${borrowerName}` : `Loan to ${borrowerName}`}
                   </h2>
                   {borrowerEmail && (
-                    <p className="text-xs text-secondary">{borrowerEmail}</p>
+                    <p className="text-[11px] sm:text-xs text-secondary truncate">{borrowerEmail}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                   {canManageLoan && (
                     <button
                       type="button"
-                      className="ui-button-secondary ui-button-sm"
+                      className="ui-button-secondary !min-h-0 !h-7 sm:!h-8 !py-0 !px-2 sm:!px-3 text-[11px] sm:text-xs font-semibold rounded-lg cursor-pointer"
                       onClick={() => {
                         setSelectedLoanForDetails(null);
                         handleOpenEditLoan(liveLoan);
                       }}
                     >
-                      ✏️ Edit Terms
+                      ✏️ <span className="hidden sm:inline">Edit Terms</span><span className="sm:hidden">Edit</span>
                     </button>
                   )}
                   <button
                     type="button"
-                    className="ui-button-secondary ui-button-sm"
+                    className="ui-button-secondary !min-h-0 !h-7 sm:!h-8 !py-0 !px-2.5 sm:!px-3 text-[11px] sm:text-xs font-semibold rounded-lg cursor-pointer"
                     onClick={() => setSelectedLoanForDetails(null)}
                   >
                     Close
@@ -6153,44 +6576,44 @@ export function WalletsPage({
               </div>
             </div>
 
-            <div className="overflow-y-auto p-6 space-y-6">
+            <div className="overflow-y-auto p-3.5 sm:p-6 space-y-4 sm:space-y-6">
               {/* Financial Cards Grid */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/40">
-                  <span className="text-2xs text-secondary">Principal</span>
-                  <p className="text-base font-bold text-ink">{formatCurrency(principal.toFixed(2), loanCurrency)}</p>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
+                <div className="rounded-xl bg-zinc-50 p-2.5 sm:p-3 dark:bg-zinc-800/40">
+                  <span className="text-[10px] sm:text-2xs text-secondary">Principal</span>
+                  <p className="text-xs sm:text-base font-bold text-ink truncate">{formatCurrency(principal.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className="rounded-xl bg-amber-50/50 p-3 dark:bg-amber-950/20">
-                  <span className="text-2xs text-amber-700 dark:text-amber-300">
+                <div className="rounded-xl bg-amber-50/50 p-2.5 sm:p-3 dark:bg-amber-950/20">
+                  <span className="text-[10px] sm:text-2xs text-amber-700 dark:text-amber-300 truncate block">
                     {liveLoan.loan_type === "borrowed" ? "Interest to Pay" : "Interest"}
                   </span>
-                  <p className="text-base font-bold text-ink">{formatCurrency(accruedInterest.toFixed(2), loanCurrency)}</p>
+                  <p className="text-xs sm:text-base font-bold text-ink truncate">{formatCurrency(accruedInterest.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className="rounded-xl bg-emerald-50/50 p-3 dark:bg-emerald-950/20">
-                  <span className="text-2xs text-emerald-700 dark:text-emerald-300">
+                <div className="rounded-xl bg-emerald-50/50 p-2.5 sm:p-3 dark:bg-emerald-950/20">
+                  <span className="text-[10px] sm:text-2xs text-emerald-700 dark:text-emerald-300 truncate block">
                     {liveLoan.loan_type === "borrowed" ? "Paid Back" : "Repaid"}
                   </span>
-                  <p className="text-base font-bold text-ink">{formatCurrency(totalRepaid.toFixed(2), loanCurrency)}</p>
+                  <p className="text-xs sm:text-base font-bold text-ink truncate">{formatCurrency(totalRepaid.toFixed(2), loanCurrency)}</p>
                 </div>
-                <div className={cn("rounded-xl p-3", isOverpaid ? "bg-rose-50/80 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800" : "bg-purple-50/50 dark:bg-purple-950/20")}>
-                  <span className={cn("text-2xs", isOverpaid ? "text-rose-700 dark:text-rose-300 font-bold" : "text-purple-700 dark:text-purple-300")}>
+                <div className={cn("rounded-xl p-2.5 sm:p-3", isOverpaid ? "bg-rose-50/80 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800" : "bg-purple-50/50 dark:bg-purple-950/20")}>
+                  <span className={cn("text-[10px] sm:text-2xs truncate block", isOverpaid ? "text-rose-700 dark:text-rose-300 font-bold" : "text-purple-700 dark:text-purple-300")}>
                     {isOverpaid ? "Overpaid By" : liveLoan.loan_type === "borrowed" ? "Remaining Debt" : "Balance"}
                   </span>
-                  <p className={cn("text-base font-bold", isOverpaid ? "text-rose-600 dark:text-rose-400 font-extrabold" : "text-ink")}>
+                  <p className={cn("text-xs sm:text-base font-bold truncate", isOverpaid ? "text-rose-600 dark:text-rose-400 font-extrabold" : "text-ink")}>
                     {isOverpaid ? `+${formatCurrency(overpaidAmount.toFixed(2), loanCurrency)}` : formatCurrency(remainingBalance.toFixed(2), loanCurrency)}
                   </p>
                 </div>
               </div>
 
               {/* Terms Overview */}
-              <div className="rounded-2xl border border-[color:var(--border)] p-4 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-secondary">{liveLoan.loan_type === "borrowed" ? "Borrowed Date:" : "Lending Date:"}</span>
-                  <span className="font-semibold text-ink">{liveLoan.lending_date}</span>
+              <div className="rounded-2xl border border-[color:var(--border)] p-3 sm:p-4 space-y-1.5 sm:space-y-2 text-[11px] sm:text-xs">
+                <div className="flex justify-between gap-2">
+                  <span className="text-secondary shrink-0">{liveLoan.loan_type === "borrowed" ? "Borrowed Date:" : "Lending Date:"}</span>
+                  <span className="font-semibold text-ink text-right">{liveLoan.lending_date}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-secondary">Interest Policy:</span>
-                  <span className="font-semibold text-ink">
+                <div className="flex justify-between gap-2">
+                  <span className="text-secondary shrink-0">Interest Policy:</span>
+                  <span className="font-semibold text-ink text-right">
                     {Number(liveLoan.interest_rate) > 0
                       ? liveLoan.interest_type === "percentage"
                         ? `${liveLoan.interest_rate}% / ${liveLoan.interest_rate_period}`
@@ -6199,29 +6622,29 @@ export function WalletsPage({
                   </span>
                 </div>
                 {liveLoan.interest_start_date && (
-                  <div className="flex justify-between">
-                    <span className="text-secondary">Interest Start Date:</span>
-                    <span className="font-semibold text-ink">{liveLoan.interest_start_date}</span>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-secondary shrink-0">Interest Start Date:</span>
+                    <span className="font-semibold text-ink text-right">{liveLoan.interest_start_date}</span>
                   </div>
                 )}
                 {liveLoan.due_date && (
-                  <div className="flex justify-between">
-                    <span className="text-secondary">Due Date:</span>
-                    <span className="font-semibold text-ink">{liveLoan.due_date} {isOverdue && "(Overdue)"}</span>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-secondary shrink-0">Due Date:</span>
+                    <span className="font-semibold text-ink text-right">{liveLoan.due_date} {isOverdue && "(Overdue)"}</span>
                   </div>
                 )}
                 {liveLoan.notes && (
-                  <div className="border-t border-[color:var(--border)] pt-2 mt-2">
+                  <div className="border-t border-[color:var(--border)] pt-1.5 sm:pt-2 mt-1 sm:mt-2">
                     <span className="text-secondary">Notes:</span>
-                    <p className="mt-1 italic text-ink">{liveLoan.notes}</p>
+                    <p className="mt-0.5 sm:mt-1 italic text-ink">{liveLoan.notes}</p>
                   </div>
                 )}
               </div>
 
               {/* Repayments History */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-sm text-ink">
+              <div className="space-y-2.5 sm:space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-semibold text-xs sm:text-sm text-ink truncate">
                     {liveLoan.loan_type === "borrowed"
                       ? `Payment History (${liveLoan.repayments?.length || 0})`
                       : `Repayment History (${liveLoan.repayments?.length || 0})`}
@@ -6229,7 +6652,7 @@ export function WalletsPage({
                   {!isFullyPaid && (
                     <button
                       type="button"
-                      className="ui-button-primary !py-1 !px-2.5 text-xs"
+                      className="ui-button-primary !min-h-0 !h-7 sm:!h-8 !py-0 !px-2.5 text-[11px] sm:text-xs font-semibold rounded-lg cursor-pointer shadow-xs shrink-0"
                       onClick={() => {
                         handleOpenRepaymentModal(liveLoan);
                       }}
@@ -6240,39 +6663,39 @@ export function WalletsPage({
                 </div>
 
                 {(!liveLoan.repayments || liveLoan.repayments.length === 0) ? (
-                  <p className="text-xs text-secondary text-center py-4 bg-zinc-50 dark:bg-zinc-800/30 rounded-2xl">
+                  <p className="text-[11px] sm:text-xs text-secondary text-center py-4 bg-zinc-50 dark:bg-zinc-800/30 rounded-2xl">
                     {liveLoan.loan_type === "borrowed"
                       ? "No payments have been made to this lender yet."
                       : "No repayments have been recorded for this loan yet."}
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5 sm:space-y-2">
                     {liveLoan.repayments.map((repayment) => (
                       <div
                         key={repayment.id}
-                        className="flex items-center justify-between rounded-xl border border-[color:var(--border)] p-3 bg-white/70 dark:bg-zinc-800/40"
+                        className="flex items-center justify-between rounded-xl border border-[color:var(--border)] p-2.5 sm:p-3 bg-white/70 dark:bg-zinc-800/40 gap-2"
                       >
-                        <div>
-                          <p className="font-bold text-sm text-ink">
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs sm:text-sm text-ink truncate">
                             {formatCurrency(repayment.amount, loanCurrency)}
                           </p>
-                          <p className="text-2xs text-secondary">
+                          <p className="text-[10px] sm:text-2xs text-secondary truncate">
                             {liveLoan.loan_type === "borrowed" ? "Paid on " : "Received on "}
                             {repayment.repayment_date} {repayment.notes && `• ${repayment.notes}`}
                           </p>
                         </div>
                         {canManageLoan && (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                             <button
                               type="button"
-                              className="ui-button-secondary ui-button-sm"
+                              className="ui-button-secondary !min-h-0 !h-6 sm:!h-7 !py-0 !px-2 text-[10px] sm:text-xs rounded-md cursor-pointer"
                               onClick={() => handleOpenEditRepayment(liveLoan, repayment)}
                             >
                               Edit
                             </button>
                             <button
                               type="button"
-                              className="ui-button-danger ui-button-sm"
+                              className="ui-button-danger !min-h-0 !h-6 sm:!h-7 !py-0 !px-2 text-[10px] sm:text-xs rounded-md cursor-pointer"
                               disabled={deletingLoanRepaymentIds.includes(repayment.id)}
                               onClick={() => void handleDeleteRepaymentClick(liveLoan, repayment.id)}
                             >

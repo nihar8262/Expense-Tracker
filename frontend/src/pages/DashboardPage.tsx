@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { EmptyState, SectionHeader, SurfaceCard, ModalFrame, cn } from "../components/ui";
 import { TrendChart } from "../components/TrendChart";
-import { FilterDropdown } from "../components/FilterDropdown";
+import { FilterDropdown, type FilterOption } from "../components/FilterDropdown";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { useNavigate } from "react-router-dom";
 import { PLATFORMS } from "../lib/platforms";
@@ -206,6 +206,38 @@ export function DashboardPage({
 
   const isCustomMonth = /^\d{4}-\d{2}$/.test(selectedTimeRange);
   const isCustomYear = /^\d{4}$/.test(selectedTimeRange);
+
+  const isSingleMonth = selectedTimeRange === "month" || isCustomMonth;
+  const isSingleWeek = selectedTimeRange === "week";
+
+  const granularityOptions = useMemo<FilterOption[]>(() => {
+    if (isSingleWeek) {
+      return [{ value: "daily", label: "Daily" }];
+    }
+    if (isSingleMonth) {
+      return [
+        { value: "daily", label: "Daily" },
+        { value: "weekly", label: "Weekly" },
+      ];
+    }
+    return [
+      { value: "weekly", label: "Weekly" },
+      { value: "monthly", label: "Monthly" },
+      { value: "quarterly", label: "Quarterly" },
+      { value: "yearly", label: "Yearly" },
+    ];
+  }, [isSingleMonth, isSingleWeek]);
+
+  useEffect(() => {
+    const validValues = granularityOptions.map((opt) => opt.value);
+    if (!validValues.includes(chartGranularity)) {
+      if (isSingleWeek || isSingleMonth) {
+        onChartGranularityChange("daily");
+      } else {
+        onChartGranularityChange("monthly");
+      }
+    }
+  }, [granularityOptions, chartGranularity, isSingleWeek, isSingleMonth, onChartGranularityChange]);
 
   let primaryRange = selectedTimeRange;
   if (isCustomMonth) {
@@ -632,13 +664,13 @@ export function DashboardPage({
               </div>
             )}
 
-            {(selectedCategory || selectedPlatform || selectedTimeRange !== "all") && (
+            {(selectedCategory || selectedPlatform || selectedTimeRange !== "month") && (
               <button
                 type="button"
                 onClick={() => {
                   onSelectedCategoryChange("");
                   onSelectedPlatformChange("");
-                  onSelectedTimeRangeChange("all");
+                  onSelectedTimeRangeChange("month");
                 }}
                 className="col-span-2 sm:col-span-1 text-xs text-muted hover:text-ink px-1.5 py-1 transition underline text-center sm:text-left self-center shrink-0"
               >
@@ -1051,12 +1083,7 @@ export function DashboardPage({
                   label="Graph by"
                   value={chartGranularity}
                   onChange={(val) => onChartGranularityChange(val as ChartGranularity)}
-                  options={[
-                    { value: "weekly", label: "Weekly" },
-                    { value: "monthly", label: "Monthly" },
-                    { value: "quarterly", label: "Quarterly" },
-                    { value: "yearly", label: "Yearly" },
-                  ]}
+                  options={granularityOptions}
                 />
 
                 <FilterDropdown

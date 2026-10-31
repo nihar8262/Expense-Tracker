@@ -157,7 +157,7 @@ function sanitizeToolResult(obj) {
   return obj;
 }
 
-const MODEL_NAME = process.env.LLM_MODEL || "meta/llama-3.2-11b-vision-instruct";
+const MODEL_NAME = process.env.LLM_MODEL || "nvidia/nemotron-3.5-bolt-e4b";
 const API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
 async function callLLM(messages, toolsList, currencyCode = "INR", currencySymbol = "₹") {

@@ -18,6 +18,7 @@ import { WalletsPage } from "../pages/WalletsPage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { cn } from "../components/ui";
 import type {
+  BankAccount,
   BillReminder,
   BillReminderRecurrence,
   Budget,
@@ -45,7 +46,7 @@ import type {
   WalletLoan
 } from "../types";
 import { ApiError } from "../types";
-import { deleteAccountData } from "../services/api";
+import { deleteAccountData, listBankAccounts } from "../services/api";
 import {
   defaultCategoryOptions,
   resolveCategoryIcon,
@@ -83,15 +84,15 @@ declare global {
 
 const EXPENSES_PAGE_SIZE = 20;
 
-function createInitialFormState(baseDate = new Date()): ExpenseForm {
+function createInitialFormState(baseDate = new Date(), defaultBank?: BankAccount | null): ExpenseForm {
   return {
     amount: "",
     category: "",
     description: "",
     date: getTodayIsoDate(baseDate),
     platform: null,
-    bankAccountId: null,
-    bankName: null
+    bankAccountId: defaultBank?.id ?? null,
+    bankName: defaultBank ? (defaultBank.account_label || defaultBank.bank_name) : null
   };
 }
 
@@ -432,6 +433,40 @@ export function AppRoutes() {
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
   const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences | null>(null);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [userBankAccounts, setUserBankAccounts] = useState<BankAccount[]>([]);
+  const hasAutoSelectedDefaultBankRef = useRef(false);
+
+  const defaultBankAccount = useMemo(() => {
+    return userBankAccounts.find((a) => a.is_default) || (userBankAccounts.length === 1 ? userBankAccounts[0] : null);
+  }, [userBankAccounts]);
+
+  const loadUserBankAccounts = useCallback(async (user: User) => {
+    try {
+      const accounts = await listBankAccounts(user);
+      setUserBankAccounts(accounts);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setUserBankAccounts([]);
+      hasAutoSelectedDefaultBankRef.current = false;
+      return;
+    }
+    void loadUserBankAccounts(currentUser);
+  }, [currentUser, loadUserBankAccounts]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (currentUser) {
+        void loadUserBankAccounts(currentUser);
+      }
+    };
+    window.addEventListener("bank-accounts-changed", handler);
+    return () => window.removeEventListener("bank-accounts-changed", handler);
+  }, [currentUser, loadUserBankAccounts]);
 
   const getCurrencySymbol = useCallback((code: string = "INR") => {
     const symbols: Record<string, string> = {
@@ -524,10 +559,10 @@ export function AppRoutes() {
   const [selectedPlatform, setSelectedPlatform] = useState("");
   // Independent Dashboard filter and expenses states
   const [dashboardCategory, setDashboardCategory] = useState("");
-  const [dashboardTimeRange, setDashboardTimeRange] = useState<TimeRangeFilter>("all");
+  const [dashboardTimeRange, setDashboardTimeRange] = useState<TimeRangeFilter>("month");
   const [dashboardPlatform, setDashboardPlatform] = useState("");
   const [dashboardPersonalExpenses, setDashboardPersonalExpenses] = useState<Expense[]>([]);
-  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("monthly");
+  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("daily");
   const [chartDisplayType, setChartDisplayType] = useState<ChartDisplayType>("area");
   const [budgetHistoryRange, setBudgetHistoryRange] = useState<BudgetHistoryRange>("half-year");
   const [expensesSort, setExpensesSort] = useState<ExpenseSortOption>("date_desc");
@@ -541,6 +576,20 @@ export function AppRoutes() {
   const [isBudgetHistoryOpen, setIsBudgetHistoryOpen] = useState(false);
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (defaultBankAccount && !hasAutoSelectedDefaultBankRef.current && !editingExpenseId) {
+      hasAutoSelectedDefaultBankRef.current = true;
+      setForm((prev) => {
+        if (prev.bankAccountId) return prev;
+        return {
+          ...prev,
+          bankAccountId: defaultBankAccount.id,
+          bankName: defaultBankAccount.account_label || defaultBankAccount.bank_name
+        };
+      });
+    }
+  }, [defaultBankAccount, editingExpenseId]);
   const [deletingBudgetIds, setDeletingBudgetIds] = useState<string[]>([]);
   const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -1564,10 +1613,28 @@ export function AppRoutes() {
   const budgetSummaries = useMemo<BudgetSummary[]>(() => {
     return budgets
       .map((budget) => {
-        const spent = expenses
-          .filter((expense) => getExpenseMonth(expense.date) === budget.month)
-          .filter((expense) => (budget.scope === "category" ? expense.category === budget.category : true))
-          .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        let spent = 0;
+        if (personalAggregation) {
+          if (budget.scope === "monthly") {
+            const monthRecord = personalAggregation.monthly_totals?.find((entry) => entry.month === budget.month);
+            spent = monthRecord ? Number(monthRecord.total) : 0;
+          } else {
+            const catRecord = personalAggregation.monthly_category_totals?.find(
+              (entry) => entry.month === budget.month && entry.category.trim().toLowerCase() === (budget.category ?? "").trim().toLowerCase()
+            );
+            spent = catRecord ? Number(catRecord.total) : 0;
+          }
+        } else {
+          spent = expenses
+            .filter((expense) => getExpenseMonth(expense.date) === budget.month)
+            .filter((expense) =>
+              budget.scope === "category"
+                ? expense.category.trim().toLowerCase() === (budget.category ?? "").trim().toLowerCase()
+                : true
+            )
+            .reduce((sum, expense) => sum + Number(expense.amount), 0);
+        }
+
         const totalBudgetAmount = Number(budget.amount);
         const remaining = totalBudgetAmount - spent;
 
@@ -1594,7 +1661,7 @@ export function AppRoutes() {
 
         return (left.category ?? "").localeCompare(right.category ?? "");
       });
-  }, [budgets, expenses, formatCurrency]);
+  }, [budgets, personalAggregation, expenses, formatCurrency]);
 
   const currentBudgetMonth = getCurrentMonthValue();
 
@@ -1636,10 +1703,21 @@ export function AppRoutes() {
   const dashboardCurrentMonthBudgetSummaries = useMemo(() => dashboardBudgetSummaries.filter((budget) => budget.month === currentBudgetMonth), [dashboardBudgetSummaries, currentBudgetMonth]);
 
   const dashboardCurrentMonthBudgetOverview = useMemo(() => {
-    const totalBudgetAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + Number(budget.amount), 0);
-    const totalSpentAmount = dashboardCurrentMonthBudgetSummaries.reduce((sum, budget) => sum + budget.spent, 0);
-    const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
+    const monthlyBudget = dashboardCurrentMonthBudgetSummaries.find((budget) => budget.scope === "monthly");
+    const categoryBudgets = dashboardCurrentMonthBudgetSummaries.filter((budget) => budget.scope === "category");
 
+    let totalBudgetAmount = 0;
+    let totalSpentAmount = 0;
+
+    if (monthlyBudget) {
+      totalBudgetAmount = Number(monthlyBudget.amount);
+      totalSpentAmount = monthlyBudget.spent;
+    } else {
+      totalBudgetAmount = categoryBudgets.reduce((sum, budget) => sum + Number(budget.amount), 0);
+      totalSpentAmount = categoryBudgets.reduce((sum, budget) => sum + budget.spent, 0);
+    }
+
+    const totalRemainingAmount = totalBudgetAmount - totalSpentAmount;
     const targetCurrency = dashboardViewMode === "wallet" && dashboardWallet ? dashboardWallet.wallet.currency : undefined;
 
     return {
@@ -1832,7 +1910,18 @@ export function AppRoutes() {
           return current;
         }
 
-        return walletEntries[0]?.id ?? null;
+        if (typeof window !== "undefined") {
+          const params = new URLSearchParams(window.location.search);
+          const tab = params.get("tab")?.toLowerCase();
+          if (tab !== "loan" && tab !== "loans") {
+            const urlWalletId = params.get("walletId");
+            if (urlWalletId && walletEntries.some((wallet) => wallet.id === urlWalletId)) {
+              return urlWalletId;
+            }
+          }
+        }
+
+        return null;
       });
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallets.");
@@ -2140,7 +2229,7 @@ export function AppRoutes() {
     void createExpense(pendingSubmission.payload, pendingSubmission.idempotencyKey, currentUser)
       .then(async () => {
         writePendingSubmission(null);
-        setForm(initialFormState);
+        setForm(createInitialFormState(new Date(), defaultBankAccount));
         setStatusMessage("Expense saved.");
         await loadExpenses(currentUser);
       })
@@ -2253,7 +2342,7 @@ export function AppRoutes() {
 
   function handleEditCancel() {
     setEditingExpenseId(null);
-    setForm(initialFormState);
+    setForm(createInitialFormState(new Date(), defaultBankAccount));
     setStatusMessage("");
     setErrorMessage("");
   }
@@ -2275,14 +2364,16 @@ export function AppRoutes() {
 
       if (deletedExpenseIds.includes(editingExpenseId ?? "")) {
         setEditingExpenseId(null);
-        setForm(initialFormState);
+        setForm(createInitialFormState(new Date(), defaultBankAccount));
       }
 
       if (deletedExpenseIds.length > 0) {
         setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
-        await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
-        void loadPersonalAggregation(currentUser);
-        void loadDashboardExpenses(currentUser);
+        await Promise.all([
+          loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
+          loadPersonalAggregation(currentUser),
+          loadDashboardExpenses(currentUser)
+        ]);
       }
 
       return {
@@ -2401,6 +2492,23 @@ export function AppRoutes() {
     setIsWalletSubmitting(false);
     setWalletSubmittingAction("");
   }
+
+  const handleSelectWallet = useCallback((walletId: string | null) => {
+    setSelectedWalletId(walletId);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (walletId) {
+        url.searchParams.set("tab", "sharedwallet");
+        url.searchParams.set("walletId", walletId);
+      } else {
+        url.searchParams.delete("walletId");
+        if (!url.searchParams.has("tab")) {
+          url.searchParams.set("tab", "sharedwallet");
+        }
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
 
   async function handleCreateWallet(input: { name: string; description: string; defaultSplitRule: SplitRule; currency?: string; pictureUrl?: string | null; members: Array<{ displayName: string; email?: string }> }) {
     if (!currentUser) {
@@ -3366,12 +3474,14 @@ export function AppRoutes() {
       try {
         await updateExpense(editingExpenseId, form, currentUser);
         setEditingExpenseId(null);
-        setForm(initialFormState);
+        setForm(createInitialFormState(new Date(), defaultBankAccount));
         setIsAddExpenseModalOpen(false);
         setStatusMessage("Expense updated.");
-        await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
-        void loadPersonalAggregation(currentUser);
-        void loadDashboardExpenses(currentUser);
+        await Promise.all([
+          loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
+          loadPersonalAggregation(currentUser),
+          loadDashboardExpenses(currentUser)
+        ]);
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Failed to update expense.");
       } finally {
@@ -3388,12 +3498,14 @@ export function AppRoutes() {
     try {
       await createExpense(form, idempotencyKey, currentUser);
       writePendingSubmission(null);
-      setForm(initialFormState);
+      setForm(createInitialFormState(new Date(), defaultBankAccount));
       setIsAddExpenseModalOpen(false);
       setStatusMessage("Expense saved.");
-      await loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
-      void loadPersonalAggregation(currentUser);
-      void loadDashboardExpenses(currentUser);
+      await Promise.all([
+        loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
+        loadPersonalAggregation(currentUser),
+        loadDashboardExpenses(currentUser)
+      ]);
       void runChecksAndReloadNotifications(currentUser);
     } catch (error) {
       if (error instanceof ApiError && !error.retryable) {
@@ -3666,7 +3778,7 @@ export function AppRoutes() {
         onDeleteAccount={handleDeleteAccount}
         onOpenAddExpenseModal={() => {
           setEditingExpenseId(null);
-          setForm(createInitialFormState());
+          setForm(createInitialFormState(new Date(), defaultBankAccount));
           setIsAddExpenseModalOpen(true);
         }}
       >
@@ -3750,7 +3862,14 @@ export function AppRoutes() {
               onOpenBudgetHistory={() => setIsBudgetHistoryOpen(true)}
               onCloseBudgetHistory={() => setIsBudgetHistoryOpen(false)}
               onSelectedCategoryChange={setDashboardCategory}
-              onSelectedTimeRangeChange={setDashboardTimeRange}
+              onSelectedTimeRangeChange={(range) => {
+                setDashboardTimeRange(range);
+                if (range === "month" || range === "week" || /^\d{4}-\d{2}$/.test(range)) {
+                  setChartGranularity("daily");
+                } else if (range === "year" || range === "all" || /^\d{4}$/.test(range)) {
+                  setChartGranularity("monthly");
+                }
+              }}
               onChartDisplayTypeChange={setChartDisplayType}
               onChartGranularityChange={setChartGranularity}
             />
@@ -3806,6 +3925,7 @@ export function AppRoutes() {
             onEditStart={handleEditStart}
             onDeleteExpense={handleDeleteExpense}
             onClearFilters={handleClearExpenseFilters}
+            userAccounts={userBankAccounts}
           />
         ) : page === "wallets" ? (
           <WalletsPage
@@ -3822,7 +3942,7 @@ export function AppRoutes() {
             errorMessage={walletErrorMessage}
             formatCurrency={formatCurrency}
             currencySymbol={selectedWallet ? getCurrencySymbol(selectedWallet.wallet.currency) : getCurrencySymbol(reminderPreferences?.default_currency)}
-            onSelectWallet={setSelectedWalletId}
+            onSelectWallet={handleSelectWallet}
             onCreateWallet={handleCreateWallet}
             onUpdateWallet={handleUpdateWallet}
             onDeleteWallet={handleDeleteWallet}
@@ -3855,6 +3975,8 @@ export function AppRoutes() {
             onDeleteStandaloneLoanRepayment={handleDeleteStandaloneLoanRepayment}
             onLoadMoreExpenses={handleLoadMoreWalletExpenses}
             isLoadingMoreExpenses={isLoadingMoreWalletExpenses}
+            userBankAccounts={userBankAccounts}
+            defaultBankAccount={defaultBankAccount}
           />
         ) : page === "alerts" ? (
           <AlertsPage
@@ -3915,6 +4037,7 @@ export function AppRoutes() {
           onEditCancel={handleEditCancel}
           statusMessage={statusMessage}
           errorMessage={errorMessage}
+          userAccounts={userBankAccounts}
         />
       </SignedInLayout>
     );

@@ -1766,7 +1766,7 @@ export async function handleCreateFeedback(rawBody: unknown, userId: string, use
   }
 
   try {
-    const feedback = await store.createFeedback(userId, userEmail, result.data);
+    const feedback = await store.createFeedback(userId, null, result.data);
 
     let emailSent = false;
     const resendApiKey = process.env.RESEND_API_KEY?.trim();
@@ -1774,7 +1774,7 @@ export async function handleCreateFeedback(rawBody: unknown, userId: string, use
       try {
         const rawRecipient = (process.env.EMAIL?.trim() || "niharnics").toLowerCase();
         const recipientEmail = rawRecipient.includes("@") ? rawRecipient : `${rawRecipient}@gmail.com`;
-        const senderName = result.data.userName?.trim() || userEmail || "User";
+        const senderName = result.data.userName?.trim() || "User";
 
         const response = await fetch("https://api.resend.com/emails", {
           method: "POST",
@@ -1785,14 +1785,13 @@ export async function handleCreateFeedback(rawBody: unknown, userId: string, use
           body: JSON.stringify({
             from: "Expense Tracker Feedback <onboarding@resend.dev>",
             to: [recipientEmail],
-            reply_to: userEmail || undefined,
-            subject: `[Expense Tracker] New ${result.data.category.toUpperCase()} from ${senderName}`,
+                        subject: `[Expense Tracker] New ${result.data.category.toUpperCase()} from ${senderName}`,
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #0f172a; margin-top: 0; margin-bottom: 12px; font-size: 20px;">New Feedback Received</h2>
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 16px 0;">
                   <p style="margin: 0 0 10px;"><strong>Category:</strong> <span style="text-transform: capitalize; padding: 3px 10px; background: #e0f2fe; color: #0369a1; border-radius: 6px; font-size: 13px; font-weight: 600;">${escapeHtml(result.data.category)}</span></p>
-                  <p style="margin: 0 0 10px;"><strong>Submitted By:</strong> ${escapeHtml(result.data.userName ? `${result.data.userName} (${userEmail || "No email"})` : (userEmail || "User"))}</p>
+                  <p style="margin: 0 0 10px;"><strong>Submitted By:</strong> ${escapeHtml(senderName)}</p>
                   ${result.data.rating ? `<p style="margin: 0 0 10px;"><strong>Rating:</strong> ${"⭐".repeat(result.data.rating)} (${result.data.rating}/5)</p>` : ""}
                   <p style="margin: 12px 0 6px;"><strong>Message:</strong></p>
                   <div style="background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; white-space: pre-wrap; font-size: 14px;">${escapeHtml(result.data.message)}</div>

@@ -150,7 +150,11 @@ export function BudgetTrackerSection({
 
   useEffect(() => {
     if (editingBudgetId) {
-      setIsBudgetFormOpen(true);
+      if (typeof window !== "undefined" && window.innerWidth >= 1280) {
+        setIsBudgetFormOpen(true);
+      } else {
+        setIsBudgetFormOpen(false);
+      }
     }
   }, [editingBudgetId]);
 
@@ -174,19 +178,25 @@ export function BudgetTrackerSection({
     await onBudgetSubmit(event);
     setShowBudgetValidation(false);
     setIsMobileEditOpen(false);
+    setIsBudgetFormOpen(false);
   }
 
   function handleValidatedBudgetEditCancel() {
     setShowBudgetValidation(false);
     setIsMobileEditOpen(false);
+    setIsBudgetFormOpen(false);
     onBudgetEditCancel();
   }
 
   function handleEditStart(budget: BudgetSummary) {
     onBudgetEditStart(budget);
     // Open mobile modal on small screens (< xl breakpoint = 1280px)
-    if (window.innerWidth < 1280) {
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
       setIsMobileEditOpen(true);
+      setIsBudgetFormOpen(false);
+    } else {
+      setIsBudgetFormOpen(true);
+      setIsMobileEditOpen(false);
     }
   }
 
@@ -289,7 +299,7 @@ export function BudgetTrackerSection({
             }
           />
 
-          {(isBudgetFormOpen || editingBudgetId) && (
+          {((isBudgetFormOpen && !isMobileEditOpen) || (editingBudgetId && !isMobileEditOpen)) && (
             <div className="rounded-[22px] border border-primary/20 bg-primary/[0.03] p-4 sm:p-5 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2.5">
                 <div>

@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { ModalFrame, cn } from "./ui";
 import { FilterDropdown } from "./FilterDropdown";
+import { BankLogo } from "./BankPicker";
 import type { WalletLoan } from "../types";
 
 export interface BorrowerMiniStatementModalProps {
@@ -589,89 +590,89 @@ export function BorrowerMiniStatementModal({
             {/* Top Consolidated Metrics Cards */}
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
               {/* Total Principal Lent or Borrowed */}
-              <div className="rounded-2xl border border-[color:var(--border)] bg-blue-50/40 dark:bg-blue-950/20 p-3.5 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+              <div className="rounded-2xl border border-[color:var(--border)] bg-blue-50/40 dark:bg-blue-950/20 p-2.5 sm:p-3.5 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
                   {isLenderMode ? "Total Borrowed" : isMixedMode ? "Total Principal" : "Total Lent"}
                 </span>
-                <strong className="block text-xl font-extrabold text-ink truncate">
+                <strong className="block text-sm sm:text-base lg:text-xl font-extrabold text-ink truncate">
                   {formatCurrency(borrowerFinancials.totalPrincipal.toFixed(2))}
                 </strong>
-                <span className="text-[11px] text-secondary">
+                <span className="text-[10px] sm:text-[11px] text-secondary">
                   {isLenderMode ? "Principal from lender" : "Across all loans"}
                 </span>
               </div>
 
               {/* Total Accrued Interest */}
-              <div className="rounded-2xl border border-[color:var(--border)] bg-purple-50/40 dark:bg-purple-950/20 p-3.5 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
+              <div className="rounded-2xl border border-[color:var(--border)] bg-purple-50/40 dark:bg-purple-950/20 p-2.5 sm:p-3.5 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
                   {isLenderMode ? "Interest to Pay" : isMixedMode ? "Total Interest" : "Interest Receivable"}
                 </span>
-                <strong className="block text-xl font-extrabold text-purple-700 dark:text-purple-300 truncate">
+                <strong className="block text-sm sm:text-base lg:text-xl font-extrabold text-purple-700 dark:text-purple-300 truncate">
                   +{formatCurrency(borrowerFinancials.totalAccruedInterest.toFixed(2))}
                 </strong>
-                <span className="text-[11px] text-secondary">
+                <span className="text-[10px] sm:text-[11px] text-secondary">
                   {isLenderMode ? "Payable interest" : "Accrued interest"}
                 </span>
               </div>
 
               {/* Total Repaid / Paid Back */}
-              <div className="rounded-2xl border border-[color:var(--border)] bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+              <div className="rounded-2xl border border-[color:var(--border)] bg-emerald-50/40 dark:bg-emerald-950/20 p-2.5 sm:p-3.5 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
                   {isLenderMode ? "Total Paid Back" : isMixedMode ? "Total Repayments" : "Total Repaid"}
                 </span>
-                <strong className="block text-xl font-extrabold text-emerald-700 dark:text-emerald-300 truncate">
+                <strong className="block text-sm sm:text-base lg:text-xl font-extrabold text-emerald-700 dark:text-emerald-300 truncate">
                   {formatCurrency(borrowerFinancials.totalRepaid.toFixed(2))}
                 </strong>
-                <span className="text-[11px] text-secondary">
+                <span className="text-[10px] sm:text-[11px] text-secondary">
                   {borrowerFinancials.repaidLoansCount} loans cleared
                 </span>
               </div>
 
               {/* Current Outstanding Balance */}
-              <div className="rounded-2xl border border-[color:var(--border)] bg-amber-50/40 dark:bg-amber-950/20 p-3.5 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              <div className="rounded-2xl border border-[color:var(--border)] bg-amber-50/40 dark:bg-amber-950/20 p-2.5 sm:p-3.5 space-y-1">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
                   {isLenderMode ? "Remaining Debt" : isMixedMode ? "Outstanding Balance" : "Outstanding"}
                 </span>
-                <strong className={cn("block text-xl font-extrabold truncate", borrowerFinancials.outstandingBalance > 0 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400")}>
+                <strong className={cn("block text-sm sm:text-base lg:text-xl font-extrabold truncate", borrowerFinancials.outstandingBalance > 0 ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400")}>
                   {formatCurrency(borrowerFinancials.outstandingBalance.toFixed(2))}
                 </strong>
-                <span className="text-[11px] text-secondary">
+                <span className="text-[10px] sm:text-[11px] text-secondary">
                   {isLenderMode ? "Remaining to pay" : "Remaining balance"}
                 </span>
               </div>
 
               {/* Overdue / Dued Times */}
               <div className={cn(
-                "rounded-2xl border p-3.5 space-y-1 col-span-2 sm:col-span-1",
+                "rounded-2xl border p-2.5 sm:p-3.5 space-y-1 col-span-2 sm:col-span-1",
                 borrowerFinancials.overdueLoansCount > 0
                   ? "border-red-200 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/30"
                   : "border-[color:var(--border)] bg-zinc-50 dark:bg-zinc-800/40"
               )}>
-                <span className={cn("text-[11px] font-bold uppercase tracking-wider", borrowerFinancials.overdueLoansCount > 0 ? "text-red-700 dark:text-red-300" : "text-secondary")}>
+                <span className={cn("text-[10px] sm:text-[11px] font-bold uppercase tracking-wider", borrowerFinancials.overdueLoansCount > 0 ? "text-red-700 dark:text-red-300" : "text-secondary")}>
                   Times Dued
                 </span>
                 <div className="flex items-baseline gap-1.5">
-                  <strong className={cn("text-xl font-extrabold", borrowerFinancials.overdueLoansCount > 0 ? "text-red-700 dark:text-red-300" : "text-ink")}>
+                  <strong className={cn("text-sm sm:text-base lg:text-xl font-extrabold", borrowerFinancials.overdueLoansCount > 0 ? "text-red-700 dark:text-red-300" : "text-ink")}>
                     {borrowerFinancials.overdueLoansCount}
                   </strong>
                   <span className="text-xs text-secondary font-medium">
                     overdue
                   </span>
                 </div>
-                <span className="text-[11px] text-secondary block truncate">
+                <span className="text-[10px] sm:text-[11px] text-secondary block truncate">
                   {borrowerFinancials.dueCount} loans with due dates
                 </span>
               </div>
             </div>
 
             {/* Navigation Tabs (Monthly Breakdown vs Full Ledger vs Loans List) */}
-            <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between border-b border-[color:var(--border)] pb-2 overflow-x-auto no-scrollbar">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => setActiveTab("monthly")}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                    "px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap",
                     activeTab === "monthly"
                       ? "bg-primary text-white shadow-xs"
                       : "text-secondary hover:text-ink bg-zinc-100 dark:bg-zinc-800"
@@ -683,7 +684,7 @@ export function BorrowerMiniStatementModal({
                   type="button"
                   onClick={() => setActiveTab("ledger")}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                    "px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap",
                     activeTab === "ledger"
                       ? "bg-primary text-white shadow-xs"
                       : "text-secondary hover:text-ink bg-zinc-100 dark:bg-zinc-800"
@@ -695,7 +696,7 @@ export function BorrowerMiniStatementModal({
                   type="button"
                   onClick={() => setActiveTab("loans")}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                    "px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap",
                     activeTab === "loans"
                       ? "bg-primary text-white shadow-xs"
                       : "text-secondary hover:text-ink bg-zinc-100 dark:bg-zinc-800"
@@ -1027,6 +1028,15 @@ export function BorrowerMiniStatementModal({
                             <span>{isLoanBorrowed ? "Interest to Pay" : "Interest"} ({loan.interest_rate}% {loan.interest_rate_period}):</span>
                             <span className="font-semibold text-purple-600 dark:text-purple-400">
                               +{formatCurrency(fin.accruedInterest.toFixed(2))}
+                            </span>
+                          </div>
+                        )}
+                        {loan.bank_name && (
+                          <div className="text-xs flex items-center justify-between text-secondary pt-1 border-t border-[color:var(--border)]">
+                            <span>{isLoanBorrowed ? "Receiving Bank" : "Disbursing Bank"}:</span>
+                            <span className="inline-flex items-center gap-1 font-semibold text-ink">
+                              <BankLogo bankName={loan.bank_name} size="xs" />
+                              <span>{loan.bank_name}</span>
                             </span>
                           </div>
                         )}

@@ -1246,7 +1246,11 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
       category_totals: categoryTotals,
       monthly_category_totals: monthlyCategoryTotals,
       monthly_platform_totals: monthlyPlatformTotals,
-      budget_totals: [],
+      budget_totals: monthlyCategoryTotals.map((r) => ({
+        month: r.month,
+        category: r.category,
+        total: r.total
+      })),
       top_platform: topPlatform,
       latest_expense: latestExpense
     };

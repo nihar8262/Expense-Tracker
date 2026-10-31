@@ -267,7 +267,9 @@ const createWalletLoanSchema = z.object({
   interestStartDate: z.string().trim().refine(isValidIsoDate, "Interest start date must be a valid YYYY-MM-DD value.").nullable().optional(),
   notes: z.string().trim().max(280).nullable().optional(),
   creatorName: z.string().trim().max(120).optional(),
-  creatorEmail: z.string().trim().email("Invalid creator email.").max(320).nullable().optional()
+  creatorEmail: z.string().trim().email("Invalid creator email.").max(320).nullable().optional(),
+  bankAccountId: z.string().trim().max(128).nullable().optional(),
+  bankName: z.string().trim().max(120).nullable().optional()
 });
 
 const updateWalletLoanSchema = z.object({
@@ -300,7 +302,9 @@ const updateWalletLoanSchema = z.object({
   dueDate: z.string().trim().refine(isValidIsoDate).nullable().optional(),
   interestStartDate: z.string().trim().refine(isValidIsoDate).nullable().optional(),
   notes: z.string().trim().max(280).nullable().optional(),
-  status: z.enum(["active", "settled", "cancelled"]).optional()
+  status: z.enum(["active", "settled", "cancelled"]).optional(),
+  bankAccountId: z.string().trim().max(128).nullable().optional(),
+  bankName: z.string().trim().max(120).nullable().optional()
 });
 
 const createWalletLoanRepaymentSchema = z.object({
@@ -649,6 +653,8 @@ async function ensureSchema(sql) {
       await safeSchemaStep("wallet_loans borrower_name column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_name VARCHAR(120)`);
       await safeSchemaStep("wallet_loans borrower_email column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS borrower_email VARCHAR(320)`);
       await safeSchemaStep("wallet_loans loan_type column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS loan_type VARCHAR(16) NOT NULL DEFAULT 'lent'`);
+      await safeSchemaStep("wallet_loans bank_account_id column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS bank_account_id TEXT`);
+      await safeSchemaStep("wallet_loans bank_name column", () => sql`ALTER TABLE wallet_loans ADD COLUMN IF NOT EXISTS bank_name TEXT`);
       await safeSchemaStep("wallet_loans drop not null constraints", async () => {
         await sql`ALTER TABLE wallet_loans ALTER COLUMN wallet_id DROP NOT NULL`;
         await sql`ALTER TABLE wallet_loans ALTER COLUMN lender_member_id DROP NOT NULL`;
@@ -1903,7 +1909,8 @@ async function createWalletLoanForUser(userId, walletId, rawBody) {
       INSERT INTO wallet_loans (
         id, wallet_id, lender_member_id, borrower_member_id, borrower_name, borrower_email, amount_minor,
         interest_rate_basis_points, interest_type, interest_rate_period, loan_type,
-        lending_date, due_date, interest_start_date, notes, status, created_at
+        lending_date, due_date, interest_start_date, notes, status, created_at,
+        bank_account_id, bank_name
       ) VALUES (
         ${newLoanId},
         ${walletId},
@@ -1921,7 +1928,9 @@ async function createWalletLoanForUser(userId, walletId, rawBody) {
         ${result.data.interestStartDate ?? null},
         ${result.data.notes?.trim() || null},
         ${"active"},
-        ${new Date().toISOString()}
+        ${new Date().toISOString()},
+        ${result.data.bankAccountId ?? null},
+        ${result.data.bankName ?? null}
       )
     `;
 
@@ -1977,7 +1986,7 @@ async function updateWalletLoanForUser(userId, walletId, loanId, rawBody) {
       throw new Error("Only the wallet owner can update loan terms and interest.");
     }
 
-    const loanRows = await tx`SELECT id, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
+    const loanRows = await tx`SELECT id, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status, bank_account_id, bank_name FROM wallet_loans WHERE id = ${loanId} AND wallet_id = ${walletId}`;
     const currentLoan = loanRows[0];
     if (!currentLoan) {
       throw new Error("Loan not found.");
@@ -2001,6 +2010,8 @@ async function updateWalletLoanForUser(userId, walletId, loanId, rawBody) {
     const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentLoan.notes;
     const updatedStatus = result.data.status ?? currentLoan.status;
     const updatedLoanType = result.data.loanType ?? currentLoan.loan_type ?? "lent";
+    const updatedBankAccountId = result.data.bankAccountId !== undefined ? (result.data.bankAccountId || null) : (currentLoan.bank_account_id ?? null);
+    const updatedBankName = result.data.bankName !== undefined ? (result.data.bankName?.trim() || null) : (currentLoan.bank_name ?? null);
 
     await tx`
       UPDATE wallet_loans
@@ -2014,7 +2025,9 @@ async function updateWalletLoanForUser(userId, walletId, loanId, rawBody) {
           due_date = ${updatedDueDate},
           interest_start_date = ${updatedInterestStartDate},
           notes = ${updatedNotes},
-          status = ${updatedStatus}
+          status = ${updatedStatus},
+          bank_account_id = ${updatedBankAccountId},
+          bank_name = ${updatedBankName}
       WHERE id = ${loanId} AND wallet_id = ${walletId}
     `;
 
@@ -2238,6 +2251,8 @@ async function loadLoanRecord(sql, loanId, viewingUserId) {
            wallet_loans.notes,
            wallet_loans.status,
            wallet_loans.loan_type,
+           wallet_loans.bank_account_id,
+           wallet_loans.bank_name,
            wallet_loans.created_at,
            COALESCE(
              wallet_loans.creator_name,
@@ -2304,9 +2319,11 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
              wallet_loans.notes,
              wallet_loans.status,
              wallet_loans.loan_type,
-             wallet_loans.created_at,
-             COALESCE(
-               wallet_loans.creator_name,
+              wallet_loans.bank_account_id,
+              wallet_loans.bank_name,
+              wallet_loans.created_at,
+              COALESCE(
+                wallet_loans.creator_name,
                owner_pref.display_name,
                owner_member.display_name,
                wallet_loans.borrower_name
@@ -2354,7 +2371,9 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
                wallet_loans.notes,
                wallet_loans.status,
                COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
-               wallet_loans.created_at,
+                   wallet_loans.bank_account_id,
+                   wallet_loans.bank_name,
+                   wallet_loans.created_at,
                'Loan Owner' AS creator_name,
                NULL AS creator_email
         FROM wallet_loans
@@ -2389,6 +2408,8 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
                    wallet_loans.notes,
                    wallet_loans.status,
                    COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.bank_account_id,
+                   wallet_loans.bank_name,
                    wallet_loans.created_at,
                    'Loan Owner' AS creator_name,
                    NULL AS creator_email
@@ -2425,6 +2446,8 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
                    wallet_loans.notes,
                    wallet_loans.status,
                    COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.bank_account_id,
+                   wallet_loans.bank_name,
                    wallet_loans.created_at,
                    'Loan Owner' AS creator_name,
                    NULL AS creator_email
@@ -2459,6 +2482,8 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
                    wallet_loans.notes,
                    wallet_loans.status,
                    COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.bank_account_id,
+                   wallet_loans.bank_name,
                    wallet_loans.created_at,
                    'Loan Owner' AS creator_name,
                    NULL AS creator_email
@@ -2494,6 +2519,8 @@ async function listLoansForUser(userId, userEmail, emailVerified = true) {
                    wallet_loans.notes,
                    wallet_loans.status,
                    COALESCE(wallet_loans.loan_type, 'lent') AS loan_type,
+                   wallet_loans.bank_account_id,
+                   wallet_loans.bank_name,
                    wallet_loans.created_at,
                    'Loan Owner' AS creator_name,
                    NULL AS creator_email
@@ -2572,7 +2599,7 @@ async function createStandaloneLoanForUser(userId, rawBody, userName = null, use
         borrower_name, borrower_email, amount_minor,
         interest_rate_basis_points, interest_type, interest_rate_period, loan_type,
         lending_date, due_date, interest_start_date, notes, status, created_at,
-        creator_name, creator_email
+        creator_name, creator_email, bank_account_id, bank_name
       ) VALUES (
         ${loanId},
         ${userId},
@@ -2593,7 +2620,9 @@ async function createStandaloneLoanForUser(userId, rawBody, userName = null, use
         ${"active"},
         ${new Date().toISOString()},
         ${creatorName},
-        ${creatorEmail}
+        ${creatorEmail},
+        ${result.data.bankAccountId ?? null},
+        ${result.data.bankName ?? null}
       )
     `;
 
@@ -2641,7 +2670,7 @@ async function updateStandaloneLoanForUser(userId, loanId, rawBody) {
   await ensureSchema(sql);
 
   const loan = await sql.begin(async (tx) => {
-    const loanRows = await tx`SELECT id, owner_user_id, borrower_name, borrower_email, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
+    const loanRows = await tx`SELECT id, owner_user_id, borrower_name, borrower_email, borrower_member_id, amount_minor, interest_rate_basis_points, interest_type, interest_rate_period, lending_date, due_date, interest_start_date, notes, status, bank_account_id, bank_name FROM wallet_loans WHERE id = ${loanId} AND owner_user_id = ${userId}`;
     const currentLoan = loanRows[0];
     if (!currentLoan) {
       throw new Error("Loan not found.");
@@ -2660,6 +2689,8 @@ async function updateStandaloneLoanForUser(userId, loanId, rawBody) {
     const updatedNotes = result.data.notes !== undefined ? (result.data.notes?.trim() || null) : currentLoan.notes;
     const updatedStatus = result.data.status ?? currentLoan.status;
     const updatedLoanType = result.data.loanType ?? currentLoan.loan_type ?? "lent";
+    const updatedBankAccountId = result.data.bankAccountId !== undefined ? (result.data.bankAccountId || null) : (currentLoan.bank_account_id ?? null);
+    const updatedBankName = result.data.bankName !== undefined ? (result.data.bankName?.trim() || null) : (currentLoan.bank_name ?? null);
 
     await tx`
       UPDATE wallet_loans
@@ -2675,7 +2706,9 @@ async function updateStandaloneLoanForUser(userId, loanId, rawBody) {
           due_date = ${updatedDueDate},
           interest_start_date = ${updatedInterestStartDate},
           notes = ${updatedNotes},
-          status = ${updatedStatus}
+          status = ${updatedStatus},
+          bank_account_id = ${updatedBankAccountId},
+          bank_name = ${updatedBankName}
       WHERE id = ${loanId} AND owner_user_id = ${userId}
     `;
 

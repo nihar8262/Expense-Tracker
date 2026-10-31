@@ -1976,7 +1976,11 @@ export function createPostgresExpenseStore(): ExpenseStore {
           total: formatMinorUnits(Number(r.total_minor)),
           count: Number(r.expense_count)
         })),
-        budget_totals: [],
+        budget_totals: monthlyCategoryRows.map((r) => ({
+          month: r.month,
+          category: r.category,
+          total: formatMinorUnits(Number(r.total_minor))
+        })),
         top_platform: topPlatform,
         latest_expense: latestExpense
       };

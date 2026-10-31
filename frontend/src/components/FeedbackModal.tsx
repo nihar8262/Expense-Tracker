@@ -31,7 +31,7 @@ export function FeedbackModal({
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = Boolean(initialFeedback);
-  const senderName = userName?.trim() || currentUser.displayName || currentUser.email?.split("@")[0] || "User";
+  const senderName = userName?.trim() || currentUser.displayName || "User";
 
   useEffect(() => {
     if (initialFeedback) {
@@ -154,11 +154,7 @@ export function FeedbackModal({
                 <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
                   {senderName}
                 </span>
-                {currentUser.email && (
-                  <span className="text-zinc-400 truncate hidden sm:inline">
-                    ({currentUser.email})
-                  </span>
-                )}
+
               </div>
               {!isEditing && (
                 <span className="text-[11px] font-medium text-zinc-500 shrink-0">
