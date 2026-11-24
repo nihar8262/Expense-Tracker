@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { ArrowRight, Download, Smartphone, X } from "lucide-react";
 import { isAndroidApp } from "../utils/platform";
 
@@ -11,6 +11,7 @@ type AndroidDownloadPromotionProps = {
 };
 
 export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPromotionProps) {
+  const { pathname } = useLocation();
   const [isBannerVisible, setIsBannerVisible] = useState(() => {
     if (isAndroidApp || typeof window === "undefined") return false;
     return window.localStorage.getItem(`${RELEASE_KEY}.banner-dismissed`) !== "true";
@@ -26,6 +27,7 @@ export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPro
   if (isAndroidApp) return null;
 
   const destination = isAuthenticated ? "/profile#android-app" : "/signin";
+  const isAuthPage = pathname === "/signin" || pathname === "/signup";
 
   function markAnnouncementSeen() {
     window.localStorage.setItem(`${RELEASE_KEY}.announcement-seen`, "true");
@@ -39,7 +41,7 @@ export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPro
 
   return (
     <>
-      {isBannerVisible ? (
+      {isBannerVisible && !isAuthPage ? (
         <section className="relative z-[60] mx-3 mt-3 overflow-hidden rounded-[18px] border border-emerald-800/15 bg-[linear-gradient(115deg,#123f2c,#1d7450)] px-3 py-3 text-white shadow-[0_12px_35px_rgba(15,83,57,0.24)] sm:mx-auto sm:max-w-[1180px] sm:rounded-[20px] sm:px-5">
           <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full border border-white/10 bg-white/5" />
           <div className="relative flex items-start gap-2.5 pr-7 sm:items-center sm:gap-3 sm:pr-8">
