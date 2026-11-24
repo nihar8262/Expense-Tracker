@@ -1155,12 +1155,12 @@ export function ProfilePage({
         <SurfaceCard id="android-app" className="scroll-mt-28 overflow-hidden border border-emerald-900/15 bg-[linear-gradient(135deg,rgba(235,247,237,0.95),rgba(255,250,239,0.92))] p-0">
           <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
             <div className="p-4 sm:p-6">
-              <div className="flex items-start gap-3.5 sm:gap-5">
+              <div className="flex flex-col items-center gap-3.5 text-center min-[390px]:flex-row min-[390px]:items-start min-[390px]:text-left sm:gap-5">
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[20px] border border-white bg-white/80 p-2.5 shadow-[0_12px_30px_rgba(28,87,58,0.14)] sm:h-20 sm:w-20">
                   <img src="/Glossy-logo.png" alt="Expense Tracker Android app icon" className="h-full w-full object-contain" />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-center gap-2 min-[390px]:justify-start">
                     <h2 className="font-display text-xl font-bold tracking-tight text-ink sm:text-2xl">Expense Tracker for Android</h2>
                     <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">v{ANDROID_APP_VERSION}</span>
                   </div>
@@ -1191,7 +1191,7 @@ export function ProfilePage({
               </div>
               <div className="mt-5">
                 {ANDROID_APK_URL ? (
-                  <a href={ANDROID_APK_URL} className="ui-button-primary w-full justify-center gap-2" download rel="noopener noreferrer">
+                  <a href={ANDROID_APK_URL} className="ui-button-primary min-h-11 w-full justify-center gap-2 text-center" download rel="noopener noreferrer">
                     <Download className="h-4 w-4" aria-hidden="true" /> Download APK · v{ANDROID_APP_VERSION}
                   </a>
                 ) : (

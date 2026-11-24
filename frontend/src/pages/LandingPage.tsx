@@ -41,27 +41,27 @@ export function LandingPage({ onCreateAccount, onSignIn, formatCurrency }: Landi
       <div className="w-full max-w-[1240px] space-y-12 sm:space-y-16 lg:space-y-20 relative z-10">
         
         {/* Floating Glass Header */}
-        <header className="surface-card flex items-center justify-between gap-4 p-4 rounded-[28px] border border-white/60 bg-white/20 shadow-sm backdrop-blur-xl transition-all duration-300 hover:shadow-md">
+        <header className="surface-card flex items-center justify-between gap-2 p-3 rounded-[22px] border border-white/60 bg-white/20 shadow-sm backdrop-blur-xl transition-all duration-300 hover:shadow-md sm:gap-4 sm:p-4 sm:rounded-[28px]">
           <div className="flex items-center gap-2.5 pl-2">
             <div className="w-8 h-8 rounded-full overflow-hidden border border-zinc-200/80 bg-white shadow-2xs shrink-0">
               <img src="/expense-tracker.avif" alt="Expense Tracker Logo" className="w-full h-full object-cover" />
             </div>
             <div>
               <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted leading-none mb-0.5">finance space</p>
-              <h1 className="font-display text-xl font-bold tracking-tight text-ink leading-none">Expense Tracker</h1>
+              <h1 className="font-display text-base font-bold tracking-tight text-ink leading-none min-[390px]:text-lg sm:text-xl">Expense Tracker</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button 
               type="button" 
-              className="ui-button-secondary py-2 px-4 text-xs font-semibold cursor-pointer transition hover:scale-[1.02] active:scale-[0.98]" 
+              className="ui-button-secondary min-h-10 px-3 py-2 text-xs font-semibold cursor-pointer transition hover:scale-[1.02] active:scale-[0.98] sm:px-4"
               onClick={onSignIn}
             >
               Sign in
             </button>
             <button 
               type="button" 
-              className="ui-button-primary py-2 px-4 text-xs font-semibold cursor-pointer transition hover:scale-[1.02] active:scale-[0.98]" 
+              className="ui-button-primary hidden min-h-10 px-3 py-2 text-xs font-semibold cursor-pointer transition hover:scale-[1.02] active:scale-[0.98] min-[440px]:inline-flex sm:px-4"
               onClick={onCreateAccount}
             >
               Create account
