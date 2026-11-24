@@ -1,11 +1,17 @@
 const crypto = require("crypto");
 const { getTools } = require("./assistant-tools");
 
-const HMAC_SECRET = process.env.HMAC_SECRET || process.env.SCHEDULER_SECRET || "expense-tracker-action-secret";
+function getHmacSecret() {
+  const secret = process.env.HMAC_SECRET && process.env.HMAC_SECRET.trim();
+  if (!secret) {
+    throw new Error("HMAC_SECRET is required for assistant action confirmations.");
+  }
+  return secret;
+}
 
 function signActionToken(userId, tool, args) {
   const payload = `${userId}:${tool}:${JSON.stringify(args)}`;
-  return crypto.createHmac("sha256", HMAC_SECRET).update(payload).digest("hex");
+  return crypto.createHmac("sha256", getHmacSecret()).update(payload).digest("hex");
 }
 
 function verifyActionToken(userId, tool, args, token) {

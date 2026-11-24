@@ -36,6 +36,8 @@ type SignedInLayoutProps = {
   onDeleteNotification: (notificationId: string) => Promise<boolean>;
   onRunNotificationChecks: () => void;
   onRespondToWalletInvite: (walletMemberId: string, action: "accept" | "decline") => Promise<boolean>;
+  onRespondToLoanInvite: (notificationId: string, loanId: string, action: "accept" | "decline") => Promise<boolean>;
+  onAddDetectedDebit: (notification: Notification) => void;
   onSaveBillReminder: (input: {
     title: string;
     amount: string;
@@ -84,6 +86,8 @@ export function SignedInLayout({
   onDeleteNotification,
   onRunNotificationChecks,
   onRespondToWalletInvite,
+  onRespondToLoanInvite,
+  onAddDetectedDebit,
   onSaveBillReminder,
   onDeleteBillReminder,
   onReminderPreferencesChange,
@@ -186,6 +190,8 @@ export function SignedInLayout({
               onDeleteNotification={onDeleteNotification}
               onRefreshChecks={onRunNotificationChecks}
               onRespondToWalletInvite={onRespondToWalletInvite}
+              onRespondToLoanInvite={onRespondToLoanInvite}
+              onAddDetectedDebit={onAddDetectedDebit}
               onSaveBillReminder={onSaveBillReminder}
               onDeleteBillReminder={onDeleteBillReminder}
               onPreferencesChange={onReminderPreferencesChange}

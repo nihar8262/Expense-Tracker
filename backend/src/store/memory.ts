@@ -516,6 +516,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
   const walletLoans = new Map<string, StoredWalletLoan>();
   const walletLoanRepayments = new Map<string, StoredWalletLoanRepayment>();
   const notifications = new Map<string, StoredNotification>();
+  const devicePushTokens = new Map<string, { userId: string; platform: "android" }>();
   const reminderPreferences = new Map<string, StoredReminderPreferences>();
   const billReminders = new Map<string, StoredBillReminder>();
   const bankAccounts = new Map<string, BankAccountRecord>();
@@ -2706,6 +2707,10 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     notifications.delete(notificationId);
   }
 
+  async function registerDevicePushToken(userId: string, token: string, platform: "android"): Promise<void> {
+    devicePushTokens.set(token, { userId, platform });
+  }
+
   async function getReminderPreferences(userId: string): Promise<ReminderPreferencesRecord> {
     return mapReminderPreferences(getReminderPreferencesInternal(userId));
   }
@@ -3263,6 +3268,7 @@ export function createMemoryExpenseStore(): MemoryExpenseStore {
     markNotificationRead,
     markAllNotificationsRead,
     deleteNotification,
+    registerDevicePushToken,
     getReminderPreferences,
     upsertReminderPreferences,
     getWalletReminderPreferences,

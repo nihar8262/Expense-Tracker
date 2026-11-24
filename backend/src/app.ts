@@ -80,6 +80,12 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
   const app = express();
 
   app.use(express.json({ limit: "10mb" }));
+  app.use("/api", (_request, response, next) => {
+    response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
+    next();
+  });
 
   async function withAuthenticatedUser(
     request: express.Request,
@@ -638,6 +644,22 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
         return response.status(result.status).json(result.body);
       },
       "Failed to load notifications."
+    );
+  });
+
+  app.post("/api/device-push-tokens", async (request, response) => {
+    return withAuthenticatedUser(
+      request,
+      response,
+      async (user) => {
+        const token = typeof request.body?.token === "string" ? request.body.token.trim() : "";
+        if (!token || token.length > 4096) {
+          return response.status(400).json({ error: "A valid device push token is required." });
+        }
+        await store.registerDevicePushToken(user.id, token, "android");
+        return response.sendStatus(204);
+      },
+      "Failed to register this device for notifications."
     );
   });
 

@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { createMemoryExpenseStore } from "../src/store/memory.js";
 
@@ -18,6 +18,20 @@ function buildApp() {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const originalHmacSecret = process.env.HMAC_SECRET;
+
+beforeAll(() => {
+  process.env.HMAC_SECRET = "test-only-assistant-confirmation-secret";
+});
+
+afterAll(() => {
+  if (originalHmacSecret === undefined) {
+    delete process.env.HMAC_SECRET;
+  } else {
+    process.env.HMAC_SECRET = originalHmacSecret;
+  }
+});
 
 describe("assistant API", () => {
   it("enforces scope guardrail for off-topic questions", async () => {

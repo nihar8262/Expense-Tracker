@@ -27,7 +27,8 @@ import { ApiError } from "../types";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const apiClient = axios.create({
-  baseURL: API_BASE_URL || undefined
+  baseURL: API_BASE_URL || undefined,
+  timeout: 60000
 });
 
 type ApiRequestConfig = Omit<AxiosRequestConfig, "headers"> & {
@@ -80,8 +81,13 @@ function createApiError(error: unknown, fallbackMessage: string): ApiError {
 
 export async function apiRequest<T>(user: User, config: ApiRequestConfig, fallbackMessage: string): Promise<T> {
   try {
+    const method = (config.method ?? "GET").toUpperCase();
+    const isReadRequest = method === "GET" || method === "HEAD";
     const response = await apiClient.request<T>({
       ...config,
+      params: isReadRequest
+        ? { ...(config.params ?? {}), _fresh: Date.now() }
+        : config.params,
       headers: await buildAuthorizedHeaders(user, config.headers)
     });
 
@@ -131,6 +137,15 @@ export function buildNotificationsUrl(): string {
   return API_BASE_URL ? new URL("/api/notifications", API_BASE_URL).toString() : "/api/notifications";
 }
 
+export async function registerDevicePushToken(token: string, user: User): Promise<void> {
+  const endpoint = API_BASE_URL ? new URL("/api/device-push-tokens", API_BASE_URL).toString() : "/api/device-push-tokens";
+  await apiRequest<void>(user, {
+    url: endpoint,
+    method: "POST",
+    data: { token, platform: "android" }
+  }, "Failed to register this device for push notifications.");
+}
+
 export function buildReminderPreferencesUrl(): string {
   return API_BASE_URL ? new URL("/api/reminder-preferences", API_BASE_URL).toString() : "/api/reminder-preferences";
 }
@@ -139,9 +154,9 @@ export function buildBillRemindersUrl(): string {
   return API_BASE_URL ? new URL("/api/bill-reminders", API_BASE_URL).toString() : "/api/bill-reminders";
 }
 
-export async function createExpense(payload: ExpenseForm, idempotencyKey: string, user: User): Promise<void> {
+export async function createExpense(payload: ExpenseForm, idempotencyKey: string, user: User): Promise<import("../types").Expense> {
   const endpoint = API_BASE_URL ? new URL("/api/expenses", API_BASE_URL).toString() : "/api/expenses";
-  await apiRequest<void>(user, {
+  const result = await apiRequest<{ expense: import("../types").Expense }>(user, {
     url: endpoint,
     method: "POST",
     headers: {
@@ -149,6 +164,7 @@ export async function createExpense(payload: ExpenseForm, idempotencyKey: string
     },
     data: payload
   }, "Failed to save expense.");
+  return result.expense;
 }
 
 export async function updateExpense(expenseId: string, payload: ExpenseForm, user: User): Promise<void> {

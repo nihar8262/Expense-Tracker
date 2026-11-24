@@ -30,6 +30,7 @@ export type BankAccountRecord = {
   last_four_digits: string | null;
   is_default: boolean;
   created_at: string;
+  updated_at?: string;
 };
 
 export type FeedbackRecord = {
@@ -51,6 +52,7 @@ export type ExpenseRecord = {
   description: string;
   date: string;
   created_at: string;
+  updated_at?: string;
   platform: string | null;
   bank_account_id?: string | null;
   bank_name?: string | null;
@@ -65,6 +67,7 @@ export type BudgetRecord = {
   category: string | null;
   month: string;
   created_at: string;
+  updated_at?: string;
 };
 
 export type WalletBudgetRecord = BudgetRecord & {
@@ -370,6 +373,7 @@ export interface ExpenseStore {
   markNotificationRead(userId: string, notificationId: string): Promise<NotificationRecord>;
   markAllNotificationsRead(userId: string): Promise<void>;
   deleteNotification(userId: string, notificationId: string): Promise<void>;
+  registerDevicePushToken(userId: string, token: string, platform: "android"): Promise<void>;
   getReminderPreferences(userId: string): Promise<ReminderPreferencesRecord>;
   upsertReminderPreferences(userId: string, input: CreateReminderPreferencesInput): Promise<ReminderPreferencesRecord>;
   getWalletReminderPreferences(userId: string, walletId: string): Promise<{ budget_alerts_enabled: boolean; budget_alert_threshold: number }>;

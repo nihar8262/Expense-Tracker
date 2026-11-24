@@ -1,0 +1,6 @@
+frontend/android
+backend/dist
+**/*.apk
+**/.gradle
+**/build
+.git

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { BudgetTrackerSection } from "../components/BudgetTrackerSection";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { PlatformPicker } from "../components/PlatformPicker";
@@ -19,6 +20,7 @@ import { ArrowLeft, Pencil, Trash2, LogOut, Users, CreditCard, Plus, X, ArrowUpR
 import { ReceiptScanPanel } from "../components/ReceiptScanPanel";
 import { BorrowerMiniStatementModal } from "../components/BorrowerMiniStatementModal";
 import { compressGroupImage } from "../utils/imageCompressor";
+import { isAndroidApp } from "../utils/platform";
 import type {
   BankAccount,
   BudgetForm,
@@ -443,6 +445,7 @@ export function WalletsPage({
   userBankAccounts = [],
   defaultBankAccount: passedDefaultBank
 }: WalletsPageProps) {
+  const location = useLocation();
   const effectiveDefaultBank = useMemo(() => {
     if (passedDefaultBank) return passedDefaultBank;
     return userBankAccounts.find((a) => a.is_default) || (userBankAccounts.length === 1 ? userBankAccounts[0] : null);
@@ -461,6 +464,7 @@ export function WalletsPage({
   const [pictureError, setPictureError] = useState<string | null>(null);
 
   const [isWalletEditModalOpen, setIsWalletEditModalOpen] = useState(false);
+  const [syncingLoanId, setSyncingLoanId] = useState<string | null>(null);
   const [editWalletName, setEditWalletName] = useState("");
   const [editWalletDescription, setEditWalletDescription] = useState("");
   const [editWalletSplitRule, setEditWalletSplitRule] = useState<SplitRule>("equal");
@@ -595,19 +599,10 @@ export function WalletsPage({
   });
 
   useEffect(() => {
-    const handlePopState = () => {
-      if (typeof window !== "undefined") {
-        const tab = new URLSearchParams(window.location.search).get("tab")?.toLowerCase();
-        if (tab === "loan" || tab === "loans") {
-          setViewMode("loans");
-        } else if (tab === "sharedwallet" || tab === "wallets") {
-          setViewMode("wallets");
-        }
-      }
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+    const tab = new URLSearchParams(location.search).get("tab")?.toLowerCase();
+    if (tab === "loan" || tab === "loans") setViewMode("loans");
+    else if (tab === "sharedwallet" || tab === "wallets") setViewMode("wallets");
+  }, [location.search]);
 
   useEffect(() => {
     if (viewMode === "loans" && onLoadLoans) {
@@ -2319,6 +2314,19 @@ export function WalletsPage({
       }
     } finally {
       setDeletingLoanRepaymentIds((prev) => prev.filter((id) => id !== repaymentId));
+    }
+  }
+
+  async function handleSyncLoan(loanId: string) {
+    if (!onLoadLoans || syncingLoanId) return;
+    setSyncingLoanId(loanId);
+    try {
+      await onLoadLoans(true);
+      window.showToast?.("Loan data synced from the shared database.", "success");
+    } catch (error) {
+      window.showToast?.(error instanceof Error ? error.message : "Could not sync loan data.", "error");
+    } finally {
+      setSyncingLoanId(null);
     }
   }
 
@@ -5107,6 +5115,17 @@ export function WalletsPage({
                               </div>
 
                               <div className="flex items-center gap-1">
+                                {isAndroidApp && bEmail && (
+                                  <button
+                                    type="button"
+                                    className="ui-button-secondary ui-button-sm !min-h-0 !py-0.5 sm:!py-1 !px-1.5 sm:!px-2 text-[11px] sm:text-xs cursor-pointer"
+                                    disabled={syncingLoanId !== null}
+                                    onClick={() => void handleSyncLoan(loan.id)}
+                                    title="Download changes shared through this borrower's email"
+                                  >
+                                    {syncingLoanId === loan.id ? "Syncing..." : "Sync"}
+                                  </button>
+                                )}
                                 {!isFullyPaid && (
                                   <button
                                     type="button"

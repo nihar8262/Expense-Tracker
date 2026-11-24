@@ -16,7 +16,32 @@ import { ExpensesPage } from "../pages/ExpensesPage";
 import { LandingPage } from "../pages/LandingPage";
 import { WalletsPage } from "../pages/WalletsPage";
 import { ProfilePage } from "../pages/ProfilePage";
+import { InitialDeviceSetup, WhatsNewModal } from "../components/InitialDeviceSetup";
 import { cn } from "../components/ui";
+import { isAndroidApp } from "../utils/platform";
+import { preloadAndroidProfile } from "../services/profilePreload";
+import {
+  deleteLocalSystemNotification,
+  listLocalSystemNotifications,
+  markAllLocalSystemNotificationsRead,
+  markLocalSystemNotificationRead,
+  importDetectedDebitNotifications,
+  publishLocalBudgetAlerts,
+  publishUnreadSystemNotifications
+} from "../services/systemNotifications";
+import { deleteDetectedDebit, getDetectedDebits, getNotificationReaderStatus, type DetectedDebit } from "../services/notificationReader";
+import { getSystemPushToken } from "../services/systemNotifications";
+import {
+  cacheLocalLoans,
+  cacheLocalWalletMetadata,
+  getLocalBudgetAlerts,
+  enableDeviceStorage,
+  getDeviceStorageStatus,
+  readLocalLoans,
+  readLocalWalletMetadata,
+  syncServerDataToDevice,
+  type DeviceSyncStage
+} from "../services/localDeviceStore";
 import type {
   BankAccount,
   BillReminder,
@@ -46,7 +71,7 @@ import type {
   WalletLoan
 } from "../types";
 import { ApiError } from "../types";
-import { deleteAccountData, listBankAccounts } from "../services/api";
+import { deleteAccountData, listBankAccounts, registerDevicePushToken } from "../services/api";
 import {
   defaultCategoryOptions,
   resolveCategoryIcon,
@@ -83,6 +108,7 @@ declare global {
 }
 
 const EXPENSES_PAGE_SIZE = 20;
+const ANDROID_WHATS_NEW_VERSION = "local-first-release-v1";
 
 function createInitialFormState(baseDate = new Date(), defaultBank?: BankAccount | null): ExpenseForm {
   return {
@@ -322,7 +348,12 @@ function buildTrendDetailLookup(expenseItems: Expense[], granularity: ChartGranu
   return Object.fromEntries(buckets);
 }
 
-export function AppRoutes() {
+type AppRoutesProps = {
+  onAuthReady?: (isAuthenticated: boolean) => void;
+  onSignedOut?: () => void;
+};
+
+export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -369,6 +400,146 @@ export function AppRoutes() {
     };
   }, [addToast]);
   const { authLoading, currentUser, authMessage, setAuthMessage, setCurrentUser, signIn, signOutCurrentUser, signInWithEmail, signUpWithEmail, sendPasswordReset } = useAuth();
+  const [deviceSetupState, setDeviceSetupState] = useState<"checking" | "required" | "syncing" | "ready" | "failed">(isAndroidApp ? "checking" : "ready");
+  const [deviceSetupProgress, setDeviceSetupProgress] = useState(0);
+  const [deviceSetupStage, setDeviceSetupStage] = useState("Checking this device...");
+  const [deviceSetupDetail, setDeviceSetupDetail] = useState("Looking for an existing verified local copy.");
+  const [deviceSetupError, setDeviceSetupError] = useState("");
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const initialSetupStartedRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!authLoading) onAuthReady?.(Boolean(currentUser));
+  }, [authLoading, currentUser, onAuthReady]);
+
+  useEffect(() => {
+    if (!isAndroidApp) {
+      setDeviceSetupState("ready");
+      return;
+    }
+    if (authLoading) return;
+    if (!currentUser) {
+      setDeviceSetupState("checking");
+      setDeviceSetupProgress(0);
+      setShowWhatsNew(false);
+      return;
+    }
+
+    let active = true;
+    setDeviceSetupState("checking");
+    setDeviceSetupStage("Checking this device...");
+    setDeviceSetupDetail("Looking for an existing verified local copy.");
+    void getDeviceStorageStatus(currentUser.uid)
+      .then((status) => {
+        if (!active) return;
+        const isVerified = status.enabled && Boolean(status.lastSyncedAt) && status.lastSyncStatus === "success";
+        setDeviceSetupProgress(isVerified ? 100 : 0);
+        setDeviceSetupState(isVerified ? "ready" : "required");
+        setDeviceSetupStage(isVerified ? "Verified local data found" : "Ready to prepare this device");
+        setDeviceSetupDetail(isVerified
+          ? `${status.expenseCount} expenses, ${status.budgetCount} budgets, and ${status.walletCount} wallet summaries are available locally.`
+          : "Your server data will be downloaded once. Future synchronization remains manual.");
+        if (isVerified) {
+          const whatsNewKey = `finance-space.whats-new.${ANDROID_WHATS_NEW_VERSION}.${currentUser.uid}`;
+          setShowWhatsNew(window.localStorage.getItem(whatsNewKey) !== "dismissed");
+        }
+      })
+      .catch((error) => {
+        if (!active) return;
+        setDeviceSetupState("required");
+        setDeviceSetupStage("Device setup is required");
+        setDeviceSetupDetail(error instanceof Error ? error.message : "The local database has not been prepared yet.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [authLoading, currentUser]);
+
+  useEffect(() => {
+    if (!authLoading && currentUser && isAndroidApp && deviceSetupState === "ready") {
+      void preloadAndroidProfile(currentUser);
+    }
+  }, [authLoading, currentUser, deviceSetupState]);
+
+  async function runInitialDeviceSetup() {
+    if (!currentUser || !isAndroidApp || deviceSetupState === "syncing") return;
+    initialSetupStartedRef.current.add(currentUser.uid);
+    setDeviceSetupState("syncing");
+    setDeviceSetupError("");
+    setDeviceSetupProgress(5);
+    setDeviceSetupStage("Preparing secure local storage");
+    setDeviceSetupDetail("Creating a private SQLite space for this signed-in account.");
+    const stageProgress: Record<DeviceSyncStage, number> = {
+      preparing: 10,
+      uploading: 22,
+      downloading: 55,
+      saving: 84,
+      complete: 94
+    };
+    const stageLabels: Record<DeviceSyncStage, string> = {
+      preparing: "Preparing secure local storage",
+      uploading: "Checking for pending device changes",
+      downloading: "Downloading your account data",
+      saving: "Saving the verified device copy",
+      complete: "Verifying local data"
+    };
+
+    try {
+      await enableDeviceStorage(currentUser.uid);
+      const status = await syncServerDataToDevice(currentUser, (stage) => {
+        setDeviceSetupProgress(stageProgress[stage]);
+        setDeviceSetupStage(stageLabels[stage]);
+        setDeviceSetupDetail(stage === "downloading"
+          ? "Loading expenses, budgets, wallet summaries, and loans from your account."
+          : stage === "saving"
+            ? "Committing all downloaded datasets together so partial data is never shown."
+            : "Please keep Finance Space open while this step completes.");
+      });
+
+      setDeviceSetupProgress(96);
+      setDeviceSetupStage("Preparing profile and settings");
+      setDeviceSetupDetail("Loading bank information, preferences, feedback history, and connected tools.");
+      await preloadAndroidProfile(currentUser);
+
+      if (!status.enabled || !status.lastSyncedAt || status.lastSyncStatus !== "success") {
+        throw new Error("The local copy could not be verified. Please retry device setup.");
+      }
+
+      setDeviceSetupProgress(100);
+      setDeviceSetupStage("Your device is ready");
+      setDeviceSetupDetail(`${status.expenseCount} expenses, ${status.budgetCount} budgets, and ${status.walletCount} wallet summaries prepared successfully.`);
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+      setDeviceSetupState("ready");
+      window.dispatchEvent(new CustomEvent("device-sync-complete"));
+      window.dispatchEvent(new CustomEvent("expense-added"));
+      setShowWhatsNew(true);
+      navigate(localStorage.getItem("default_landing_page") === "dashboard" ? "/dashboard" : "/expenses", { replace: true });
+    } catch (error) {
+      initialSetupStartedRef.current.delete(currentUser.uid);
+      setDeviceSetupState("failed");
+      setDeviceSetupProgress(0);
+      setDeviceSetupStage("Setup could not be completed");
+      setDeviceSetupDetail("Your server data remains unchanged. Nothing incomplete has been activated on this device.");
+      setDeviceSetupError(error instanceof Error ? error.message : "Could not prepare this device. Please try again.");
+    }
+  }
+
+  useEffect(() => {
+    if (!currentUser || deviceSetupState !== "required" || initialSetupStartedRef.current.has(currentUser.uid)) return;
+    void runInitialDeviceSetup();
+  }, [currentUser, deviceSetupState]);
+
+  function dismissWhatsNew() {
+    if (currentUser) {
+      window.localStorage.setItem(`finance-space.whats-new.${ANDROID_WHATS_NEW_VERSION}.${currentUser.uid}`, "dismissed");
+    }
+    setShowWhatsNew(false);
+  }
+
+  function openSyncSettingsFromWhatsNew() {
+    dismissWhatsNew();
+    navigate("/profile");
+  }
   const { listExpenses, getPersonalAggregation, createExpense, updateExpense, deleteExpense } = useExpenses();
   const { listBudgets, createBudget, updateBudget, deleteBudget } = useBudgets();
   const {
@@ -427,7 +598,7 @@ export function AppRoutes() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [loans, setLoans] = useState<WalletLoan[]>([]);
-  const [isLoansLoading, setIsLoansLoading] = useState(false);
+  const [isLoansLoading, setIsLoansLoading] = useState(!isAndroidApp);
   const [hasLoadedLoans, setHasLoadedLoans] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [billReminders, setBillReminders] = useState<BillReminder[]>([]);
@@ -593,30 +764,35 @@ export function AppRoutes() {
   const [deletingBudgetIds, setDeletingBudgetIds] = useState<string[]>([]);
   const [deletingExpenseIds, setDeletingExpenseIds] = useState<string[]>([]);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [isBudgetLoading, setIsBudgetLoading] = useState(false);
-  const [isWalletLoading, setIsWalletLoading] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isBudgetLoading, setIsBudgetLoading] = useState(!isAndroidApp);
+  const [isWalletLoading, setIsWalletLoading] = useState(!isAndroidApp);
+  const [isLoading, setIsLoading] = useState(!isAndroidApp);
   const [isBudgetSubmitting, setIsBudgetSubmitting] = useState(false);
   const [isWalletSubmitting, setIsWalletSubmitting] = useState(false);
   const [walletSubmittingAction, setWalletSubmittingAction] = useState("");
   const [dashboardViewMode, setDashboardViewMode] = useState<"personal" | "wallet">("personal");
   const [dashboardWalletId, setDashboardWalletId] = useState<string | null>(null);
   const [dashboardWallet, setDashboardWallet] = useState<WalletDetail | null>(null);
-  const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+  const [isDashboardLoading, setIsDashboardLoading] = useState(!isAndroidApp);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const [selectedWallet, _setSelectedWallet] = useState<WalletDetail | null>(null);
   const [walletCache, setWalletCache] = useState<Record<string, WalletDetail>>({});
+  const dashboardWalletCacheRef = useRef<Record<string, WalletDetail>>({});
   const [isLoadingMoreWalletExpenses, setIsLoadingMoreWalletExpenses] = useState(false);
 
   const [hasLoadedBudgets, setHasLoadedBudgets] = useState(false);
   const [hasLoadedWallets, setHasLoadedWallets] = useState(false);
   const [hasLoadedAlerts, setHasLoadedAlerts] = useState(false);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(!isAndroidApp);
 
   const setSelectedWallet = useCallback((val: WalletDetail | null | ((prev: WalletDetail | null) => WalletDetail | null)) => {
     _setSelectedWallet((prev) => {
       const next = typeof val === "function" ? val(prev) : val;
       if (next) {
         setWalletCache((cache) => ({ ...cache, [next.wallet.id]: next }));
+        if (dashboardWalletCacheRef.current[next.wallet.id] || dashboardWalletId === next.wallet.id) {
+          dashboardWalletCacheRef.current[next.wallet.id] = next;
+        }
         if (dashboardWalletId === next.wallet.id) {
           setDashboardWallet(next);
         }
@@ -638,6 +814,9 @@ export function AppRoutes() {
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
   const walletRequestSeqRef = useRef(0);
   const selectedWalletIdRef = useRef<string | null>(selectedWalletId);
+  const lastWebExpenseQueryRef = useRef<string | null>(null);
+  const hasLoadedWebDashboardRef = useRef(false);
+  const hasLoadedAndroidDashboardRef = useRef(false);
 
   useEffect(() => {
     selectedWalletIdRef.current = selectedWalletId;
@@ -1799,6 +1978,13 @@ export function AppRoutes() {
   }, [budgetHistoryRange, dashboardBudgetSummaries]);
 
   const unreadNotificationCount = useMemo(() => notifications.filter((notification) => notification.status === "unread").length, [notifications]);
+  useEffect(() => {
+    if (isAndroidApp && notifications.length > 0) {
+      void publishUnreadSystemNotifications(notifications).catch((error) => {
+        console.warn("Could not publish Android notifications:", error);
+      });
+    }
+  }, [notifications]);
 
   async function loadExpenses(
     user: User,
@@ -1806,9 +1992,10 @@ export function AppRoutes() {
     activeSort: ExpenseSortOption | boolean = expensesSort,
     page = currentExpensesPage,
     platform = selectedPlatform,
-    timeRange = selectedTimeRange
+    timeRange = selectedTimeRange,
+    showBlockingLoader = false
   ) {
-    setIsLoading(true);
+    if (showBlockingLoader) setIsLoading(true);
     setErrorMessage("");
 
     try {
@@ -1863,7 +2050,7 @@ export function AppRoutes() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to load expenses.");
     } finally {
-      setIsLoading(false);
+      if (showBlockingLoader) setIsLoading(false);
     }
   }
 
@@ -1886,7 +2073,7 @@ export function AppRoutes() {
   }
 
   async function loadBudgets(user: User) {
-    setIsBudgetLoading(true);
+    if (!isAndroidApp) setIsBudgetLoading(true);
     setBudgetErrorMessage("");
 
     try {
@@ -1898,13 +2085,21 @@ export function AppRoutes() {
     }
   }
 
-  async function loadWallets(user: User) {
-    setIsWalletLoading(true);
+  async function loadWallets(user: User, force = false) {
+    if (!isAndroidApp && wallets.length === 0) setIsWalletLoading(true);
     setWalletErrorMessage("");
 
     try {
+      if (isAndroidApp && !force) {
+        const cachedWallets = await readLocalWalletMetadata(user.uid);
+        if (cachedWallets) {
+          setWallets(cachedWallets);
+          setIsWalletLoading(false);
+        }
+      }
       const walletEntries = await listWallets(user);
       setWallets(walletEntries);
+      if (isAndroidApp) await cacheLocalWalletMetadata(user.uid, walletEntries);
       setSelectedWalletId((current) => {
         if (current && walletEntries.some((wallet) => wallet.id === current)) {
           return current;
@@ -1965,10 +2160,41 @@ export function AppRoutes() {
     if (!force && hasLoadedLoans) {
       return;
     }
-    setIsLoansLoading(true);
+    if (!isAndroidApp) setIsLoansLoading(true);
     try {
-      const data = await listLoans(user);
+      let localLoanBase = loans;
+      if (isAndroidApp && !force) {
+        const cachedLoans = await readLocalLoans(user.uid);
+        if (cachedLoans) {
+          localLoanBase = cachedLoans;
+          setLoans(cachedLoans);
+          setHasLoadedLoans(true);
+          setIsLoansLoading(false);
+          const acceptedIds = new Set(JSON.parse(window.localStorage.getItem(`expense-tracker.accepted-loans.${user.uid}`) || "[]") as string[]);
+          const hasMissingAcceptedLoan = [...acceptedIds].some((loanId) => !cachedLoans.some((loan) => loan.id === loanId));
+          if (!hasMissingAcceptedLoan) return;
+          force = true;
+        }
+      }
+      const remoteLoans = await listLoans(user);
+      let data = remoteLoans;
+      if (isAndroidApp && force) {
+        const accepted = new Set(JSON.parse(window.localStorage.getItem(`expense-tracker.accepted-loans.${user.uid}`) || "[]") as string[]);
+        const declined = new Set(JSON.parse(window.localStorage.getItem(`expense-tracker.declined-loans.${user.uid}`) || "[]") as string[]);
+        const isSharedLoan = (loan: WalletLoan) => loan.is_owner === false || Boolean(loan.borrower_email);
+        const existingSharedIds = new Set(localLoanBase.filter((loan) => isSharedLoan(loan) && !declined.has(loan.id)).map((loan) => loan.id));
+        const merged = new Map<string, WalletLoan>();
+        for (const loan of localLoanBase.filter((loan) => !isSharedLoan(loan))) merged.set(loan.id, loan);
+        for (const loan of remoteLoans) {
+          if (!declined.has(loan.id) && (accepted.has(loan.id) || existingSharedIds.has(loan.id))) merged.set(loan.id, loan);
+        }
+        for (const loan of localLoanBase.filter((loan) => isSharedLoan(loan) && !declined.has(loan.id))) {
+          if (!merged.has(loan.id)) merged.set(loan.id, loan);
+        }
+        data = [...merged.values()];
+      }
       setLoans(data);
+      if (isAndroidApp) await cacheLocalLoans(user.uid, data);
       setHasLoadedLoans(true);
     } catch (error) {
       setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load loans.");
@@ -1983,12 +2209,46 @@ export function AppRoutes() {
     }
   }, [currentUser, hasLoadedLoans]);
 
+  useEffect(() => {
+    if (!currentUser || !isAndroidApp || !hasLoadedLoans) return;
+    void cacheLocalLoans(currentUser.uid, loans).catch((error) =>
+      console.warn("Could not update the local loan snapshot:", error)
+    );
+  }, [currentUser, hasLoadedLoans, loans]);
+
   async function loadNotifications(user: User) {
+    if (!isAndroidApp) setIsNotificationsLoading(true);
     try {
-      setNotifications(await listNotifications(user));
+      const localNotifications = isAndroidApp
+        ? importDetectedDebitNotifications(user.uid, await getDetectedDebits().catch(() => []))
+        : [];
+      const remoteNotifications = await listNotifications(user);
+      setNotifications([...localNotifications, ...remoteNotifications].sort((left, right) => right.created_at.localeCompare(left.created_at)));
     } catch (error) {
+      if (isAndroidApp) setNotifications(listLocalSystemNotifications(user.uid));
       console.warn("Could not load notifications:", error);
+    } finally {
+      setIsNotificationsLoading(false);
     }
+  }
+
+  function handleAddDetectedDebit(notification: Notification) {
+    const detectedAt = new Date(notification.created_at);
+    const bankHint = `${notification.metadata?.appName ?? ""} ${notification.message}`.toLowerCase();
+    const matchedBank = userBankAccounts.find((account) =>
+      [account.bank_name, account.account_label]
+        .filter(Boolean)
+        .some((name) => bankHint.includes(String(name).toLowerCase()))
+    ) ?? null;
+    setEditingExpenseId(null);
+    setForm({
+      ...createInitialFormState(Number.isNaN(detectedAt.getTime()) ? new Date() : detectedAt, matchedBank),
+      amount: notification.metadata?.amount ?? "",
+      description: ""
+    });
+    setIsNotificationPanelOpen(false);
+    setIsAddExpenseModalOpen(true);
+    if (notification.status === "unread") void handleMarkNotificationRead(notification.id);
   }
 
   async function runChecksAndReloadNotifications(user: User) {
@@ -1998,6 +2258,17 @@ export function AppRoutes() {
       // silently ignore check errors; still reload existing notifications
     }
     await loadNotifications(user);
+  }
+
+  async function runLocalBudgetChecks(user: User) {
+    if (!isAndroidApp || reminderPreferences?.budget_alerts_enabled === false) return;
+    const alerts = await getLocalBudgetAlerts(user, reminderPreferences?.budget_alert_threshold ?? 80);
+    await publishLocalBudgetAlerts(alerts, user.uid);
+    const localNotifications = listLocalSystemNotifications(user.uid);
+    setNotifications((current) => {
+      const remoteNotifications = current.filter((item) => !item.id.startsWith("local-"));
+      return [...localNotifications, ...remoteNotifications].sort((left, right) => right.created_at.localeCompare(left.created_at));
+    });
   }
 
   async function loadReminderPreferences(user: User) {
@@ -2069,16 +2340,43 @@ export function AppRoutes() {
       setExpenses([]);
       setTotalPersonalExpenses(0);
       setPersonalAggregation(null);
+      lastWebExpenseQueryRef.current = null;
+      hasLoadedWebDashboardRef.current = false;
+      hasLoadedAndroidDashboardRef.current = false;
       return;
     }
 
-    void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
-    void loadPersonalAggregation(currentUser);
-    void loadDashboardExpenses(currentUser);
-  }, [authLoading, currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange]);
+    if (isAndroidApp && deviceSetupState !== "ready") return;
+
+    if (isAndroidApp) {
+      void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
+      if (!hasLoadedAndroidDashboardRef.current) {
+        hasLoadedAndroidDashboardRef.current = true;
+        void loadPersonalAggregation(currentUser);
+        void loadDashboardExpenses(currentUser);
+      }
+      return;
+    }
+
+    const expenseQueryKey = JSON.stringify([
+      currentUser.uid, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange
+    ]);
+    if (lastWebExpenseQueryRef.current !== expenseQueryKey) {
+      const isFirstExpenseLoad = lastWebExpenseQueryRef.current === null;
+      lastWebExpenseQueryRef.current = expenseQueryKey;
+      void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange, isFirstExpenseLoad);
+    }
+
+    if (!hasLoadedWebDashboardRef.current) {
+      hasLoadedWebDashboardRef.current = true;
+      setIsDashboardLoading(true);
+      void Promise.all([loadPersonalAggregation(currentUser), loadDashboardExpenses(currentUser)])
+        .finally(() => setIsDashboardLoading(false));
+    }
+  }, [authLoading, currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange, location.pathname, dashboardViewMode, deviceSetupState]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || (isAndroidApp && deviceSetupState !== "ready")) return;
     const handleExpenseAdded = () => {
       void loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange);
       void loadPersonalAggregation(currentUser);
@@ -2086,7 +2384,25 @@ export function AppRoutes() {
     };
     window.addEventListener("expense-added", handleExpenseAdded);
     return () => window.removeEventListener("expense-added", handleExpenseAdded);
-  }, [currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange]);
+  }, [currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange, deviceSetupState]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const handleDeviceSyncComplete = () => {
+      void loadBudgets(currentUser);
+      dashboardWalletCacheRef.current = {};
+      if (dashboardViewMode === "wallet" && dashboardWalletId) {
+        void getWalletDetail(dashboardWalletId, currentUser, 0, 1000)
+          .then((wallet) => {
+            dashboardWalletCacheRef.current[dashboardWalletId] = wallet;
+            setDashboardWallet(wallet);
+          })
+          .catch((error) => console.warn("Could not refresh the synced wallet dashboard:", error));
+      }
+    };
+    window.addEventListener("device-sync-complete", handleDeviceSyncComplete);
+    return () => window.removeEventListener("device-sync-complete", handleDeviceSyncComplete);
+  }, [currentUser, dashboardViewMode, dashboardWalletId]);
 
   // Load Preferences & Notifications on login
   useEffect(() => {
@@ -2109,12 +2425,25 @@ export function AppRoutes() {
       setSelectedWallet(null);
       setDashboardWallet(null);
       setDashboardWalletId(null);
+      dashboardWalletCacheRef.current = {};
       setIsDashboardLoading(false);
       setNotifications([]);
       setBillReminders([]);
       setReminderPreferences(null);
       setWalletCache({});
+      setIsNotificationsLoading(false);
       return;
+    }
+
+    if (isAndroidApp && deviceSetupState !== "ready") return;
+
+    if (!isAndroidApp) {
+      setIsLoading(true);
+      setIsBudgetLoading(true);
+      setIsWalletLoading(true);
+      setIsLoansLoading(true);
+      setIsDashboardLoading(location.pathname === "/dashboard");
+      setIsNotificationsLoading(true);
     }
 
     void loadReminderPreferences(currentUser);
@@ -2126,11 +2455,50 @@ export function AppRoutes() {
     }, 12000);
 
     return () => clearTimeout(checksTimer);
-  }, [authLoading, currentUser]);
+  }, [authLoading, currentUser, deviceSetupState]);
+
+  useEffect(() => {
+    if (!currentUser || !isAndroidApp || deviceSetupState !== "ready") return;
+    const importDebits = (debits: DetectedDebit[]) => {
+      const localNotifications = importDetectedDebitNotifications(currentUser.uid, debits);
+      setNotifications((existing) => {
+        const remote = existing.filter((item) => !item.id.startsWith("local-"));
+        return [...localNotifications, ...remote].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      });
+    };
+    const refreshDetectedDebits = () => {
+      if (document.visibilityState === "visible") {
+        void getNotificationReaderStatus().then((status) => importDebits(status.items ?? [])).catch(() => undefined);
+        void loadNotifications(currentUser);
+      }
+    };
+    const handleDetectedDebits = (event: Event) => importDebits((event as CustomEvent<DetectedDebit[]>).detail ?? []);
+    void getNotificationReaderStatus().then((status) => importDebits(status.items ?? [])).catch(() => undefined);
+    document.addEventListener("visibilitychange", refreshDetectedDebits);
+    window.addEventListener("focus", refreshDetectedDebits);
+    window.addEventListener("detected-debits", handleDetectedDebits);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshDetectedDebits);
+      window.removeEventListener("focus", refreshDetectedDebits);
+      window.removeEventListener("detected-debits", handleDetectedDebits);
+    };
+  }, [currentUser, deviceSetupState]);
+
+  useEffect(() => {
+    if (!currentUser || !isAndroidApp || deviceSetupState !== "ready" || !reminderPreferences) return;
+    void runLocalBudgetChecks(currentUser).catch((error) => console.warn("Could not check local budgets:", error));
+  }, [currentUser, reminderPreferences, deviceSetupState]);
+
+  useEffect(() => {
+    if (!currentUser || !isAndroidApp) return;
+    void getSystemPushToken()
+      .then(({ token }) => token ? registerDevicePushToken(token, currentUser) : undefined)
+      .catch((error) => console.warn("Could not register this device for push notifications:", error));
+  }, [currentUser]);
 
   // Route-based on-demand lazy loading: only fetch resources when navigating to their respective routes
   useEffect(() => {
-    if (!currentUser || authLoading) return;
+    if (!currentUser || authLoading || (isAndroidApp && deviceSetupState !== "ready")) return;
 
     // Load budgets when visiting dashboard
     if ((location.pathname === "/dashboard" || dashboardViewMode === "wallet") && !hasLoadedBudgets) {
@@ -2149,11 +2517,11 @@ export function AppRoutes() {
       setHasLoadedAlerts(true);
       void loadBillReminders(currentUser);
     }
-  }, [currentUser, authLoading, location.pathname, dashboardViewMode, hasLoadedBudgets, hasLoadedWallets, hasLoadedAlerts]);
+  }, [currentUser, authLoading, location.pathname, dashboardViewMode, hasLoadedBudgets, hasLoadedWallets, hasLoadedAlerts, deviceSetupState]);
 
   useEffect(() => {
     setWalletExpenseOffset(0);
-    if (!currentUser || !selectedWalletId) {
+    if (!currentUser || (isAndroidApp && deviceSetupState !== "ready") || !selectedWalletId) {
       walletRequestSeqRef.current++;
       setSelectedWallet(null);
       setIsWalletLoading(false);
@@ -2161,15 +2529,18 @@ export function AppRoutes() {
     }
 
     void loadSelectedWallet(currentUser, selectedWalletId);
-  }, [currentUser, selectedWalletId]);
+  }, [currentUser, selectedWalletId, deviceSetupState]);
 
   useEffect(() => {
-    if (!currentUser || !dashboardWalletId || dashboardViewMode !== "wallet") {
+    if (!currentUser || (isAndroidApp && deviceSetupState !== "ready") || !dashboardWalletId || dashboardViewMode !== "wallet") {
       setIsDashboardLoading(false);
       return;
     }
-    // Only fetch if we don't have the current wallet loaded
-    if (dashboardWallet && dashboardWallet.wallet.id === dashboardWalletId) {
+    const cachedWallet = dashboardWalletCacheRef.current[dashboardWalletId];
+    if (cachedWallet) {
+      if (!dashboardWallet || dashboardWallet.wallet.id !== dashboardWalletId) {
+        setDashboardWallet(cachedWallet);
+      }
       setIsDashboardLoading(false);
       return;
     }
@@ -2179,6 +2550,7 @@ export function AppRoutes() {
     getWalletDetail(dashboardWalletId, currentUser, 0, 1000)
       .then((data) => {
         if (isMounted) {
+          dashboardWalletCacheRef.current[dashboardWalletId] = data;
           setDashboardWallet(data);
         }
       })
@@ -2196,7 +2568,7 @@ export function AppRoutes() {
     return () => {
       isMounted = false;
     };
-  }, [currentUser, dashboardViewMode, dashboardWalletId]);
+  }, [currentUser, dashboardViewMode, dashboardWalletId, deviceSetupState]);
 
   useEffect(() => {
     setCurrentExpensesPage(1);
@@ -2311,6 +2683,7 @@ export function AppRoutes() {
 
   async function handleSignOut() {
     await signOutCurrentUser();
+    onSignedOut?.();
     writePendingSubmission(null);
     setStatusMessage("");
     setErrorMessage("");
@@ -2369,11 +2742,10 @@ export function AppRoutes() {
 
       if (deletedExpenseIds.length > 0) {
         setSelectedExpenseIds((current) => current.filter((expenseId) => !deletedExpenseIds.includes(expenseId)));
-        await Promise.all([
-          loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
-          loadPersonalAggregation(currentUser),
-          loadDashboardExpenses(currentUser)
-        ]);
+        setExpenses((current) => current.filter((expense) => !deletedExpenseIds.includes(expense.id)));
+        setDashboardPersonalExpenses((current) => current.filter((expense) => !deletedExpenseIds.includes(expense.id)));
+        setTotalPersonalExpenses((current) => Math.max(0, current - deletedExpenseIds.length));
+        void loadPersonalAggregation(currentUser);
       }
 
       return {
@@ -2469,6 +2841,7 @@ export function AppRoutes() {
       setEditingBudgetId(null);
       setIsBudgetHistoryOpen(false);
       await signOutCurrentUser();
+      onSignedOut?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete your account.";
       if (message.includes("requires-recent-login")) {
@@ -2492,6 +2865,19 @@ export function AppRoutes() {
     setIsWalletSubmitting(false);
     setWalletSubmittingAction("");
   }
+
+  function mergeWalletMetadata(wallet: Wallet) {
+    setWallets((current) => current.some((entry) => entry.id === wallet.id)
+      ? current.map((entry) => entry.id === wallet.id ? wallet : entry)
+      : [wallet, ...current]);
+  }
+
+  useEffect(() => {
+    if (!currentUser || !isAndroidApp || !hasLoadedWallets) return;
+    void cacheLocalWalletMetadata(currentUser.uid, wallets).catch((error) =>
+      console.warn("Could not update the local wallet metadata snapshot:", error)
+    );
+  }, [currentUser, hasLoadedWallets, wallets]);
 
   const handleSelectWallet = useCallback((walletId: string | null) => {
     setSelectedWalletId(walletId);
@@ -2520,7 +2906,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await createWallet(input, currentUser);
-      await loadWallets(currentUser);
+      mergeWalletMetadata(wallet.wallet);
       setSelectedWalletId(wallet.wallet.id);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Wallet created.");
@@ -2543,7 +2929,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await updateWallet(walletId, input, currentUser);
-      await loadWallets(currentUser);
+      mergeWalletMetadata(wallet.wallet);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Wallet updated.");
       return true;
@@ -2565,7 +2951,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await addWalletMember(inputWalletId, input, currentUser);
-      await loadWallets(currentUser);
+      mergeWalletMetadata(wallet.wallet);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Wallet member added.");
       return true;
@@ -2587,7 +2973,7 @@ export function AppRoutes() {
 
     try {
       const wallet = await removeWalletMember(inputWalletId, memberId, currentUser);
-      await loadWallets(currentUser);
+      mergeWalletMetadata(wallet.wallet);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Member removed.");
       return true;
@@ -2671,7 +3057,7 @@ export function AppRoutes() {
       await deleteWalletGroup(inputWalletId, currentUser);
       setSelectedWallet(null);
       setSelectedWalletId(null);
-      await loadWallets(currentUser);
+      setWallets((current) => current.filter((wallet) => wallet.id !== inputWalletId));
       await loadNotifications(currentUser);
       setWalletStatusMessage("Group deleted.");
       return true;
@@ -2695,7 +3081,7 @@ export function AppRoutes() {
       await leaveWalletGroup(inputWalletId, currentUser);
       setSelectedWallet(null);
       setSelectedWalletId(null);
-      await loadWallets(currentUser);
+      setWallets((current) => current.filter((wallet) => wallet.id !== inputWalletId));
       await loadNotifications(currentUser);
       setWalletStatusMessage("You exited the group.");
       return true;
@@ -2718,7 +3104,6 @@ export function AppRoutes() {
     try {
       const wallet = await createSharedWalletExpense(inputWalletId, input, currentUser);
       setWalletExpenseOffset(0);
-      await loadWallets(currentUser);
       setSelectedWallet(wallet);
       setWalletStatusMessage("Shared expense added.");
       void loadNotifications(currentUser);
@@ -2990,6 +3375,35 @@ export function AppRoutes() {
     startWalletSubmit("loan");
 
     try {
+      const borrowerEmail = String(input?.borrowerEmail ?? "").trim();
+      if (isAndroidApp && !borrowerEmail) {
+        const now = new Date().toISOString();
+        const localLoan: WalletLoan = {
+          id: `local-loan-${crypto.randomUUID()}`,
+          owner_user_id: currentUser.uid,
+          wallet_id: null,
+          borrower_name: input?.borrowerName?.trim() || (input?.loanType === "borrowed" ? "Lender" : "Borrower"),
+          borrower_email: null,
+          amount: Number(input?.amount || 0).toFixed(2),
+          interest_rate: Number(input?.interestRate || 0),
+          interest_type: input?.interestType || "none",
+          interest_rate_period: input?.interestRatePeriod || "one-time",
+          lending_date: input?.lendingDate,
+          interest_start_date: input?.interestStartDate || null,
+          due_date: input?.dueDate || null,
+          status: input?.status || "active",
+          loan_type: input?.loanType || "lent",
+          notes: input?.notes?.trim() || null,
+          created_at: now,
+          repayments: [],
+          is_owner: true,
+          bank_account_id: input?.bankAccountId || null,
+          bank_name: input?.bankName || null
+        };
+        setLoans((prev) => [localLoan, ...prev]);
+        setWalletStatusMessage(input?.loanType === "borrowed" ? "Borrowed loan saved on this device." : "Loan saved on this device.");
+        return true;
+      }
       const newLoan = await createStandaloneLoan(input, currentUser);
       setLoans((prev) => [newLoan, ...prev]);
       setWalletStatusMessage(input?.loanType === "borrowed" ? "Borrowed loan recorded successfully." : "Lent loan recorded successfully.");
@@ -3011,6 +3425,34 @@ export function AppRoutes() {
     startWalletSubmit("loan");
 
     try {
+      const targetLoan = loans.find((loan) => loan.id === loanId);
+      if (isAndroidApp && targetLoan && targetLoan.is_owner !== false && !targetLoan.borrower_email) {
+        const newEmail = String(input?.borrowerEmail ?? "").trim();
+        if (newEmail) {
+          const uploadedLoan = await createStandaloneLoan(input, currentUser);
+          setLoans((prev) => prev.map((loan) => loan.id === loanId ? uploadedLoan : loan));
+          setWalletStatusMessage("Loan linked and saved to the shared database.");
+        } else {
+          setLoans((prev) => prev.map((loan) => loan.id === loanId ? {
+            ...loan,
+            borrower_name: input?.borrowerName?.trim() || loan.borrower_name,
+            amount: input?.amount == null ? loan.amount : Number(input.amount).toFixed(2),
+            interest_rate: input?.interestRate == null ? loan.interest_rate : Number(input.interestRate || 0),
+            interest_type: input?.interestType ?? loan.interest_type,
+            interest_rate_period: input?.interestRatePeriod ?? loan.interest_rate_period,
+            lending_date: input?.lendingDate ?? loan.lending_date,
+            interest_start_date: input?.interestStartDate || null,
+            due_date: input?.dueDate || null,
+            notes: input?.notes?.trim() || null,
+            status: input?.status ?? loan.status,
+            loan_type: input?.loanType ?? loan.loan_type,
+            bank_account_id: input?.bankAccountId ?? loan.bank_account_id,
+            bank_name: input?.bankName ?? loan.bank_name
+          } : loan));
+          setWalletStatusMessage("Loan updated on this device.");
+        }
+        return true;
+      }
       const updatedLoan = await updateStandaloneLoan(loanId, input, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
       setWalletStatusMessage("Loan terms updated successfully.");
@@ -3032,6 +3474,12 @@ export function AppRoutes() {
     startWalletSubmit("loan");
 
     try {
+      const targetLoan = loans.find((loan) => loan.id === loanId);
+      if (isAndroidApp && targetLoan && targetLoan.is_owner !== false && !targetLoan.borrower_email) {
+        setLoans((prev) => prev.filter((loan) => loan.id !== loanId));
+        setWalletStatusMessage("Local loan deleted.");
+        return true;
+      }
       await deleteStandaloneLoan(loanId, currentUser);
       setLoans((prev) => prev.filter((l) => l.id !== loanId));
       setWalletStatusMessage("Loan deleted.");
@@ -3055,6 +3503,22 @@ export function AppRoutes() {
     try {
       const targetLoan = loans.find((l) => l.id === loanId);
       const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
+      if (isAndroidApp && targetLoan && targetLoan.is_owner !== false && !targetLoan.borrower_email) {
+        const now = new Date().toISOString();
+        setLoans((prev) => prev.map((loan) => loan.id === loanId ? {
+          ...loan,
+          repayments: [...(loan.repayments || []), {
+            id: `local-repayment-${crypto.randomUUID()}`,
+            loan_id: loanId,
+            amount: Number(input?.amount || 0).toFixed(2),
+            repayment_date: input?.repaymentDate,
+            notes: input?.notes?.trim() || null,
+            created_at: now
+          }]
+        } : loan));
+        setWalletStatusMessage(isTargetBorrowed ? "Payment saved on this device." : "Repayment saved on this device.");
+        return true;
+      }
       const updatedLoan = await createStandaloneLoanRepayment(loanId, input, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
       setWalletStatusMessage(isTargetBorrowed ? "Payment to lender recorded successfully." : "Repayment recorded successfully.");
@@ -3078,6 +3542,14 @@ export function AppRoutes() {
     try {
       const targetLoan = loans.find((l) => l.id === loanId);
       const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
+      if (isAndroidApp && targetLoan && targetLoan.is_owner !== false && !targetLoan.borrower_email) {
+        setLoans((prev) => prev.map((loan) => loan.id === loanId ? {
+          ...loan,
+          repayments: (loan.repayments || []).filter((repayment) => repayment.id !== repaymentId)
+        } : loan));
+        setWalletStatusMessage(isTargetBorrowed ? "Local payment deleted." : "Local repayment deleted.");
+        return true;
+      }
       const updatedLoan = await deleteStandaloneLoanRepayment(loanId, repaymentId, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
       setWalletStatusMessage(isTargetBorrowed ? "Payment deleted." : "Repayment deleted.");
@@ -3101,6 +3573,19 @@ export function AppRoutes() {
     try {
       const targetLoan = loans.find((l) => l.id === loanId);
       const isTargetBorrowed = targetLoan?.loan_type === "borrowed";
+      if (isAndroidApp && targetLoan && targetLoan.is_owner !== false && !targetLoan.borrower_email) {
+        setLoans((prev) => prev.map((loan) => loan.id === loanId ? {
+          ...loan,
+          repayments: (loan.repayments || []).map((repayment) => repayment.id === repaymentId ? {
+            ...repayment,
+            amount: input?.amount == null ? repayment.amount : Number(input.amount).toFixed(2),
+            repayment_date: input?.repaymentDate ?? repayment.repayment_date,
+            notes: input?.notes?.trim() || null
+          } : repayment)
+        } : loan));
+        setWalletStatusMessage(isTargetBorrowed ? "Local payment updated." : "Local repayment updated.");
+        return true;
+      }
       const updatedLoan = await updateStandaloneLoanRepayment(loanId, repaymentId, input, currentUser);
       setLoans((prev) => prev.map((l) => (l.id === loanId ? updatedLoan : l)));
       setWalletStatusMessage(isTargetBorrowed ? "Payment updated successfully." : "Repayment updated successfully.");
@@ -3141,6 +3626,12 @@ export function AppRoutes() {
       return;
     }
 
+    if (notificationId.startsWith("local-")) {
+      const localNotifications = markLocalSystemNotificationRead(currentUser.uid, notificationId);
+      setNotifications((current) => current.map((item) => localNotifications.find((local) => local.id === item.id) ?? item));
+      return;
+    }
+
     try {
       const updatedNotification = await markNotificationRead(notificationId, currentUser);
       setNotifications((current) => current.map((notification) => (notification.id === notificationId ? updatedNotification : notification)));
@@ -3154,6 +3645,11 @@ export function AppRoutes() {
       return;
     }
 
+    if (isAndroidApp) {
+      markAllLocalSystemNotificationsRead(currentUser.uid);
+      setNotifications((current) => current.map((notification) => ({ ...notification, status: "read" })));
+    }
+
     try {
       await markAllNotificationsRead(currentUser);
       setNotifications((current) => current.map((notification) => ({ ...notification, status: "read" })));
@@ -3165,6 +3661,15 @@ export function AppRoutes() {
   async function handleDeleteNotification(notificationId: string) {
     if (!currentUser) {
       return false;
+    }
+
+    if (notificationId.startsWith("local-")) {
+      deleteLocalSystemNotification(currentUser.uid, notificationId);
+      if (notificationId.startsWith("local-debit-")) {
+        await deleteDetectedDebit(notificationId.slice("local-debit-".length)).catch(() => undefined);
+      }
+      setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
+      return true;
     }
 
     try {
@@ -3185,11 +3690,43 @@ export function AppRoutes() {
     try {
       await respondToWalletInvite(walletMemberId, action, currentUser);
       await loadNotifications(currentUser);
-      await loadWallets(currentUser);
+      await loadWallets(currentUser, true);
       setAuthMessage(action === "accept" ? "Invite accepted â€” you have been added to the group." : "Invite declined.");
       return true;
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to respond to wallet invite.");
+      return false;
+    }
+  }
+
+  async function handleRespondToLoanInvite(notificationId: string, loanId: string, action: "accept" | "decline") {
+    if (!currentUser) return false;
+    const acceptedKey = `expense-tracker.accepted-loans.${currentUser.uid}`;
+    const declinedKey = `expense-tracker.declined-loans.${currentUser.uid}`;
+    const accepted = new Set(JSON.parse(window.localStorage.getItem(acceptedKey) || "[]") as string[]);
+    const declined = new Set(JSON.parse(window.localStorage.getItem(declinedKey) || "[]") as string[]);
+    try {
+      if (action === "accept") {
+        accepted.add(loanId);
+        declined.delete(loanId);
+        window.localStorage.setItem(acceptedKey, JSON.stringify([...accepted]));
+        window.localStorage.setItem(declinedKey, JSON.stringify([...declined]));
+        await markNotificationRead(notificationId, currentUser);
+        setNotifications((current) => current.map((notification) => notification.id === notificationId ? { ...notification, status: "read" } : notification));
+        await loadLoans(currentUser, true);
+        setWalletStatusMessage("Loan invitation accepted and synced to this device.");
+      } else {
+        declined.add(loanId);
+        accepted.delete(loanId);
+        window.localStorage.setItem(acceptedKey, JSON.stringify([...accepted]));
+        window.localStorage.setItem(declinedKey, JSON.stringify([...declined]));
+        setLoans((current) => current.filter((loan) => loan.id !== loanId));
+        await deleteNotification(notificationId, currentUser);
+        setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
+      }
+      return true;
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Failed to respond to loan invitation.");
       return false;
     }
   }
@@ -3330,7 +3867,7 @@ export function AppRoutes() {
         await Promise.all([
           loadExpenses(currentUser),
           loadBudgets(currentUser),
-          loadWallets(currentUser)
+          loadWallets(currentUser, true)
         ]);
       }
     } catch (error) {
@@ -3472,16 +4009,32 @@ export function AppRoutes() {
 
     if (editingExpenseId) {
       try {
+        const updatedExpenseId = editingExpenseId;
         await updateExpense(editingExpenseId, form, currentUser);
+        const applyUpdate = (expense: Expense): Expense => expense.id === updatedExpenseId
+          ? {
+              ...expense,
+              amount: Number(form.amount).toFixed(2),
+              category: form.category,
+              description: form.description,
+              date: form.date,
+              platform: form.platform || null,
+              bank_account_id: form.bankAccountId || null,
+              bank_name: form.bankName || null
+            }
+          : expense;
+        setExpenses((current) => current.map(applyUpdate));
+        setDashboardPersonalExpenses((current) => current.map(applyUpdate));
         setEditingExpenseId(null);
         setForm(createInitialFormState(new Date(), defaultBankAccount));
         setIsAddExpenseModalOpen(false);
         setStatusMessage("Expense updated.");
-        await Promise.all([
-          loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
-          loadPersonalAggregation(currentUser),
-          loadDashboardExpenses(currentUser)
-        ]);
+        void loadPersonalAggregation(currentUser);
+        if (isAndroidApp) {
+          void runLocalBudgetChecks(currentUser).catch((error) => console.warn("Could not check local budgets:", error));
+        } else {
+          void runChecksAndReloadNotifications(currentUser);
+        }
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Failed to update expense.");
       } finally {
@@ -3496,17 +4049,23 @@ export function AppRoutes() {
     writePendingSubmission(pendingSubmission);
 
     try {
-      await createExpense(form, idempotencyKey, currentUser);
+      const createdExpense = await createExpense(form, idempotencyKey, currentUser);
       writePendingSubmission(null);
+      setExpenses((current) => [createdExpense, ...current.filter((expense) => expense.id !== createdExpense.id)]);
+      setDashboardPersonalExpenses((current) => [
+        createdExpense,
+        ...current.filter((expense) => expense.id !== createdExpense.id)
+      ].slice(0, 100));
+      setTotalPersonalExpenses((current) => current + 1);
       setForm(createInitialFormState(new Date(), defaultBankAccount));
       setIsAddExpenseModalOpen(false);
       setStatusMessage("Expense saved.");
-      await Promise.all([
-        loadExpenses(currentUser, selectedCategory, expensesSort, currentExpensesPage, selectedPlatform, selectedTimeRange),
-        loadPersonalAggregation(currentUser),
-        loadDashboardExpenses(currentUser)
-      ]);
-      void runChecksAndReloadNotifications(currentUser);
+      void loadPersonalAggregation(currentUser);
+      if (isAndroidApp) {
+        void runLocalBudgetChecks(currentUser).catch((error) => console.warn("Could not check local budgets:", error));
+      } else {
+        void runChecksAndReloadNotifications(currentUser);
+      }
     } catch (error) {
       if (error instanceof ApiError && !error.retryable) {
         writePendingSubmission(null);
@@ -3747,7 +4306,7 @@ export function AppRoutes() {
         reminderPreferences={activeReminderPreferences}
         isSavingReminderPreferences={isSavingReminderPreferences}
         isSavingBillReminder={isSavingBillReminder}
-        isRunningNotificationChecks={isRunningNotificationChecks}
+        isRunningNotificationChecks={isRunningNotificationChecks || isNotificationsLoading}
         onToggleProfileMenu={() => setIsProfileMenuOpen((current) => !current)}
         onCloseProfileMenu={() => setIsProfileMenuOpen(false)}
         onToggleNotificationPanel={() => {
@@ -3766,6 +4325,8 @@ export function AppRoutes() {
           void handleRunNotificationChecks();
         }}
         onRespondToWalletInvite={(walletMemberId, action) => handleRespondToWalletInvite(walletMemberId, action)}
+        onRespondToLoanInvite={(notificationId, loanId, action) => handleRespondToLoanInvite(notificationId, loanId, action)}
+        onAddDetectedDebit={handleAddDetectedDebit}
         onSaveBillReminder={(input, billReminderId) => handleSaveBillReminder(input, billReminderId)}
         onDeleteBillReminder={(billReminderId) => handleDeleteBillReminder(billReminderId)}
         onReminderPreferencesChange={handleReminderPreferencesChange}
@@ -3796,25 +4357,20 @@ export function AppRoutes() {
               currencySymbol={getCurrencySymbol((dashboardViewMode === "wallet" && dashboardWallet?.wallet.currency) ? dashboardWallet.wallet.currency : reminderPreferences?.default_currency)}
               onDashboardViewModeChange={(mode) => {
                 if (mode === dashboardViewMode) return;
-                setIsDashboardLoading(true);
                 setDashboardCategory("");
                 setDashboardPlatform("");
                 setDashboardViewMode(mode);
                 if (mode === "personal") {
                   setDashboardWalletId(null);
                   setDashboardWallet(null);
-                  if (currentUser) {
-                    void loadPersonalAggregation(currentUser);
-                    void loadDashboardExpenses(currentUser);
-                  }
-                  setTimeout(() => {
-                    setIsDashboardLoading(false);
-                  }, 280);
+                  setIsDashboardLoading(false);
                 } else {
                   const nextWalletId = dashboardWalletId || (wallets.length > 0 ? wallets[0].id : null);
                   if (nextWalletId) {
-                    setDashboardWallet(null);
+                    const cachedWallet = dashboardWalletCacheRef.current[nextWalletId] ?? null;
+                    setDashboardWallet(cachedWallet);
                     setDashboardWalletId(nextWalletId);
+                    setIsDashboardLoading(!cachedWallet);
                   } else {
                     setIsDashboardLoading(false);
                   }
@@ -3822,8 +4378,9 @@ export function AppRoutes() {
               }}
               onDashboardWalletIdChange={(walletId) => {
                 if (walletId === dashboardWalletId) return;
-                setIsDashboardLoading(true);
-                setDashboardWallet(null);
+                const cachedWallet = dashboardWalletCacheRef.current[walletId] ?? null;
+                setIsDashboardLoading(!cachedWallet);
+                setDashboardWallet(cachedWallet);
                 setDashboardWalletId(walletId);
               }}
               budgetForm={budgetForm}
@@ -3984,7 +4541,7 @@ export function AppRoutes() {
             billReminders={billReminders}
             isSavingPreferences={isSavingReminderPreferences}
             isSavingBillReminder={isSavingBillReminder}
-            isRunningChecks={isRunningNotificationChecks}
+            isRunningChecks={isRunningNotificationChecks || isNotificationsLoading}
             preferences={activeReminderPreferences}
             wallets={wallets}
             preferenceScope={preferenceScope}
@@ -3994,6 +4551,8 @@ export function AppRoutes() {
             onDeleteNotification={handleDeleteNotification}
             onRefreshChecks={handleRunNotificationChecks}
             onRespondToWalletInvite={handleRespondToWalletInvite}
+            onRespondToLoanInvite={handleRespondToLoanInvite}
+            onAddDetectedDebit={handleAddDetectedDebit}
             onSaveBillReminder={handleSaveBillReminder}
             onDeleteBillReminder={handleDeleteBillReminder}
             onPreferencesChange={handleReminderPreferencesChange}
@@ -4046,12 +4605,31 @@ export function AppRoutes() {
   if (authLoading) {
     return (
       <main className="mx-auto flex min-h-screen max-w-[780px] items-center justify-center px-4 py-6 sm:px-6">
-        <section className="surface-card w-full max-w-[520px] p-8 text-center sm:p-10">
+        <section className="surface-card w-full max-w-[520px] p-6 text-center sm:p-10">
+          <img
+            src="/Splash 4.png"
+            alt="Secure shield protecting your session"
+            className="mx-auto h-32 w-full object-contain sm:h-48"
+            draggable={false}
+          />
           <p className="section-eyebrow">Secure access</p>
-          <h1 className="mt-4 font-display text-[3.2rem] leading-none tracking-[-0.04em] text-ink">Checking your session...</h1>
-          <p className="mt-4 text-base leading-7 text-secondary">The app is verifying whether you already have an authenticated session before routing you into the product.</p>
+          <h1 className="mt-3 font-display text-[2rem] leading-none tracking-[-0.035em] text-ink sm:mt-4 sm:text-[3.2rem]">Checking your session...</h1>
+          <p className="mx-auto mt-3 max-w-[390px] text-sm leading-6 text-secondary sm:mt-4 sm:text-base sm:leading-7">The app is verifying whether you already have an authenticated session before routing you into the product.</p>
         </section>
       </main>
+    );
+  }
+
+  if (isAndroidApp && currentUser && deviceSetupState !== "ready") {
+    return (
+      <InitialDeviceSetup
+        state={deviceSetupState}
+        progress={deviceSetupProgress}
+        stageLabel={deviceSetupStage}
+        detail={deviceSetupDetail}
+        error={deviceSetupError}
+        onStart={() => void runInitialDeviceSetup()}
+      />
     );
   }
 
@@ -4124,7 +4702,7 @@ export function AppRoutes() {
           </>
         ) : (
           <>
-            <Route path="/" element={<LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
+            <Route path="/" element={isAndroidApp ? <Navigate to="/signin" replace /> : <LandingPage onCreateAccount={() => navigate("/signup")} onSignIn={() => navigate("/signin")} formatCurrency={formatCurrency} />} />
             <Route path="/signin" element={<AuthPage mode="signin" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} onSignInWithEmail={signInWithEmail} onSignUpWithEmail={signUpWithEmail} onSendPasswordReset={sendPasswordReset} />} />
             <Route path="/signup" element={<AuthPage mode="signup" authLoading={authLoading} authMessage={authMessage} providerOptions={providerOptions} onBack={() => navigate("/")} onChangeMode={(mode) => navigate(mode === "signin" ? "/signin" : "/signup")} onSignIn={signIn} onSignInWithEmail={signInWithEmail} onSignUpWithEmail={signUpWithEmail} onSendPasswordReset={sendPasswordReset} />} />
             <Route path="/dashboard" element={<Navigate to="/" replace />} />
@@ -4136,6 +4714,10 @@ export function AppRoutes() {
           </>
         )}
       </Routes>
+
+      {isAndroidApp && currentUser && showWhatsNew ? (
+        <WhatsNewModal onClose={dismissWhatsNew} onOpenSyncSettings={openSyncSettingsFromWhatsNew} />
+      ) : null}
 
       {/* Toasts Container */}
       <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] sm:bottom-5 right-0 sm:right-5 left-0 sm:left-auto z-[9999] flex flex-col items-center sm:items-end gap-2 max-w-sm sm:w-full pointer-events-none px-3 sm:px-0 mx-auto sm:mx-0">

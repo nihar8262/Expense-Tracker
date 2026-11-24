@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import type { AuthProvider, User } from "firebase/auth";
-import { onAuthStateChanged, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  FacebookAuthProvider,
+  GithubAuthProvider,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut
+} from "firebase/auth";
+import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { auth, authPersistenceReady, facebookProvider, githubProvider, googleProvider, isFirebaseConfigured } from "../auth";
 import type { ProviderOption } from "../types";
 import { formatAuthError } from "../utils/auth";
+import { isAndroidApp } from "../utils/platform";
 
-export const providerOptions: ProviderOption[] = [
+const webProviderOptions: ProviderOption[] = [
   {
     id: "google",
     label: "Continue with Google",
@@ -25,6 +38,11 @@ export const providerOptions: ProviderOption[] = [
     provider: facebookProvider
   }
 ];
+
+// Keep the same provider choices in the browser and Android app. Android uses
+// the native Firebase plugin because browser popups cannot reliably return to
+// a Capacitor WebView.
+export const providerOptions: ProviderOption[] = webProviderOptions;
 
 export function useAuth() {
   const [authLoading, setAuthLoading] = useState(true);
@@ -70,7 +88,34 @@ export function useAuth() {
 
     try {
       await authPersistenceReady;
-      await signInWithPopup(auth, provider);
+      if (isAndroidApp) {
+        if (provider.providerId === "google.com") {
+          const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+          const idToken = result.credential?.idToken;
+          if (!idToken) {
+            throw new Error("Google did not return an identity token. Check the Firebase Android configuration.");
+          }
+          await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+        } else if (provider.providerId === "github.com") {
+          const result = await FirebaseAuthentication.signInWithGithub({ skipNativeAuth: true });
+          const accessToken = result.credential?.accessToken;
+          if (!accessToken) {
+            throw new Error("GitHub did not return an access token. Check the GitHub provider configuration in Firebase.");
+          }
+          await signInWithCredential(auth, GithubAuthProvider.credential(accessToken));
+        } else if (provider.providerId === "facebook.com") {
+          const result = await FirebaseAuthentication.signInWithFacebook({ skipNativeAuth: true });
+          const accessToken = result.credential?.accessToken;
+          if (!accessToken) {
+            throw new Error("Facebook did not return an access token. Check the Meta app configuration.");
+          }
+          await signInWithCredential(auth, FacebookAuthProvider.credential(accessToken));
+        } else {
+          throw new Error("This sign-in provider is not supported in the Android app.");
+        }
+      } else {
+        await signInWithPopup(auth, provider);
+      }
     } catch (error) {
       setAuthMessage(formatAuthError(error));
     } finally {

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { saveEmbedding, deleteEmbedding } from "../mcp/embeddingsHelper.js";
 import { formatMinorUnits } from "../lib/money.js";
 import { createExpenseRequestHash } from "../lib/request-hash.js";
+import { sendPushNotification } from "../push.js";
 import type {
   CreateBillReminderInput,
   CreateBudgetInput,
@@ -98,6 +99,7 @@ type ExpenseRow = {
   description: string;
   expense_date: string | Date;
   created_at: string | Date;
+  updated_at?: string | Date | null;
   platform: string | null;
   bank_account_id?: string | null;
   bank_name?: string | null;
@@ -116,6 +118,7 @@ type BudgetRow = {
   category: string | null;
   budget_month: string;
   created_at: string | Date;
+  updated_at?: string | Date | null;
 };
 
 type WalletRow = {
@@ -327,6 +330,7 @@ function mapExpense(row: ExpenseRow): ExpenseRecord {
     description: row.description,
     date: asIsoDate(row.expense_date),
     created_at: asIsoTimestamp(row.created_at),
+    updated_at: row.updated_at ? asIsoTimestamp(row.updated_at) : asIsoTimestamp(row.created_at),
     platform: row.platform,
     bank_account_id: row.bank_account_id ?? null,
     bank_name: row.bank_name ?? null
@@ -340,7 +344,8 @@ function mapBudget(row: BudgetRow): BudgetRecord {
     scope: row.budget_scope,
     category: row.category,
     month: row.budget_month,
-    created_at: asIsoTimestamp(row.created_at)
+    created_at: asIsoTimestamp(row.created_at),
+    updated_at: row.updated_at ? asIsoTimestamp(row.updated_at) : asIsoTimestamp(row.created_at)
   };
 }
 
@@ -733,6 +738,8 @@ async function ensureSchema(sql: Sql): Promise<void> {
       `;
 
       await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id TEXT`;
+      await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`;
+      await sql`UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL`;
       await sql`UPDATE expenses SET user_id = 'legacy-anonymous' WHERE user_id IS NULL`;
       await sql`CREATE INDEX IF NOT EXISTS expenses_user_id_expense_date_idx ON expenses (user_id, expense_date DESC, created_at DESC)`;
 
@@ -762,6 +769,8 @@ async function ensureSchema(sql: Sql): Promise<void> {
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS budgets_user_id_budget_month_idx ON budgets (user_id, budget_month DESC, created_at DESC)`;
+      await sql`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`;
+      await sql`UPDATE budgets SET updated_at = created_at WHERE updated_at IS NULL`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS wallets (
@@ -922,6 +931,17 @@ async function ensureSchema(sql: Sql): Promise<void> {
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS notifications_user_id_created_at_idx ON notifications (user_id, created_at DESC)`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS device_push_tokens (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          platform VARCHAR(16) NOT NULL CHECK (platform IN ('android')),
+          created_at TIMESTAMPTZ NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS device_push_tokens_user_id_idx ON device_push_tokens (user_id)`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS reminder_preferences (
@@ -1174,7 +1194,21 @@ async function upsertNotification(
     RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key
   `;
 
-  return rows[0] ? mapNotification(rows[0]) : null;
+  if (!rows[0]) return null;
+  const notification = mapNotification(rows[0]);
+  try {
+    const tokenRows = await db<{ token: string }[]>`
+      SELECT token FROM device_push_tokens WHERE user_id = ${input.userId}
+    `;
+    const tokens = tokenRows.map((row) => row.token);
+    const invalidTokens = await sendPushNotification(tokens, notification);
+    if (invalidTokens.length > 0) {
+      await db`DELETE FROM device_push_tokens WHERE token = ANY(${invalidTokens})`;
+    }
+  } catch (error) {
+    console.warn("Failed to send push notification:", error);
+  }
+  return notification;
 }
 
 function isUndefinedColumnError(err: unknown, column: string): boolean {
@@ -1689,9 +1723,9 @@ export function createPostgresExpenseStore(): ExpenseStore {
         const createdAt = new Date().toISOString();
 
         const insertedExpenses = await tx<ExpenseRow[]>`
-          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name)
-          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt}, ${input.platform ?? null}, ${input.bankAccountId ?? null}, ${input.bankName ?? null})
-          RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
+          INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name)
+          VALUES (${expenseId}, ${userId}, ${input.amount}, ${input.category.trim()}, ${input.description.trim()}, ${input.date}, ${createdAt}, ${createdAt}, ${input.platform ?? null}, ${input.bankAccountId ?? null}, ${input.bankName ?? null})
+          RETURNING id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name
         `;
 
         await tx`
@@ -1730,7 +1764,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       const searchPattern = query.search?.trim() ? `%${query.search.trim()}%` : null;
 
       const rows = await sql<ExpenseRow[]>`
-        SELECT id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
+        SELECT id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name
         FROM expenses
         WHERE user_id = ${userId}
           ${query.category ? sql`AND category = ${query.category}` : sql``}
@@ -1997,9 +2031,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
             expense_date = ${input.date},
             platform = ${input.platform ?? null},
             bank_account_id = ${input.bankAccountId ?? null},
-            bank_name = ${input.bankName ?? null}
+            bank_name = ${input.bankName ?? null},
+            updated_at = NOW()
         WHERE id = ${expenseId} AND user_id = ${userId}
-        RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
+        RETURNING id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name
       `;
 
       if (!updatedRows[0]) {
@@ -2036,7 +2071,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await ensureSchema(sql);
 
       const insertedRows = await sql<BudgetRow[]>`
-        INSERT INTO budgets (id, user_id, amount_minor, budget_scope, category, budget_month, created_at)
+        INSERT INTO budgets (id, user_id, amount_minor, budget_scope, category, budget_month, created_at, updated_at)
         VALUES (
           ${randomUUID()},
           ${userId},
@@ -2044,9 +2079,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
           ${input.scope},
           ${input.scope === "category" ? input.category?.trim() ?? null : null},
           ${input.month},
+          ${new Date().toISOString()},
           ${new Date().toISOString()}
         )
-        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
       `;
 
       return mapBudget(insertedRows[0]);
@@ -2056,7 +2092,7 @@ export function createPostgresExpenseStore(): ExpenseStore {
       await ensureSchema(sql);
 
       const rows = await sql<BudgetRow[]>`
-        SELECT id, amount_minor, budget_scope, category, budget_month, created_at
+        SELECT id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
         FROM budgets
         WHERE user_id = ${userId}
         ORDER BY budget_month DESC, created_at DESC
@@ -2073,9 +2109,10 @@ export function createPostgresExpenseStore(): ExpenseStore {
         SET amount_minor = ${input.amount},
             budget_scope = ${input.scope},
             category = ${input.scope === "category" ? input.category?.trim() ?? null : null},
-            budget_month = ${input.month}
+            budget_month = ${input.month},
+            updated_at = NOW()
         WHERE id = ${budgetId} AND user_id = ${userId}
-        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
+        RETURNING id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
       `;
 
       if (!updatedRows[0]) {
@@ -3890,6 +3927,16 @@ export function createPostgresExpenseStore(): ExpenseStore {
       if (!rows[0]) {
         throw new NotificationNotFoundError();
       }
+    },
+
+    async registerDevicePushToken(userId: string, token: string, platform: "android"): Promise<void> {
+      await ensureSchema(sql);
+      await sql`
+        INSERT INTO device_push_tokens (token, user_id, platform, created_at, updated_at)
+        VALUES (${token}, ${userId}, ${platform}, NOW(), NOW())
+        ON CONFLICT (token) DO UPDATE
+        SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = NOW()
+      `;
     },
 
     async getReminderPreferences(userId: string): Promise<ReminderPreferencesRecord> {

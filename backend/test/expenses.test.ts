@@ -492,6 +492,58 @@ describe("expenses API", () => {
     expect(settlementResponse.body.wallet.settlements).toHaveLength(1);
   });
 
+  it("rejects settlement participants from another wallet", async () => {
+    const app = buildApp();
+
+    const firstWalletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "First wallet",
+        description: "Settlement target",
+        defaultSplitRule: "equal",
+        members: [{ displayName: "Alex" }]
+      });
+
+    const secondWalletResponse = await request(app)
+      .post("/api/wallets")
+      .set("Authorization", "Bearer user-one")
+      .send({
+        name: "Second wallet",
+        description: "Unrelated members",
+        defaultSplitRule: "equal",
+        members: [{ displayName: "Sam" }]
+      });
+
+    const firstWalletId = firstWalletResponse.body.wallet.wallet.id;
+    const firstWalletOwner = firstWalletResponse.body.wallet.members.find(
+      (member: { display_name: string }) => member.display_name === "user-one"
+    );
+    const unrelatedMember = secondWalletResponse.body.wallet.members.find(
+      (member: { display_name: string }) => member.display_name === "Sam"
+    );
+
+    const settlementResponse = await request(app)
+      .post(`/api/wallets/${firstWalletId}/settlements`)
+      .set("Authorization", "Bearer user-one")
+      .send({
+        fromMemberId: unrelatedMember.id,
+        toMemberId: firstWalletOwner.id,
+        amount: "100.00",
+        date: "2026-04-12",
+        note: "Must not cross wallet boundaries"
+      });
+
+    expect(settlementResponse.status).toBe(400);
+    expect(settlementResponse.body.error).toBe("Settlement members must belong to this wallet.");
+
+    const firstWalletDetail = await request(app)
+      .get(`/api/wallets/${firstWalletId}`)
+      .set("Authorization", "Bearer user-one");
+
+    expect(firstWalletDetail.body.wallet.settlements).toHaveLength(0);
+  });
+
   it("creates, updates, and deletes wallet budgets inside a shared wallet", async () => {
     const app = buildApp();
 

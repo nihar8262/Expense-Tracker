@@ -1,7 +1,9 @@
 const { randomUUID } = require("node:crypto");
 const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
-const { cert, getApps, initializeApp } = require("firebase-admin/app");
+const { cert, getApp, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
+const { getMessaging } = require("firebase-admin/messaging");
+const { waitUntil } = require("@vercel/functions");
 const { getSqlClient } = require("./db");
 const { z } = require("zod");
 
@@ -571,14 +573,18 @@ function readFirebaseAdminCredentials() {
   return { projectId, clientEmail, privateKey };
 }
 
-function getFirebaseAuth() {
+function getFirebaseAdminApp() {
   if (getApps().length === 0) {
-    initializeApp({
+    return initializeApp({
       credential: cert(readFirebaseAdminCredentials())
     });
   }
 
-  return getAuth();
+  return getApp();
+}
+
+function getFirebaseAuth() {
+  return getAuth(getFirebaseAdminApp());
 }
 
 async function authenticateRequest(request) {
@@ -662,6 +668,8 @@ async function ensureSchema(sql) {
       });
       await safeSchemaStep("create wallet_loan_repayments table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loan_repayments (id UUID PRIMARY KEY, loan_id UUID NOT NULL REFERENCES wallet_loans(id) ON DELETE CASCADE, amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), repayment_date DATE NOT NULL, notes VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue', 'loan-repayment')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
+      await safeSchemaStep("create device push tokens table", () => sql`CREATE TABLE IF NOT EXISTS device_push_tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, platform VARCHAR(16) NOT NULL CHECK (platform IN ('android')), created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)`);
+      await safeSchemaStep("device push tokens user index", () => sql`CREATE INDEX IF NOT EXISTS device_push_tokens_user_id_idx ON device_push_tokens (user_id)`);
       await safeSchemaStep("create reminder_preferences table", () => sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create bill_reminders table", () => sql`CREATE TABLE IF NOT EXISTS bill_reminders (id UUID PRIMARY KEY, user_id TEXT NOT NULL, title VARCHAR(120) NOT NULL, amount_minor BIGINT, category VARCHAR(64), due_date DATE NOT NULL, recurrence VARCHAR(16) NOT NULL CHECK (recurrence IN ('once', 'weekly', 'monthly', 'yearly')), interval_count INTEGER NOT NULL CHECK (interval_count BETWEEN 1 AND 24), reminder_days_before INTEGER NOT NULL CHECK (reminder_days_before BETWEEN 0 AND 60), is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("wallets description column", () => sql`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS description VARCHAR(280)`);
@@ -1807,6 +1815,11 @@ async function createWalletSettlementForUser(userId, walletId, rawBody) {
   await ensureSchema(sql);
   const wallet = await sql.begin(async (tx) => {
     await ensureWalletAccess(tx, userId, walletId);
+    const memberRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId}`;
+    const memberIds = new Set(memberRows.map((member) => member.id));
+    if (!memberIds.has(result.data.fromMemberId) || !memberIds.has(result.data.toMemberId)) {
+      throw new Error("Settlement members must belong to this wallet.");
+    }
     await tx`INSERT INTO wallet_settlements (id, wallet_id, from_member_id, to_member_id, amount_minor, settlement_date, note, created_at) VALUES (${randomUUID()}, ${walletId}, ${result.data.fromMemberId}, ${result.data.toMemberId}, ${result.data.amount}, ${result.data.date}, ${result.data.note?.trim() || null}, ${new Date().toISOString()})`;
     return loadWalletDetail(tx, walletId);
   });
@@ -1835,6 +1848,11 @@ async function updateWalletSettlementForUser(userId, walletId, settlementId, raw
     }
     if (rows[0].owner_user_id !== userId && rows[0].from_user_id !== userId && rows[0].to_user_id !== userId) {
       throw new Error("You can only edit or delete settlements you are involved in, unless you are the wallet owner.");
+    }
+    const memberRows = await tx`SELECT id FROM wallet_members WHERE wallet_id = ${walletId}`;
+    const memberIds = new Set(memberRows.map((member) => member.id));
+    if (!memberIds.has(result.data.fromMemberId) || !memberIds.has(result.data.toMemberId)) {
+      throw new Error("Settlement members must belong to this wallet.");
     }
     await tx`
       UPDATE wallet_settlements
@@ -3033,7 +3051,49 @@ async function updateReminderPreferencesForUser(userId, rawBody) {
 
 async function upsertNotification(sql, input) {
   const rows = await sql`INSERT INTO notifications (id, user_id, notification_type, title, message, notification_status, scheduled_for, metadata_json, dedupe_key, created_at) VALUES (${randomUUID()}, ${input.userId}, ${input.type}, ${input.title}, ${input.message}, ${"unread"}, ${input.scheduledFor}, ${input.metadata ? JSON.stringify(input.metadata) : null}, ${input.dedupeKey}, ${new Date().toISOString()}) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key`;
-  return rows[0] ? mapNotification(rows[0]) : null;
+  if (!rows[0]) return null;
+  const notification = mapNotification(rows[0]);
+  try {
+    const tokenRows = await sql`SELECT token FROM device_push_tokens WHERE user_id = ${input.userId}`;
+    const tokens = tokenRows.map((row) => row.token);
+    if (tokens.length > 0) {
+      const channelId = notification.type.startsWith("budget") || notification.type === "bill-due" || notification.type === "daily-log"
+        ? "finance_space_budgets"
+        : notification.type.startsWith("loan") ? "finance_space_payments" : "finance_space_collaboration";
+      waitUntil(
+        getMessaging(getFirebaseAdminApp()).sendEachForMulticast({
+          tokens,
+          notification: { title: notification.title, body: notification.message },
+          data: { type: notification.type, notificationId: notification.id, route: "/alerts" },
+          android: {
+            priority: "high",
+            notification: { channelId, icon: "ic_notification", sound: "default" }
+          }
+        }).then(async (pushResult) => {
+          const invalidTokens = [];
+          pushResult.responses.forEach((result, index) => {
+            if (!result.success && ["messaging/invalid-registration-token", "messaging/registration-token-not-registered"].includes(result.error?.code)) {
+              invalidTokens.push(tokens[index]);
+            }
+          });
+          if (invalidTokens.length > 0) {
+            const cleanupSql = getSqlClient();
+            await cleanupSql`DELETE FROM device_push_tokens WHERE token = ANY(${invalidTokens})`;
+          }
+        }).catch((error) => console.warn("Failed to send push notification:", error))
+      );
+    }
+  } catch (error) {
+    console.warn("Failed to send push notification:", error);
+  }
+  return notification;
+}
+
+async function registerDevicePushTokenForUser(userId, token) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  await sql`INSERT INTO device_push_tokens (token, user_id, platform, created_at, updated_at) VALUES (${token}, ${userId}, ${"android"}, NOW(), NOW()) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = NOW()`;
+  return { status: 204, body: null };
 }
 
 async function pruneExpiredBudgetNotifications(sql, userId = null, now = new Date()) {
@@ -3411,6 +3471,7 @@ module.exports = {
   markNotificationReadForUser,
   markAllNotificationsReadForUser,
   deleteNotificationForUser,
+  registerDevicePushTokenForUser,
   getReminderPreferencesForUser,
   updateReminderPreferencesForUser,
   runReminderChecksForUser,

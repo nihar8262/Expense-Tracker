@@ -19,6 +19,9 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { AddBankAccountModal } from "../components/AddBankAccountModal";
 import { FeedbackModal } from "../components/FeedbackModal";
 import { BankLogo, BankCardBadge } from "../components/BankPicker";
+import { AndroidAppSettings } from "../components/AndroidAppSettings";
+import { isAndroidApp } from "../utils/platform";
+import { readProfilePreload, writeProfilePreload } from "../services/profilePreload";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -208,8 +211,9 @@ export function ProfilePage({
   const [profileMessage, setProfileMessage] = useState<{ tone: "success" | "error" | "neutral"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [tokens, setTokens] = useState<Token[]>([]);
-  const [isLoadingTokens, setIsLoadingTokens] = useState(false);
+  const cachedProfile = isAndroidApp ? readProfilePreload(currentUser.uid) : null;
+  const [tokens, setTokens] = useState<Token[]>(cachedProfile?.tokens ?? []);
+  const [isLoadingTokens, setIsLoadingTokens] = useState(!isAndroidApp);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [newTokenLabel, setNewTokenLabel] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -222,17 +226,17 @@ export function ProfilePage({
   const [guideModalOpen, setGuideModalOpen] = useState(false);
 
   // Bank Accounts Management
-  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
-  const [isLoadingBanks, setIsLoadingBanks] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>(cachedProfile?.bankAccounts ?? []);
+  const [isLoadingBanks, setIsLoadingBanks] = useState(!isAndroidApp);
   const [bankError, setBankError] = useState<string | null>(null);
   const [bankModalOpen, setBankModalOpen] = useState(false);
   const [editingBankAccount, setEditingBankAccount] = useState<BankAccount | null>(null);
 
   // User Feedback Modal & Recent Feedbacks (within 24h)
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
-  const [feedbacks, setFeedbacks] = useState<FeedbackRecord[]>([]);
+  const [feedbacks, setFeedbacks] = useState<FeedbackRecord[]>(cachedProfile?.feedbacks ?? []);
   const [editingFeedback, setEditingFeedback] = useState<FeedbackRecord | null>(null);
-  const [isLoadingFeedbacks, setIsLoadingFeedbacks] = useState(false);
+  const [isLoadingFeedbacks, setIsLoadingFeedbacks] = useState(!isAndroidApp);
   const [deletingFeedbackId, setDeletingFeedbackId] = useState<string | null>(null);
 
   const loadFeedbacks = useCallback(async () => {
@@ -241,6 +245,7 @@ export function ProfilePage({
     try {
       const data = await listUserFeedbacks(currentUser);
       setFeedbacks(data);
+      if (isAndroidApp) writeProfilePreload(currentUser.uid, { feedbacks: data });
     } catch {
       // ignore
     } finally {
@@ -269,6 +274,7 @@ export function ProfilePage({
     try {
       const data = await listBankAccounts(currentUser);
       setBankAccounts(data);
+      if (isAndroidApp) writeProfilePreload(currentUser.uid, { bankAccounts: data });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("bank-accounts-changed", { detail: data }));
       }
@@ -318,6 +324,7 @@ export function ProfilePage({
     try {
       const data = await listTokens(currentUser);
       setTokens(data);
+      if (isAndroidApp) writeProfilePreload(currentUser.uid, { tokens: data });
     } catch (err: any) {
       console.error(err);
       setTokenError(err.message || "Failed to load access tokens.");
@@ -1128,6 +1135,8 @@ export function ProfilePage({
           )}
         </div>
       </SurfaceCard>
+
+      {isAndroidApp ? <AndroidAppSettings currentUser={currentUser} /> : null}
 
       {/* Danger Zone Row */}
       <div className="relative z-0">

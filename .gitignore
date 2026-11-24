@@ -4,6 +4,12 @@ coverage
 backend/data
 *.log
 .env
+.env.*
+!.env.example
+.idea/
+*.jks
+*.keystore
+frontend/android/app/google-services.json
 .DS_Store
 frontend/.vite
 
@@ -13,3 +19,5 @@ strix_runs
 security-audit
 *.tsbuildinfo
 readme/
+
+.vercel

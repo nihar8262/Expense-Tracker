@@ -1,4 +1,4 @@
-import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { cert, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
 export type AuthenticatedUser = {
@@ -49,14 +49,18 @@ function readFirebaseAdminCredentials() {
   return { projectId, clientEmail, privateKey };
 }
 
-function getFirebaseAuth() {
+export function getFirebaseAdminApp() {
   if (getApps().length === 0) {
-    initializeApp({
+    return initializeApp({
       credential: cert(readFirebaseAdminCredentials())
     });
   }
 
-  return getAuth();
+  return getApp();
+}
+
+function getFirebaseAuth() {
+  return getAuth(getFirebaseAdminApp());
 }
 
 export async function deleteAuthenticatedUser(userId: string): Promise<void> {

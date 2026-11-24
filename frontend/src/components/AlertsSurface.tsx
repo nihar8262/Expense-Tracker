@@ -39,6 +39,8 @@ export function AlertsSurface({
   onDeleteNotification,
   onRefreshChecks,
   onRespondToWalletInvite,
+  onRespondToLoanInvite,
+  onAddDetectedDebit,
   onSaveBillReminder,
   onDeleteBillReminder,
   onPreferencesChange,
@@ -105,6 +107,15 @@ export function AlertsSurface({
     }
   }
 
+  async function handleRespondToLoanInvite(notificationId: string, loanId: string, action: "accept" | "decline") {
+    setRespondingInviteIds((current) => [...new Set([...current, loanId])]);
+    try {
+      await onRespondToLoanInvite(notificationId, loanId, action);
+    } finally {
+      setRespondingInviteIds((current) => current.filter((id) => id !== loanId));
+    }
+  }
+
   async function handleDeleteBillReminder(billReminderId: string) {
     setDeletingBillReminderIds((current) => [...new Set([...current, billReminderId])]);
     try {
@@ -167,7 +178,7 @@ export function AlertsSurface({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-display text-base sm:text-lg font-bold text-ink">
-                In-App Notifications
+                Notifications
               </h2>
               {notifications.length > 0 && (
                 <span className="text-xs text-muted font-medium">
@@ -204,7 +215,9 @@ export function AlertsSurface({
           </div>
         </div>
 
-        {notifications.length === 0 ? (
+        {isRunningChecks && notifications.length === 0 ? (
+          <StatusNotice tone="neutral">Loading notifications...</StatusNotice>
+        ) : notifications.length === 0 ? (
           <EmptyState title="No notifications yet" description="Personal budget nudges, bill due reminders, and shared wallet invites will appear here as they happen." />
         ) : (
           <div className="grid gap-2.5">
@@ -237,7 +250,16 @@ export function AlertsSurface({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 sm:max-w-[280px] sm:justify-end shrink-0 pt-1 sm:pt-0">
-                    {notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
+                    {notification.type === "detected-debit" ? (
+                      <>
+                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" onClick={() => onAddDetectedDebit(notification)}>
+                          Add expense
+                        </button>
+                        <button type="button" className="ui-button-danger text-xs px-2.5 py-1" disabled={deletingNotificationIds.includes(notification.id)} onClick={() => void handleDeleteNotification(notification.id)}>
+                          {deletingNotificationIds.includes(notification.id) ? "Deleting..." : "Dismiss"}
+                        </button>
+                      </>
+                    ) : notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
                       <>
                         <button type="button" className="ui-button-danger text-xs px-2.5 py-1" disabled={deletingNotificationIds.includes(notification.id) || respondingInviteIds.includes(notification.metadata!.walletMemberId)} onClick={() => void handleDeleteNotification(notification.id)}>
                           {deletingNotificationIds.includes(notification.id) ? "Deleting..." : "Delete"}
@@ -249,10 +271,28 @@ export function AlertsSurface({
                           {respondingInviteIds.includes(notification.metadata!.walletMemberId) ? "Accepting..." : "Accept"}
                         </button>
                       </>
+                    ) : notification.type === "loan-issued" && notification.metadata?.loanId && notification.status === "unread" ? (
+                      <>
+                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "decline")}>
+                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Declining..." : "Decline"}
+                        </button>
+                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "accept")}>
+                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Accepting..." : "Accept & Sync"}
+                        </button>
+                      </>
+                    ) : notification.type === "loan-issued" && notification.metadata?.loanId && notification.status === "unread" ? (
+                      <>
+                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "decline")}>
+                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Declining..." : "Decline"}
+                        </button>
+                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "accept")}>
+                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Accepting..." : "Accept & Sync"}
+                        </button>
+                      </>
                     ) : (
                       <>
                         {(notification.type === "loan-issued" || notification.type === "loan-overdue") && (
-                          <Link to="/wallets" className="ui-button-secondary text-xs px-2.5 py-1">
+                          <Link to="/wallets?tab=loans" className="ui-button-secondary text-xs px-2.5 py-1">
                             View Loan
                           </Link>
                         )}

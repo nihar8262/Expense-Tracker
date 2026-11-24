@@ -163,9 +163,13 @@ export function AuthPage({
             </h2>
             <p className="text-xs text-secondary leading-relaxed max-w-[340px]">
               {localMode === "signin"
-                ? "Choose a provider to open your private expense workspace."
+                ? providerOptions.length > 0
+                  ? "Choose a provider or use your email to open your private expense workspace."
+                  : "Use your email and password to open your private expense workspace."
                 : localMode === "signup"
-                ? "Create your account with a provider below to get started."
+                ? providerOptions.length > 0
+                  ? "Create your account with a provider or email below to get started."
+                  : "Create your account with your email and password to get started."
                 : "We will send a recovery link to your registered email."}
             </p>
           </div>

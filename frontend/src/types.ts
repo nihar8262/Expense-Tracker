@@ -8,6 +8,7 @@ export type Expense = {
 	description: string;
 	date: string;
 	created_at: string;
+	updated_at?: string;
 	platform?: string | null;
 	bank_account_id?: string | null;
 	bank_name?: string | null;
@@ -79,6 +80,7 @@ export type Budget = {
 	category: string | null;
 	month: string;
 	created_at: string;
+	updated_at?: string;
 };
 
 export type WalletBudget = Budget & {
@@ -277,7 +279,7 @@ export type WalletHistoryPagination = {
 
 export type Notification = {
 	id: string;
-	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue" | "loan-repayment";
+	type: "budget-threshold" | "budget-overspent" | "daily-log" | "bill-due" | "wallet-invite" | "invite-response" | "loan-issued" | "loan-overdue" | "loan-repayment" | "detected-debit";
 	title: string;
 	message: string;
 	status: "unread" | "read";
@@ -444,6 +446,8 @@ export type NotificationCenterProps = {
 	onDeleteNotification: (notificationId: string) => Promise<boolean>;
 	onRefreshChecks: () => void;
 	onRespondToWalletInvite: (walletMemberId: string, action: "accept" | "decline") => Promise<boolean>;
+	onRespondToLoanInvite: (notificationId: string, loanId: string, action: "accept" | "decline") => Promise<boolean>;
+	onAddDetectedDebit: (notification: Notification) => void;
 	onSaveBillReminder: (input: {
 		title: string;
 		amount: string;
