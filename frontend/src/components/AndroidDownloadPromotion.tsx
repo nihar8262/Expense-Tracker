@@ -6,7 +6,11 @@ import { isAndroidApp } from "../utils/platform";
 const APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.0";
 const RELEASE_KEY = `expense-tracker.android-release.${APP_VERSION}`;
 
-export function AndroidDownloadPromotion() {
+type AndroidDownloadPromotionProps = {
+  isAuthenticated: boolean;
+};
+
+export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPromotionProps) {
   const [isBannerVisible, setIsBannerVisible] = useState(() => {
     if (isAndroidApp || typeof window === "undefined") return false;
     return window.localStorage.getItem(`${RELEASE_KEY}.banner-dismissed`) !== "true";
@@ -21,6 +25,8 @@ export function AndroidDownloadPromotion() {
 
   if (isAndroidApp) return null;
 
+  const destination = isAuthenticated ? "/profile#android-app" : "/signin";
+
   function markAnnouncementSeen() {
     window.localStorage.setItem(`${RELEASE_KEY}.announcement-seen`, "true");
     setIsModalVisible(false);
@@ -34,7 +40,7 @@ export function AndroidDownloadPromotion() {
   return (
     <>
       {isBannerVisible ? (
-        <section className="relative mb-3 overflow-hidden rounded-[20px] border border-emerald-800/15 bg-[linear-gradient(115deg,#123f2c,#1d7450)] px-3.5 py-3 text-white shadow-[0_12px_35px_rgba(15,83,57,0.2)] sm:mb-4 sm:px-5">
+        <section className="fixed left-3 right-3 top-3 z-[90] mx-auto max-w-[1180px] overflow-hidden rounded-[20px] border border-emerald-800/15 bg-[linear-gradient(115deg,#123f2c,#1d7450)] px-3.5 py-3 text-white shadow-[0_12px_35px_rgba(15,83,57,0.24)] sm:px-5">
           <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full border border-white/10 bg-white/5" />
           <div className="relative flex items-center gap-3 pr-7 sm:pr-8">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/10 sm:h-11 sm:w-11">
@@ -45,17 +51,17 @@ export function AndroidDownloadPromotion() {
               <p className="mt-0.5 text-xs leading-5 text-white/85 sm:text-sm">Faster access, offline storage, manual sync, and debit notification detection.</p>
             </div>
             <NavLink
-              to="/profile#android-app"
+              to={destination}
               className="hidden shrink-0 items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold text-emerald-900 shadow-sm transition hover:bg-emerald-50 sm:inline-flex"
             >
-              Get the app <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              {isAuthenticated ? "Get the app" : "Sign in to download"} <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </NavLink>
             <button type="button" onClick={dismissBanner} className="absolute -right-1 -top-1 rounded-full p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white" aria-label="Dismiss Android app banner">
               <X className="h-4 w-4" />
             </button>
           </div>
-          <NavLink to="/profile#android-app" className="relative mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold text-white sm:hidden">
-            View download <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          <NavLink to={destination} className="relative mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold text-white sm:hidden">
+            {isAuthenticated ? "View download" : "Sign in to download"} <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </NavLink>
         </section>
       ) : null}
@@ -84,8 +90,8 @@ export function AndroidDownloadPromotion() {
               </div>
               <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button type="button" onClick={markAnnouncementSeen} className="ui-button-secondary justify-center">Maybe later</button>
-                <NavLink to="/profile#android-app" onClick={markAnnouncementSeen} className="ui-button-primary justify-center gap-2">
-                  <Download className="h-4 w-4" aria-hidden="true" /> View Android download
+                <NavLink to={destination} onClick={markAnnouncementSeen} className="ui-button-primary justify-center gap-2">
+                  <Download className="h-4 w-4" aria-hidden="true" /> {isAuthenticated ? "View Android download" : "Sign in to download"}
                 </NavLink>
               </div>
             </div>

@@ -10,6 +10,8 @@ backend/data
 *.jks
 *.keystore
 frontend/android/app/google-services.json
+frontend/android/keystore.properties
+frontend/android/app/release/
 .DS_Store
 frontend/.vite
 

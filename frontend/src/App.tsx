@@ -5,6 +5,7 @@ import { LaunchScreen } from "./components/LaunchScreen";
 import { OnboardingExperience } from "./components/OnboardingExperience";
 import { isAndroidApp } from "./utils/platform";
 import { consumeSystemNotificationLaunchTarget } from "./services/systemNotifications";
+import { AndroidDownloadPromotion } from "./components/AndroidDownloadPromotion";
 
 const ONBOARDING_STORAGE_KEY = "finance-space-onboarding-complete-v1";
 
@@ -66,6 +67,7 @@ export default function App() {
 
   return (
     <>
+      <AndroidDownloadPromotion isAuthenticated={isAuthenticated === true} />
       <AppRoutes onAuthReady={handleAuthReady} onSignedOut={handleSignedOut} />
       {isAndroidApp && !showLaunchScreen && isAuthenticated === false && !onboardingDismissed ? <OnboardingExperience onComplete={completeOnboarding} /> : null}
       {showLaunchScreen ? <LaunchScreen isFirstLaunch={!hasCompletedOnboarding} /> : null}
