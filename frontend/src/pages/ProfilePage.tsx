@@ -22,6 +22,10 @@ import { BankLogo, BankCardBadge } from "../components/BankPicker";
 import { AndroidAppSettings } from "../components/AndroidAppSettings";
 import { isAndroidApp } from "../utils/platform";
 import { readProfilePreload, writeProfilePreload } from "../services/profilePreload";
+import { BellRing, Download, HardDrive, ShieldCheck, Smartphone } from "lucide-react";
+
+const ANDROID_APK_URL = (import.meta.env.VITE_ANDROID_APK_URL as string | undefined)?.trim() || "";
+const ANDROID_APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.0";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -442,6 +446,14 @@ export function ProfilePage({
       setCustomPhotoUrl(reminderPreferences.photo_url || currentUser.photoURL || "");
     }
   }, [reminderPreferences, currentUser]);
+
+  useEffect(() => {
+    if (isAndroidApp || window.location.hash !== "#android-app") return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("android-app")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1137,6 +1149,61 @@ export function ProfilePage({
       </SurfaceCard>
 
       {isAndroidApp ? <AndroidAppSettings currentUser={currentUser} /> : null}
+
+      {!isAndroidApp ? (
+        <SurfaceCard id="android-app" className="scroll-mt-28 overflow-hidden border border-emerald-900/15 bg-[linear-gradient(135deg,rgba(235,247,237,0.95),rgba(255,250,239,0.92))] p-0">
+          <div className="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="p-4 sm:p-6">
+              <div className="flex items-start gap-3.5 sm:gap-5">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[20px] border border-white bg-white/80 p-2.5 shadow-[0_12px_30px_rgba(28,87,58,0.14)] sm:h-20 sm:w-20">
+                  <img src="/Glossy-logo.png" alt="Expense Tracker Android app icon" className="h-full w-full object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-display text-xl font-bold tracking-tight text-ink sm:text-2xl">Expense Tracker for Android</h2>
+                    <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">v{ANDROID_APP_VERSION}</span>
+                  </div>
+                  <p className="mt-1.5 text-xs leading-5 text-secondary sm:text-sm">A local-first companion for faster expense entry, device storage, notifications, and intentional manual syncing.</p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                {[
+                  { icon: HardDrive, title: "On-device storage", detail: "Keep working with locally cached finance data." },
+                  { icon: BellRing, title: "Debit detection", detail: "Turn supported bank alerts into expense prompts." },
+                  { icon: ShieldCheck, title: "Manual sync", detail: "You choose when local and cloud data exchange." },
+                  { icon: Smartphone, title: "Built for mobile", detail: "Launch, onboarding, and controls designed for Android." }
+                ].map(({ icon: Icon, title, detail }) => (
+                  <div key={title} className="flex gap-2.5 rounded-xl border border-white/80 bg-white/55 p-3">
+                    <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                    <div><p className="text-xs font-bold text-ink">{title}</p><p className="mt-0.5 text-[10px] leading-4 text-muted sm:text-[11px]">{detail}</p></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col justify-between border-t border-emerald-900/10 bg-emerald-950/[0.035] p-4 sm:p-6 lg:border-l lg:border-t-0">
+              <div>
+                <p className="section-eyebrow text-primary">Direct APK download</p>
+                <h3 className="mt-2 text-base font-bold text-ink">Install the latest release</h3>
+                <p className="mt-1.5 text-xs leading-5 text-secondary">Android may ask you to allow installation from your browser. Only install updates downloaded from this page.</p>
+              </div>
+              <div className="mt-5">
+                {ANDROID_APK_URL ? (
+                  <a href={ANDROID_APK_URL} className="ui-button-primary w-full justify-center gap-2" download rel="noopener noreferrer">
+                    <Download className="h-4 w-4" aria-hidden="true" /> Download APK · v{ANDROID_APP_VERSION}
+                  </a>
+                ) : (
+                  <button type="button" className="ui-button-primary w-full justify-center gap-2 opacity-60" disabled title="The APK download URL has not been configured yet.">
+                    <Download className="h-4 w-4" aria-hidden="true" /> Download coming soon
+                  </button>
+                )}
+                <p className="mt-2 text-center text-[10px] leading-4 text-muted">Requires Android 7 or newer. Your existing account works in both the website and app.</p>
+              </div>
+            </div>
+          </div>
+        </SurfaceCard>
+      ) : null}
 
       {/* Danger Zone Row */}
       <div className="relative z-0">

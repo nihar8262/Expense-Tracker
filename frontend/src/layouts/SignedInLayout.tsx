@@ -5,6 +5,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { NotificationCenter } from "../components/NotificationCenter";
 import { ProfileMenu } from "../components/ProfileMenu";
 import { AssistantPanel } from "../components/AssistantPanel";
+import { AndroidDownloadPromotion } from "../components/AndroidDownloadPromotion";
 import { cn } from "../components/ui";
 import { LayoutDashboard, Receipt, ReceiptIndianRupee, Wallet as WalletIcon, Bell, Plus } from "lucide-react";
 import type { BillReminder, Notification, ReminderPreferences, Wallet } from "../types";
@@ -123,6 +124,7 @@ export function SignedInLayout({
 
   return (
     <main className="app-page">
+      <AndroidDownloadPromotion />
       <header className="surface-card sticky top-4 z-50 px-3 py-2.5 sm:px-5 sm:py-3 lg:px-6">
         <div className="flex items-center justify-between gap-2.5 sm:gap-3 lg:gap-6">
           <NavLink
