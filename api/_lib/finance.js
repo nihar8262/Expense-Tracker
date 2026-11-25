@@ -3027,9 +3027,15 @@ async function deleteNotificationForUser(userId, notificationId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
   const rows = await sql.begin(async (tx) => {
-    const found = await tx`SELECT id, dedupe_key FROM notifications WHERE id = ${notificationId} AND user_id = ${userId}`;
+    const found = await tx`SELECT id, notification_type, dedupe_key FROM notifications WHERE id = ${notificationId} AND user_id = ${userId}`;
     if (!found[0]) return [];
-    await tx`INSERT INTO notification_dismissals (user_id, dedupe_key, dismissed_at) VALUES (${userId}, ${found[0].dedupe_key}, NOW()) ON CONFLICT (user_id, dedupe_key) DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at`;
+    if (found[0].notification_type === "bill-due") {
+      // Bill reminders may be generated again while their due window is active,
+      // but an existing read or unread notification still suppresses duplicates.
+      await tx`DELETE FROM notification_dismissals WHERE user_id = ${userId} AND dedupe_key = ${found[0].dedupe_key}`;
+    } else {
+      await tx`INSERT INTO notification_dismissals (user_id, dedupe_key, dismissed_at) VALUES (${userId}, ${found[0].dedupe_key}, NOW()) ON CONFLICT (user_id, dedupe_key) DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at`;
+    }
     return tx`DELETE FROM notifications WHERE id = ${notificationId} AND user_id = ${userId} RETURNING id`;
   });
   if (!rows[0]) {
@@ -3081,8 +3087,10 @@ async function updateReminderPreferencesForUser(userId, rawBody) {
 }
 
 async function upsertNotification(sql, input) {
-  const dismissed = await sql`SELECT 1 FROM notification_dismissals WHERE user_id = ${input.userId} AND dedupe_key = ${input.dedupeKey} LIMIT 1`;
-  if (dismissed[0]) return null;
+  if (input.type !== "bill-due") {
+    const dismissed = await sql`SELECT 1 FROM notification_dismissals WHERE user_id = ${input.userId} AND dedupe_key = ${input.dedupeKey} LIMIT 1`;
+    if (dismissed[0]) return null;
+  }
   const rows = await sql`INSERT INTO notifications (id, user_id, notification_type, title, message, notification_status, scheduled_for, metadata_json, dedupe_key, created_at) VALUES (${randomUUID()}, ${input.userId}, ${input.type}, ${input.title}, ${input.message}, ${"unread"}, ${input.scheduledFor}, ${input.metadata ? JSON.stringify(input.metadata) : null}, ${input.dedupeKey}, ${new Date().toISOString()}) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key`;
   if (!rows[0]) return null;
   const notification = mapNotification(rows[0]);
@@ -3242,11 +3250,11 @@ function getUpcomingBillDueDate(billReminder, now) {
   return asIsoDate(dueDate);
 }
 
-async function runReminderChecksForUser(targetUserId) {
-  return runReminderChecks(targetUserId);
+async function runReminderChecksForUser(targetUserId, scope = "all") {
+  return runReminderChecks(targetUserId, scope);
 }
 
-async function runReminderChecks(targetUserId) {
+async function runReminderChecks(targetUserId, scope = "all") {
   const sql = getSqlClient();
   await ensureSchema(sql);
   const now = new Date();
@@ -3260,7 +3268,7 @@ async function runReminderChecks(targetUserId) {
   for (const userId of users) {
     const preferenceRows = await sql`SELECT user_id, daily_logging_enabled, daily_logging_hour, budget_alerts_enabled, budget_alert_threshold, updated_at FROM reminder_preferences WHERE user_id = ${userId}`;
     const preferences = preferenceRows[0] ?? { daily_logging_enabled: true, daily_logging_hour: 20, budget_alerts_enabled: true, budget_alert_threshold: 80 };
-    if (preferences.daily_logging_enabled && now.getHours() >= preferences.daily_logging_hour) {
+    if (scope !== "budget" && preferences.daily_logging_enabled && now.getHours() >= preferences.daily_logging_hour) {
       const todayExpenseRows = await sql`SELECT COUNT(*)::text AS count FROM expenses WHERE user_id = ${userId} AND expense_date = ${currentDate}`;
       if (Number(todayExpenseRows[0]?.count ?? "0") === 0) {
         const notification = await upsertNotification(sql, { userId, type: "daily-log", title: "Log today's spending", message: "You have not added any expenses today. Capture them before the day ends.", scheduledFor: `${currentDate}T${String(preferences.daily_logging_hour).padStart(2, "0")}:00:00.000Z`, metadata: { date: currentDate }, dedupeKey: `daily-log:${currentDate}` });
@@ -3269,7 +3277,7 @@ async function runReminderChecks(targetUserId) {
         }
       }
     }
-    if (preferences.budget_alerts_enabled) {
+    if (scope !== "reminders" && preferences.budget_alerts_enabled) {
       const budgets = await sql`SELECT id, amount_minor, budget_scope, category, budget_month FROM budgets WHERE user_id = ${userId} AND budget_month = ${currentMonth}`;
       for (const budget of budgets) {
         const spendRows = budget.budget_scope === "category"
@@ -3292,6 +3300,10 @@ async function runReminderChecks(targetUserId) {
         }
       }
     }
+
+    // Expense mutations request only budget evaluation. Scheduled reminders are
+    // evaluated separately when the app starts or when the user runs checks.
+    if (scope === "budget") continue;
 
     const billReminders = await sql`SELECT id, user_id, title, amount_minor, category, due_date, recurrence, interval_count, reminder_days_before, is_active, created_at FROM bill_reminders WHERE user_id = ${userId}`;
     for (const billReminder of billReminders) {

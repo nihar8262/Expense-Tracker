@@ -96,7 +96,7 @@ module.exports = async function handler(request, response) {
       const idempotencyKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
       const result = await createExpense(request.body, idempotencyKey, user.id);
       if (result.status === 201) {
-        runReminderChecksForUser(user.id).catch((error) => console.error("Background budget check failed.", error));
+        runReminderChecksForUser(user.id, "budget").catch((error) => console.error("Background budget check failed.", error));
       }
       return sendResult(response, result);
     }
@@ -121,7 +121,7 @@ module.exports = async function handler(request, response) {
   if (request.method === "PUT") {
     const result = await updateExpense(request.body, expenseId, user.id);
     if (result.status === 200) {
-      runReminderChecksForUser(user.id).catch((error) => console.error("Background budget check failed.", error));
+      runReminderChecksForUser(user.id, "budget").catch((error) => console.error("Background budget check failed.", error));
     }
     return sendResult(response, result);
   }

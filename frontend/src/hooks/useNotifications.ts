@@ -9,7 +9,7 @@ export function useNotifications() {
     markNotificationRead: useCallback((notificationId: string, user: User) => api.markNotificationRead(notificationId, user), []),
     markAllNotificationsRead: useCallback((user: User) => api.markAllNotificationsRead(user), []),
     deleteNotification: useCallback((notificationId: string, user: User) => api.deleteNotification(notificationId, user), []),
-    runNotificationChecks: useCallback((user: User) => api.runNotificationChecks(user), []),
+    runNotificationChecks: useCallback((user: User, scope: "all" | "budget" | "reminders" = "all") => api.runNotificationChecks(user, scope), []),
     respondToWalletInvite: useCallback((walletMemberId: string, action: "accept" | "decline", user: User) => api.respondToWalletInvite(walletMemberId, action, user), []),
     listBillReminders: useCallback((user: User) => api.listBillReminders(user), []),
     saveBillReminder: useCallback((input: { title: string; amount: string; category: string; dueDate: string; recurrence: BillReminderRecurrence; intervalCount: number; reminderDaysBefore: number; isActive: boolean }, user: User, billReminderId?: string) => api.saveBillReminder(input, user, billReminderId), []),

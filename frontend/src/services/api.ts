@@ -687,9 +687,13 @@ export async function deleteNotification(notificationId: string, user: User): Pr
   await apiRequest<void>(user, { url: endpoint, method: "DELETE" }, "Failed to delete notification.");
 }
 
-export async function runNotificationChecks(user: User): Promise<Notification[]> {
+export async function runNotificationChecks(user: User, scope: "all" | "budget" | "reminders" = "all"): Promise<Notification[]> {
   const endpoint = API_BASE_URL ? new URL("/api/notifications/run-checks", API_BASE_URL).toString() : "/api/notifications/run-checks";
-  const body = await apiRequest<{ created_notifications: Notification[] }>(user, { url: endpoint, method: "POST" }, "Failed to run reminder checks.");
+  const body = await apiRequest<{ created_notifications: Notification[] }>(user, {
+    url: endpoint,
+    method: "POST",
+    data: { scope }
+  }, "Failed to run reminder checks.");
   return body.created_notifications;
 }
 

@@ -43,7 +43,9 @@ module.exports = async function handler(request, response) {
 
     if (segments.length === 1 && segments[0] === "run-checks") {
       if (request.method === "POST") {
-        const result = await runReminderChecksForUser(user.id);
+        const requestedScope = request.body?.scope;
+        const scope = requestedScope === "budget" || requestedScope === "reminders" ? requestedScope : "all";
+        const result = await runReminderChecksForUser(user.id, scope);
         return sendResult(response, result);
       }
 

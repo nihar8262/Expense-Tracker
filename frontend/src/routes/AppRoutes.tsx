@@ -2295,9 +2295,9 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     if (notification.status === "unread") void handleMarkNotificationRead(notification.id);
   }
 
-  async function runChecksAndReloadNotifications(user: User) {
+  async function runChecksAndReloadNotifications(user: User, scope: "all" | "budget" | "reminders" = "all") {
     try {
-      const createdNotifications = await runNotificationChecks(user);
+      const createdNotifications = await runNotificationChecks(user, scope);
       if (isAndroidApp && createdNotifications.length > 0) {
         await publishUnreadSystemNotifications(createdNotifications).catch((error) => console.warn("Could not publish Android reminder notifications:", error));
       }
@@ -2499,7 +2499,9 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     }
 
     void loadReminderPreferences(currentUser);
-    void loadNotifications(currentUser);
+    // Scheduled reminders (for example subscriptions) are checked on startup.
+    // Budget checks remain tied to expense additions and updates only.
+    void runChecksAndReloadNotifications(currentUser, "reminders");
 
   }, [authLoading, currentUser, deviceSetupState]);
 
