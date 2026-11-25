@@ -1,13 +1,13 @@
 import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection } from "@capacitor-community/sqlite";
 import type { User } from "firebase/auth";
 import type { Budget, BudgetForm, Expense, ExpenseForm, ExpensesQuery, PaginatedExpenses, PersonalAggregation, Wallet, WalletLoan } from "../types";
+import { ApiError } from "../types";
 import {
   createBudget as createServerBudget,
   createExpense as createServerExpense,
   deleteBudget as deleteServerBudget,
   deleteExpense as deleteServerExpense,
-  listBudgets,
-  listExpenses as listServerExpenses,
+  getDeviceSyncPage,
   listLoans,
   listWallets,
   updateBudget as updateServerBudget,
@@ -129,7 +129,8 @@ async function openDatabase(): Promise<SQLiteDBConnection> {
         );
         CREATE TABLE IF NOT EXISTS sync_metadata (
           user_id TEXT PRIMARY KEY NOT NULL,
-          last_synced_at TEXT NOT NULL
+          last_synced_at TEXT NOT NULL,
+          sync_cursor TEXT
         );
         CREATE TABLE IF NOT EXISTS sync_history (
           id TEXT PRIMARY KEY NOT NULL,
@@ -184,6 +185,10 @@ async function openDatabase(): Promise<SQLiteDBConnection> {
         CREATE INDEX IF NOT EXISTS idx_device_budgets_sync_state
           ON device_budgets(user_id, sync_state);
       `);
+      const metadataColumns = await database.query("PRAGMA table_info(sync_metadata)");
+      if (!(metadataColumns.values ?? []).some((column) => String(column.name) === "sync_cursor")) {
+        await database.run("ALTER TABLE sync_metadata ADD COLUMN sync_cursor TEXT");
+      }
       return database;
     })().catch((error) => {
       databasePromise = null;
@@ -273,23 +278,6 @@ export async function getDeviceSyncHistory(userId: string, limit = 5): Promise<D
     downloadedCount: Number(row.downloaded_count) || 0,
     message: row.message == null ? null : String(row.message)
   }));
-}
-
-async function downloadAllExpenses(user: User) {
-  const pageSize = 100;
-  const expenses = [];
-  let offset = 0;
-  let hasMore = true;
-
-  while (hasMore) {
-    const page = await listServerExpenses(user, { limit: pageSize, offset, sort: "date_desc" });
-    expenses.push(...page.expenses);
-    hasMore = page.has_more;
-    offset += page.expenses.length;
-    if (page.expenses.length === 0) break;
-  }
-
-  return expenses;
 }
 
 function rowToExpense(row: Record<string, unknown>): Expense {
@@ -501,31 +489,39 @@ export async function getLocalPersonalAggregation(user: User): Promise<PersonalA
   };
 }
 
-async function pushPendingExpenses(user: User, database: SQLiteDBConnection, remoteExpenses: Expense[]) {
-  const remoteById = new Map(remoteExpenses.map((item) => [item.id, item]));
+async function pushPendingExpenses(user: User, database: SQLiteDBConnection) {
   const pending = await database.query(
     "SELECT * FROM device_expenses WHERE user_id = ? AND sync_state != 'synced' ORDER BY updated_at ASC",
     [user.uid]
   );
   for (const row of pending.values ?? []) {
     const expense = rowToExpense(row);
-    const remote = row.server_id ? remoteById.get(String(row.server_id)) : undefined;
-    if (remote?.updated_at && new Date(remote.updated_at).getTime() > new Date(String(row.updated_at)).getTime()) {
-      await database.run("DELETE FROM device_expenses WHERE user_id = ? AND id = ?", [user.uid, expense.id]);
-      continue;
-    }
     const payload: ExpenseForm = {
       amount: expense.amount, category: expense.category, description: expense.description, date: expense.date,
       platform: expense.platform, bankAccountId: expense.bank_account_id, bankName: expense.bank_name
     };
     if (row.sync_state === "pending_create") {
-      await createServerExpense(payload, `android-${expense.id}`, user);
+      const canonical = await createServerExpense(payload, `android-${expense.id}`, user);
+      await database.beginTransaction();
+      try {
+        await database.run("DELETE FROM device_expenses WHERE user_id = ? AND id = ?", [user.uid, expense.id], false);
+        await insertExpenseRow(database, user.uid, canonical, canonical.id, "synced", false);
+        await database.commitTransaction();
+      } catch (error) {
+        await database.rollbackTransaction();
+        throw error;
+      }
     } else if (row.sync_state === "pending_update" && row.server_id) {
-      await updateServerExpense(String(row.server_id), payload, user);
+      const canonical = await updateServerExpense(String(row.server_id), payload, user);
+      await insertExpenseRow(database, user.uid, canonical, canonical.id, "synced");
     } else if (row.sync_state === "pending_delete" && row.server_id) {
-      await deleteServerExpense(String(row.server_id), user);
+      try {
+        await deleteServerExpense(String(row.server_id), user);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      }
+      await database.run("DELETE FROM device_expenses WHERE user_id = ? AND id = ?", [user.uid, expense.id]);
     }
-    await database.run("DELETE FROM device_expenses WHERE user_id = ? AND id = ?", [user.uid, expense.id]);
   }
 }
 
@@ -680,29 +676,43 @@ export async function deleteLocalBudget(budgetId: string, user: User): Promise<v
   }
 }
 
-async function pushPendingBudgets(user: User, database: SQLiteDBConnection, remoteBudgets: Budget[]) {
-  const remoteById = new Map(remoteBudgets.map((item) => [item.id, item]));
+async function pushPendingBudgets(user: User, database: SQLiteDBConnection) {
   const pending = await database.query(
     "SELECT * FROM device_budgets WHERE user_id = ? AND sync_state != 'synced' ORDER BY updated_at ASC",
     [user.uid]
   );
   for (const row of pending.values ?? []) {
     const budget = rowToBudget(row);
-    const remote = row.server_id ? remoteById.get(String(row.server_id)) : undefined;
-    if (remote?.updated_at && new Date(remote.updated_at).getTime() > new Date(String(row.updated_at)).getTime()) {
-      await database.run("DELETE FROM device_budgets WHERE user_id = ? AND id = ?", [user.uid, budget.id]);
-      continue;
-    }
     const payload: BudgetForm = {
       amount: budget.amount,
       scope: budget.scope,
       category: budget.category ?? "",
       month: budget.month
     };
-    if (row.sync_state === "pending_create") await createServerBudget(payload, user);
-    else if (row.sync_state === "pending_update" && row.server_id) await updateServerBudget(String(row.server_id), payload, user);
-    else if (row.sync_state === "pending_delete" && row.server_id) await deleteServerBudget(String(row.server_id), user);
-    await database.run("DELETE FROM device_budgets WHERE user_id = ? AND id = ?", [user.uid, budget.id]);
+    if (row.sync_state === "pending_create") {
+      const canonical = await createServerBudget(payload, user, `android-budget-${budget.id}`);
+      await database.beginTransaction();
+      try {
+        await database.run("DELETE FROM device_budgets WHERE user_id = ? AND id = ?", [user.uid, budget.id], false);
+        await insertBudgetRow(database, user.uid, canonical, canonical.id, "synced", false);
+        await database.commitTransaction();
+      } catch (error) {
+        await database.rollbackTransaction();
+        throw error;
+      }
+    }
+    else if (row.sync_state === "pending_update" && row.server_id) {
+      const canonical = await updateServerBudget(String(row.server_id), payload, user);
+      await insertBudgetRow(database, user.uid, canonical, canonical.id, "synced");
+    }
+    else if (row.sync_state === "pending_delete" && row.server_id) {
+      try {
+        await deleteServerBudget(String(row.server_id), user);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      }
+      await database.run("DELETE FROM device_budgets WHERE user_id = ? AND id = ?", [user.uid, budget.id]);
+    }
   }
 }
 
@@ -720,68 +730,61 @@ async function performServerDataSync(user: User, onStage?: (stage: DeviceSyncSta
     [user.uid, user.uid]
   );
   const uploadedCount = Number(pendingBefore.values?.[0]?.count) || 0;
-  const [comparisonExpenses, comparisonBudgets] = await Promise.all([downloadAllExpenses(user), listBudgets(user)]);
-  await pushPendingExpenses(user, database, comparisonExpenses);
-  await pushPendingBudgets(user, database, comparisonBudgets);
+  await pushPendingExpenses(user, database);
+  await pushPendingBudgets(user, database);
   onStage?.("downloading");
-  const existingLocalLoans = await readSnapshot<WalletLoan>(user.uid, "loans");
-  const [expenses, budgets, wallets, remoteLoans] = await Promise.all([
-    downloadAllExpenses(user),
-    listBudgets(user),
-    listWallets(user),
-    listLoans(user)
-  ]);
-  const loans = existingLocalLoans
-    ? [
-        ...existingLocalLoans.filter((loan) => loan.is_owner !== false && !loan.borrower_email),
-        ...remoteLoans.filter((loan) => loan.is_owner === false || Boolean(loan.borrower_email))
-      ]
-    : remoteLoans;
-  const syncedAt = new Date().toISOString();
-  const downloadedCount = expenses.length + budgets.length + wallets.length + loans.length;
+  const cursorResult = await database.query("SELECT sync_cursor FROM sync_metadata WHERE user_id = ? LIMIT 1", [user.uid]);
+  let cursor = cursorResult.values?.[0]?.sync_cursor == null ? null : String(cursorResult.values[0].sync_cursor);
+  let downloadedCount = 0;
+  let firstPage = true;
+  let hasMore = true;
 
   onStage?.("saving");
-  await database.beginTransaction();
-  try {
-    for (const [dataset, payload] of Object.entries({ expenses, budgets, wallets, loans })) {
+  while (hasMore) {
+    const page = await getDeviceSyncPage(user, cursor);
+    await database.beginTransaction();
+    try {
+      if (firstPage && page.mode === "bootstrap") {
+        await database.run("DELETE FROM device_expenses WHERE user_id = ? AND sync_state = 'synced'", [user.uid], false);
+        await database.run("DELETE FROM device_budgets WHERE user_id = ? AND sync_state = 'synced'", [user.uid], false);
+      }
+      for (const change of page.changes) {
+        downloadedCount += 1;
+        if (change.dataset === "expenses") {
+          if (change.operation === "delete" || !change.record) {
+            await database.run("DELETE FROM device_expenses WHERE user_id = ? AND (server_id = ? OR id = ?)", [user.uid, change.record_id, change.record_id], false);
+          } else {
+            await insertExpenseRow(database, user.uid, change.record as Expense, change.record_id, "synced", false);
+          }
+        } else if (change.operation === "delete" || !change.record) {
+          await database.run("DELETE FROM device_budgets WHERE user_id = ? AND (server_id = ? OR id = ?)", [user.uid, change.record_id, change.record_id], false);
+        } else {
+          await insertBudgetRow(database, user.uid, change.record as Budget, change.record_id, "synced", false);
+        }
+      }
+      const pageSyncedAt = new Date().toISOString();
       await database.run(
-        `INSERT INTO sync_snapshots (user_id, dataset, payload_json, item_count, synced_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, dataset) DO UPDATE SET
-           payload_json = excluded.payload_json,
-           item_count = excluded.item_count,
-           synced_at = excluded.synced_at`,
-        [user.uid, dataset, JSON.stringify(payload), payload.length, syncedAt],
-        false
+        `INSERT INTO sync_metadata (user_id, last_synced_at, sync_cursor) VALUES (?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET last_synced_at = excluded.last_synced_at, sync_cursor = excluded.sync_cursor`,
+        [user.uid, pageSyncedAt, page.cursor], false
       );
+      await database.commitTransaction();
+      cursor = page.cursor;
+      hasMore = page.has_more;
+      firstPage = false;
+    } catch (error) {
+      await database.rollbackTransaction();
+      throw error;
     }
-    await database.run(
-      "DELETE FROM device_expenses WHERE user_id = ? AND sync_state = 'synced'",
-      [user.uid],
-      false
-    );
-    await database.run(
-      "DELETE FROM device_budgets WHERE user_id = ? AND sync_state = 'synced'",
-      [user.uid],
-      false
-    );
-    for (const expense of expenses) {
-      await insertExpenseRow(database, user.uid, expense, expense.id, "synced", false);
-    }
-    for (const budget of budgets) {
-      await insertBudgetRow(database, user.uid, budget, budget.id, "synced", false);
-    }
-    await database.run(
-      `INSERT INTO sync_metadata (user_id, last_synced_at) VALUES (?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET last_synced_at = excluded.last_synced_at`,
-      [user.uid, syncedAt],
-      false
-    );
-    await database.commitTransaction();
-  } catch (error) {
-    await database.rollbackTransaction();
-    throw error;
   }
+
+  // Shared-wallet and linked-loan summaries remain server coordinated. Refresh their small metadata snapshots separately.
+  const existingLocalLoans = await readSnapshot<WalletLoan>(user.uid, "loans");
+  const [wallets, remoteLoans] = await Promise.all([listWallets(user), listLoans(user)]);
+  const loans = existingLocalLoans
+    ? [...existingLocalLoans.filter((loan) => loan.is_owner !== false && !loan.borrower_email), ...remoteLoans.filter((loan) => loan.is_owner === false || Boolean(loan.borrower_email))]
+    : remoteLoans;
+  await Promise.all([writeSnapshot(user.uid, "wallets", wallets), writeSnapshot(user.uid, "loans", loans)]);
 
   return { status: await getDeviceStorageStatus(user.uid), uploadedCount, downloadedCount };
 }
@@ -805,7 +808,15 @@ export async function syncServerDataToDevice(
     const result = await performServerDataSync(user, onStage);
     await database.run(
       `UPDATE sync_history SET completed_at = ?, status = 'success', uploaded_count = ?, downloaded_count = ?, message = ? WHERE id = ?`,
-      [new Date().toISOString(), result.uploadedCount, result.downloadedCount, "Manual sync completed.", id]
+      [
+        new Date().toISOString(),
+        result.uploadedCount,
+        result.downloadedCount,
+        result.uploadedCount === 0 && result.downloadedCount === 0
+          ? "Already up to date. No changes transferred."
+          : `Manual sync completed: ${result.uploadedCount} uploaded, ${result.downloadedCount} downloaded.`,
+        id
+      ]
     );
     onStage?.("complete");
     return { ...result.status, lastSyncStatus: "success" };

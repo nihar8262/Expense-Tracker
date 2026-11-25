@@ -1,6 +1,7 @@
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { getSqlClient } = require("./db");
 const { z } = require("zod");
+const { appendDeviceSyncChange, ensureDeviceSyncSchema } = require("./device-sync");
 
 function parseAmountToMinorUnits(value) {
   const raw = typeof value === "number" ? value.toString() : String(value ?? "");
@@ -91,7 +92,8 @@ function mapBudget(row) {
     scope: row.budget_scope,
     category: row.category,
     month: row.budget_month,
-    created_at: asIsoTimestamp(row.created_at)
+    created_at: asIsoTimestamp(row.created_at),
+    updated_at: asIsoTimestamp(row.updated_at || row.created_at)
   };
 }
 
@@ -117,6 +119,16 @@ async function ensureSchema(sql) {
       `;
 
       await sql`CREATE INDEX IF NOT EXISTS budgets_user_id_budget_month_idx ON budgets (user_id, budget_month DESC, created_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS budget_idempotency_requests (
+          user_id TEXT NOT NULL,
+          idempotency_key VARCHAR(255) NOT NULL,
+          request_hash TEXT NOT NULL,
+          budget_id UUID NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, idempotency_key)
+        )
+      `;
     })();
   }
 
@@ -126,9 +138,10 @@ async function ensureSchema(sql) {
 async function listBudgets(userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
   const rows = await sql`
-    SELECT id, amount_minor, budget_scope, category, budget_month, created_at
+    SELECT id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
     FROM budgets
     WHERE user_id = ${userId}
     ORDER BY budget_month DESC, created_at DESC
@@ -140,7 +153,7 @@ async function listBudgets(userId) {
   };
 }
 
-async function createBudget(rawBody, userId) {
+async function createBudget(rawBody, userId, rawIdempotencyKey) {
   const result = createBudgetSchema.safeParse(rawBody);
 
   if (!result.success) {
@@ -155,11 +168,26 @@ async function createBudget(rawBody, userId) {
 
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
+  const idempotencyKey = typeof rawIdempotencyKey === "string" ? rawIdempotencyKey.trim() : "";
+  const requestHash = createHash("sha256").update(JSON.stringify(result.data)).digest("hex");
   const budgetId = randomUUID();
   const createdAt = new Date().toISOString();
-  const rows = await sql`
-    INSERT INTO budgets (id, user_id, amount_minor, budget_scope, category, budget_month, created_at)
+  const rows = await sql.begin(async (tx) => {
+    if (idempotencyKey) {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${`${userId}:${idempotencyKey}`}))`;
+      const existing = await tx`
+        SELECT request_hash, budget_id FROM budget_idempotency_requests
+        WHERE user_id = ${userId} AND idempotency_key = ${idempotencyKey}
+      `;
+      if (existing[0]) {
+        if (existing[0].request_hash !== requestHash) throw new Error("This budget operation key was already used for different data.");
+        return tx`SELECT id, amount_minor, budget_scope, category, budget_month, created_at, updated_at FROM budgets WHERE user_id = ${userId} AND id = ${existing[0].budget_id}`;
+      }
+    }
+    const inserted = await tx`
+    INSERT INTO budgets (id, user_id, amount_minor, budget_scope, category, budget_month, created_at, updated_at)
     VALUES (
       ${budgetId},
       ${userId},
@@ -167,10 +195,20 @@ async function createBudget(rawBody, userId) {
       ${result.data.scope},
       ${result.data.scope === "category" ? result.data.category?.trim() ?? null : null},
       ${result.data.month},
+      ${createdAt},
       ${createdAt}
     )
-    RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
-  `;
+    RETURNING id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
+    `;
+    if (idempotencyKey) {
+      await tx`
+        INSERT INTO budget_idempotency_requests (user_id, idempotency_key, request_hash, budget_id, created_at)
+        VALUES (${userId}, ${idempotencyKey}, ${requestHash}, ${budgetId}, ${createdAt})
+      `;
+    }
+    await appendDeviceSyncChange(tx, userId, "budgets", budgetId, "upsert");
+    return inserted;
+  });
 
   return {
     status: 201,
@@ -193,16 +231,22 @@ async function updateBudget(rawBody, budgetId, userId) {
 
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
-  const rows = await sql`
+  const rows = await sql.begin(async (tx) => {
+    const updated = await tx`
     UPDATE budgets
     SET amount_minor = ${result.data.amount},
         budget_scope = ${result.data.scope},
         category = ${result.data.scope === "category" ? result.data.category?.trim() ?? null : null},
-        budget_month = ${result.data.month}
+        budget_month = ${result.data.month},
+        updated_at = NOW()
     WHERE id = ${budgetId} AND user_id = ${userId}
-    RETURNING id, amount_minor, budget_scope, category, budget_month, created_at
-  `;
+    RETURNING id, amount_minor, budget_scope, category, budget_month, created_at, updated_at
+    `;
+    if (updated[0]) await appendDeviceSyncChange(tx, userId, "budgets", budgetId, "upsert");
+    return updated;
+  });
 
   if (!rows[0]) {
     return {
@@ -220,12 +264,17 @@ async function updateBudget(rawBody, budgetId, userId) {
 async function deleteBudget(budgetId, userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
-  const rows = await sql`
-    DELETE FROM budgets
-    WHERE id = ${budgetId} AND user_id = ${userId}
-    RETURNING id
-  `;
+  const rows = await sql.begin(async (tx) => {
+    const deleted = await tx`
+      DELETE FROM budgets
+      WHERE id = ${budgetId} AND user_id = ${userId}
+      RETURNING id
+    `;
+    if (deleted[0]) await appendDeviceSyncChange(tx, userId, "budgets", budgetId, "delete");
+    return deleted;
+  });
 
   if (!rows[0]) {
     return {

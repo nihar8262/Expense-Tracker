@@ -160,6 +160,8 @@ type WalletsPageProps = {
     walletId: string,
     input: { displayName: string; email?: string },
   ) => Promise<boolean>;
+  onVerifyWalletMember: (walletId: string, email: string) => Promise<{ available: boolean; displayName?: string | null }>;
+  onVerifyRegisteredWalletMember: (email: string) => Promise<{ available: boolean; displayName?: string | null }>;
   onRemoveWalletMember: (
     walletId: string,
     memberId: string,
@@ -415,6 +417,8 @@ export function WalletsPage({
   onDeleteWallet,
   onLeaveWallet,
   onAddWalletMember,
+  onVerifyWalletMember,
+  onVerifyRegisteredWalletMember,
   onRemoveWalletMember,
   onCreateWalletExpense,
   onUpdateWalletExpense,
@@ -454,7 +458,7 @@ export function WalletsPage({
   const [walletDescription, setWalletDescription] = useState("");
   const [walletSplitRule, setWalletSplitRule] = useState<SplitRule>("equal");
   const [walletCurrency, setWalletCurrency] = useState("INR");
-  const [createWalletMembers, setCreateWalletMembers] = useState<Array<{ displayName: string; email: string }>>([
+  const [createWalletMembers, setCreateWalletMembers] = useState<Array<{ displayName: string; email: string; verifiedEmail?: string; verificationMessage?: string; isVerifying?: boolean }>>([
     { displayName: "", email: "" },
   ]);
   const [isCreateWalletModalOpen, setIsCreateWalletModalOpen] = useState(false);
@@ -480,6 +484,9 @@ export function WalletsPage({
   const [showEditWalletValidation, setShowEditWalletValidation] = useState(false);
   const [inviteDisplayName, setInviteDisplayName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [verifiedInviteEmail, setVerifiedInviteEmail] = useState<string | null>(null);
+  const [memberVerificationMessage, setMemberVerificationMessage] = useState("");
+  const [isVerifyingMember, setIsVerifyingMember] = useState(false);
   const [walletSubTab, setWalletSubTab] = useState<"overview" | "transactions" | "budget" | "members" | "all">("overview");
 
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -1552,6 +1559,15 @@ export function WalletsPage({
       return;
     }
 
+    const unverifiedMember = createWalletMembers.find((member) => {
+      const email = member.email.trim().toLowerCase();
+      return email && member.verifiedEmail !== email;
+    });
+    if (unverifiedMember) {
+      window.showToast?.("Verify every member email before creating the wallet.", "error");
+      return;
+    }
+
     const members = createWalletMembers
       .map((m) => ({ displayName: m.displayName.trim(), email: m.email.trim() || undefined }))
       .filter((m) => m.displayName.length > 0);
@@ -1576,6 +1592,41 @@ export function WalletsPage({
       setCreateWalletMembers([{ displayName: "", email: "" }]);
       setShowCreateWalletValidation(false);
       setIsCreateWalletModalOpen(false);
+    }
+  }
+
+  async function handleVerifyCreateWalletMember(index: number) {
+    const member = createWalletMembers[index];
+    const email = member?.email.trim().toLowerCase() ?? "";
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      setCreateWalletMembers((current) => current.map((item, itemIndex) => itemIndex === index
+        ? { ...item, verifiedEmail: undefined, verificationMessage: "Enter a valid email address." }
+        : item));
+      return;
+    }
+
+    setCreateWalletMembers((current) => current.map((item, itemIndex) => itemIndex === index
+      ? { ...item, isVerifying: true, verificationMessage: "" }
+      : item));
+    try {
+      const result = await onVerifyRegisteredWalletMember(email);
+      setCreateWalletMembers((current) => current.map((item, itemIndex) => {
+        if (itemIndex !== index || item.email.trim().toLowerCase() !== email) return item;
+        if (!result.available) {
+          return { ...item, isVerifying: false, verifiedEmail: undefined, verificationMessage: "No registered user was found with this email." };
+        }
+        return {
+          ...item,
+          displayName: item.displayName.trim() || result.displayName?.trim() || "Member",
+          isVerifying: false,
+          verifiedEmail: email,
+          verificationMessage: "Registered user verified."
+        };
+      }));
+    } catch (error) {
+      setCreateWalletMembers((current) => current.map((item, itemIndex) => itemIndex === index
+        ? { ...item, isVerifying: false, verifiedEmail: undefined, verificationMessage: error instanceof Error ? error.message : "Unable to verify this email." }
+        : item));
     }
   }
 
@@ -1664,6 +1715,11 @@ export function WalletsPage({
       return;
     }
 
+    if (verifiedInviteEmail !== inviteEmail.trim().toLowerCase()) {
+      setMemberVerificationMessage("Verify this registered email before adding the member.");
+      return;
+    }
+
     const created = await onAddWalletMember(selectedWallet.wallet.id, {
       displayName: inviteDisplayName,
       email: inviteEmail || undefined,
@@ -1672,7 +1728,34 @@ export function WalletsPage({
     if (created) {
       setInviteDisplayName("");
       setInviteEmail("");
+      setVerifiedInviteEmail(null);
+      setMemberVerificationMessage("");
       setShowMemberValidation(false);
+    }
+  }
+
+  async function handleVerifyWalletMember() {
+    if (!selectedWallet || memberErrors.email) {
+      setShowMemberValidation(true);
+      return;
+    }
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    setIsVerifyingMember(true);
+    setMemberVerificationMessage("");
+    try {
+      const result = await onVerifyWalletMember(selectedWallet.wallet.id, normalizedEmail);
+      if (result.available) {
+        setVerifiedInviteEmail(normalizedEmail);
+        setMemberVerificationMessage(result.displayName ? `Registered user found: ${result.displayName}` : "Registered user found. You can add this member.");
+      } else {
+        setVerifiedInviteEmail(null);
+        setMemberVerificationMessage("No registered Expense Tracker user was found with this email.");
+      }
+    } catch (error) {
+      setVerifiedInviteEmail(null);
+      setMemberVerificationMessage(error instanceof Error ? error.message : "Unable to verify this email.");
+    } finally {
+      setIsVerifyingMember(false);
     }
   }
 
@@ -4088,7 +4171,7 @@ export function WalletsPage({
                   onSubmit={handleAddWalletMemberSubmit}
                   noValidate
                 >
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
                     <div className="grid gap-2">
                       <input
                         value={inviteDisplayName}
@@ -4111,7 +4194,11 @@ export function WalletsPage({
                     <div className="grid gap-2">
                       <input
                         value={inviteEmail}
-                        onChange={(event) => setInviteEmail(event.target.value)}
+                        onChange={(event) => {
+                          setInviteEmail(event.target.value);
+                          setVerifiedInviteEmail(null);
+                          setMemberVerificationMessage("");
+                        }}
                         placeholder="Email to link existing user *"
                         required
                         aria-invalid={
@@ -4123,11 +4210,17 @@ export function WalletsPage({
                           {memberErrors.email}
                         </span>
                       ) : null}
+                      {memberVerificationMessage ? (
+                        <span className={cn("text-xs", verifiedInviteEmail ? "text-emerald-700" : "text-[color:var(--danger-text)]")}>{memberVerificationMessage}</span>
+                      ) : null}
                     </div>
+                    <button type="button" className="ui-button-secondary justify-center" disabled={isVerifyingMember || Boolean(memberErrors.email)} onClick={() => void handleVerifyWalletMember()}>
+                      {isVerifyingMember ? "Verifying..." : verifiedInviteEmail ? "Verified" : "Verify"}
+                    </button>
                     <button
                       type="submit"
                       className="ui-button-secondary justify-center"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || verifiedInviteEmail !== inviteEmail.trim().toLowerCase()}
                     >
                       {submittingAction === "member"
                         ? "Saving..."
@@ -5692,18 +5785,31 @@ export function WalletsPage({
                       />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <input
-                        type="email"
-                        value={member.email}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setCreateWalletMembers((prev) =>
-                            prev.map((m, i) => (i === idx ? { ...m, email: val } : m))
-                          );
-                        }}
-                        placeholder="Email for invitation (optional)"
-                        className="w-full text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="email"
+                          value={member.email}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCreateWalletMembers((prev) =>
+                              prev.map((m, i) => (i === idx ? { ...m, email: val, verifiedEmail: undefined, verificationMessage: "" } : m))
+                            );
+                          }}
+                          placeholder="Registered email (optional)"
+                          className="min-w-0 flex-1 text-xs rounded-xl border border-[color:var(--border)] bg-white dark:bg-zinc-800 px-3 py-2 text-ink placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                        <button
+                          type="button"
+                          className="ui-button-secondary shrink-0 justify-center px-3 text-xs"
+                          disabled={!member.email.trim() || member.isVerifying || member.verifiedEmail === member.email.trim().toLowerCase()}
+                          onClick={() => void handleVerifyCreateWalletMember(idx)}
+                        >
+                          {member.isVerifying ? "Verifying..." : member.verifiedEmail === member.email.trim().toLowerCase() ? "Verified" : "Verify"}
+                        </button>
+                      </div>
+                      {member.verificationMessage ? (
+                        <p className={cn("mt-1.5 text-2xs font-medium", member.verifiedEmail ? "text-emerald-600" : "text-[color:var(--danger-text)]")}>{member.verificationMessage}</p>
+                      ) : null}
                     </div>
                     {createWalletMembers.length > 1 && (
                       <button
@@ -5748,7 +5854,7 @@ export function WalletsPage({
               <button
                 type="submit"
                 className="ui-button-primary"
-                disabled={isSubmitting || isCompressingPicture}
+                disabled={isSubmitting || isCompressingPicture || createWalletMembers.some((member) => member.isVerifying)}
               >
                 {submittingAction === "create-wallet"
                   ? "Saving..."

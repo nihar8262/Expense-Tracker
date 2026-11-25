@@ -50,7 +50,7 @@ export function AlertsSurface({
   const isPopoverLayout = layout === "popover";
   const [editingBillReminderId, setEditingBillReminderId] = useState<string | null>(null);
   const [deletingNotificationIds, setDeletingNotificationIds] = useState<string[]>([]);
-  const [respondingInviteIds, setRespondingInviteIds] = useState<string[]>([]);
+  const [respondingInviteActions, setRespondingInviteActions] = useState<Record<string, "accept" | "decline">>({});
   const [deletingBillReminderIds, setDeletingBillReminderIds] = useState<string[]>([]);
   const [billTitle, setBillTitle] = useState("");
   const [billAmount, setBillAmount] = useState("");
@@ -99,20 +99,22 @@ export function AlertsSurface({
   }
 
   async function handleRespondToInvite(walletMemberId: string, action: "accept" | "decline") {
-    setRespondingInviteIds((current) => [...new Set([...current, walletMemberId])]);
+    const key = `wallet:${walletMemberId}`;
+    setRespondingInviteActions((current) => ({ ...current, [key]: action }));
     try {
       await onRespondToWalletInvite(walletMemberId, action);
     } finally {
-      setRespondingInviteIds((current) => current.filter((id) => id !== walletMemberId));
+      setRespondingInviteActions((current) => { const next = { ...current }; delete next[key]; return next; });
     }
   }
 
   async function handleRespondToLoanInvite(notificationId: string, loanId: string, action: "accept" | "decline") {
-    setRespondingInviteIds((current) => [...new Set([...current, loanId])]);
+    const key = `loan:${loanId}`;
+    setRespondingInviteActions((current) => ({ ...current, [key]: action }));
     try {
       await onRespondToLoanInvite(notificationId, loanId, action);
     } finally {
-      setRespondingInviteIds((current) => current.filter((id) => id !== loanId));
+      setRespondingInviteActions((current) => { const next = { ...current }; delete next[key]; return next; });
     }
   }
 
@@ -261,32 +263,23 @@ export function AlertsSurface({
                       </>
                     ) : notification.type === "wallet-invite" && notification.metadata?.walletMemberId && notification.status === "unread" ? (
                       <>
-                        <button type="button" className="ui-button-danger text-xs px-2.5 py-1" disabled={deletingNotificationIds.includes(notification.id) || respondingInviteIds.includes(notification.metadata!.walletMemberId)} onClick={() => void handleDeleteNotification(notification.id)}>
+                        <button type="button" className="ui-button-danger text-xs px-2.5 py-1" disabled={deletingNotificationIds.includes(notification.id) || Boolean(respondingInviteActions[`wallet:${notification.metadata!.walletMemberId}`])} onClick={() => void handleDeleteNotification(notification.id)}>
                           {deletingNotificationIds.includes(notification.id) ? "Deleting..." : "Delete"}
                         </button>
-                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata!.walletMemberId) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "decline")}>
-                          {respondingInviteIds.includes(notification.metadata!.walletMemberId) ? "Declining..." : "Decline"}
+                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={Boolean(respondingInviteActions[`wallet:${notification.metadata!.walletMemberId}`]) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "decline")}>
+                          {respondingInviteActions[`wallet:${notification.metadata!.walletMemberId}`] === "decline" ? "Declining..." : "Decline"}
                         </button>
-                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata!.walletMemberId) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "accept")}>
-                          {respondingInviteIds.includes(notification.metadata!.walletMemberId) ? "Accepting..." : "Accept"}
-                        </button>
-                      </>
-                    ) : notification.type === "loan-issued" && notification.metadata?.loanId && notification.status === "unread" ? (
-                      <>
-                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "decline")}>
-                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Declining..." : "Decline"}
-                        </button>
-                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "accept")}>
-                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Accepting..." : "Accept & Sync"}
+                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={Boolean(respondingInviteActions[`wallet:${notification.metadata!.walletMemberId}`]) || deletingNotificationIds.includes(notification.id)} onClick={() => void handleRespondToInvite(notification.metadata!.walletMemberId, "accept")}>
+                          {respondingInviteActions[`wallet:${notification.metadata!.walletMemberId}`] === "accept" ? "Accepting..." : "Accept"}
                         </button>
                       </>
                     ) : notification.type === "loan-issued" && notification.metadata?.loanId && notification.status === "unread" ? (
                       <>
-                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "decline")}>
-                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Declining..." : "Decline"}
+                        <button type="button" className="ui-button-secondary text-xs px-2.5 py-1" disabled={Boolean(respondingInviteActions[`loan:${notification.metadata.loanId}`])} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "decline")}>
+                          {respondingInviteActions[`loan:${notification.metadata.loanId}`] === "decline" ? "Declining..." : "Decline"}
                         </button>
-                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={respondingInviteIds.includes(notification.metadata.loanId)} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "accept")}>
-                          {respondingInviteIds.includes(notification.metadata.loanId) ? "Accepting..." : "Accept & Sync"}
+                        <button type="button" className="ui-button-primary text-xs px-2.5 py-1" disabled={Boolean(respondingInviteActions[`loan:${notification.metadata.loanId}`])} onClick={() => void handleRespondToLoanInvite(notification.id, notification.metadata!.loanId, "accept")}>
+                          {respondingInviteActions[`loan:${notification.metadata.loanId}`] === "accept" ? "Accepting..." : "Accept & Sync"}
                         </button>
                       </>
                     ) : (

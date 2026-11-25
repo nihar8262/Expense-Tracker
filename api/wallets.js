@@ -4,6 +4,8 @@ const {
   createWalletForUser,
   updateWalletForUser,
   createWalletMemberForUser,
+  verifyWalletMemberEmailForUser,
+  verifyRegisteredWalletMemberEmail,
   removeWalletMemberForUser,
   createWalletSettlementForUser,
   deleteWalletBudgetForUser,
@@ -162,6 +164,17 @@ module.exports = async function handler(request, response) {
 
   const segments = getRoutedSegments(request);
 
+  if (segments.length === 1 && segments[0] === "member-verification") {
+    if (request.method === "POST") {
+      try {
+        return sendResult(response, await verifyRegisteredWalletMemberEmail(request.body));
+      } catch (error) {
+        return response.status(500).json({ error: error instanceof Error ? error.message : "Failed to verify this member." });
+      }
+    }
+    return methodNotAllowed(response, "POST");
+  }
+
   if (segments.length === 0) {
     if (request.method === "GET") {
       try {
@@ -243,6 +256,17 @@ module.exports = async function handler(request, response) {
       }
     }
 
+    return methodNotAllowed(response, "POST");
+  }
+
+  if (resource === "members" && resourceId === "verify" && segments.length === 3) {
+    if (request.method === "POST") {
+      try {
+        return sendResult(response, await verifyWalletMemberEmailForUser(user.id, walletId, request.body));
+      } catch (error) {
+        return response.status(500).json({ error: error instanceof Error ? error.message : "Failed to verify this member." });
+      }
+    }
     return methodNotAllowed(response, "POST");
   }
 

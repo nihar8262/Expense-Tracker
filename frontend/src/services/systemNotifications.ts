@@ -90,6 +90,18 @@ function writeLocalSystemNotifications(userId: string, notifications: Notificati
   window.localStorage.setItem(inboxKey(userId), JSON.stringify(unique.slice(0, 100)));
 }
 
+export function cacheRemoteSystemNotifications(userId: string, notifications: Notification[]): Notification[] {
+  const dismissed = dismissedIds(userId);
+  const existing = listLocalSystemNotifications(userId);
+  const merged = [...new Map(
+    [...existing, ...notifications]
+      .filter((item) => !dismissed.has(item.id))
+      .map((item) => [item.id, item])
+  ).values()].sort((left, right) => right.created_at.localeCompare(left.created_at));
+  writeLocalSystemNotifications(userId, merged);
+  return merged;
+}
+
 export function importDetectedDebitNotifications(userId: string, debits: DetectedDebit[]) {
   const existing = listLocalSystemNotifications(userId);
   const existingIds = new Set(existing.map((item) => item.id));

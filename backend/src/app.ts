@@ -1,6 +1,6 @@
 import express from "express";
 import crypto from "node:crypto";
-import { authenticateBearerToken, type AuthenticatedUser, AuthenticationConfigurationError, AuthenticationError, deleteAuthenticatedUser } from "./auth.js";
+import { authenticateBearerToken, type AuthenticatedUser, AuthenticationConfigurationError, AuthenticationError, deleteAuthenticatedUser, findAuthenticatedUserByEmail } from "./auth.js";
 import {
   handleCreateBillReminder,
   handleCreateBudget,
@@ -354,6 +354,27 @@ export function createApp(store: ExpenseStore, authenticateRequest: RequestAuthe
       },
       "Failed to add wallet member."
     );
+  });
+
+  app.post("/api/wallets/:walletId/members/verify", async (request, response) => {
+    return withAuthenticatedUser(request, response, async (user) => {
+      const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) return response.status(400).json({ error: "Enter a valid email address." });
+      const wallet = await store.getWallet(user.id, request.params.walletId);
+      const isOwner = wallet.members.some((member) => member.user_id === user.id && member.role === "owner");
+      if (!isOwner) return response.status(403).json({ error: "Only the wallet owner can verify invited members." });
+      const account = await findAuthenticatedUserByEmail(email);
+      return response.status(200).json({ available: Boolean(account), email, displayName: account?.displayName ?? null });
+    }, "Failed to verify this member.");
+  });
+
+  app.post("/api/wallets/member-verification", async (request, response) => {
+    return withAuthenticatedUser(request, response, async () => {
+      const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) return response.status(400).json({ error: "Enter a valid email address." });
+      const account = await findAuthenticatedUserByEmail(email);
+      return response.status(200).json({ available: Boolean(account), email, displayName: account?.displayName ?? null });
+    }, "Failed to verify this member.");
   });
 
   app.delete("/api/wallets/:walletId/members/:memberId", async (request, response) => {

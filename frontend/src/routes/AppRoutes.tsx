@@ -21,13 +21,16 @@ import { cn } from "../components/ui";
 import { isAndroidApp } from "../utils/platform";
 import { preloadAndroidProfile } from "../services/profilePreload";
 import {
+  cacheRemoteSystemNotifications,
   deleteLocalSystemNotification,
   listLocalSystemNotifications,
   markAllLocalSystemNotificationsRead,
   markLocalSystemNotificationRead,
   importDetectedDebitNotifications,
   publishLocalBudgetAlerts,
-  publishUnreadSystemNotifications
+  publishUnreadSystemNotifications,
+  getSystemNotificationPermission,
+  requestSystemNotificationPermission
 } from "../services/systemNotifications";
 import { deleteDetectedDebit, getDetectedDebits, getNotificationReaderStatus, type DetectedDebit } from "../services/notificationReader";
 import { getSystemPushToken } from "../services/systemNotifications";
@@ -109,6 +112,19 @@ declare global {
 
 const EXPENSES_PAGE_SIZE = 20;
 const ANDROID_WHATS_NEW_VERSION = "local-first-release-v1";
+const billReminderCacheKey = (userId: string) => `finance-space.android-bill-reminders.${userId}`;
+
+function readCachedBillReminders(userId: string): BillReminder[] {
+  try {
+    return JSON.parse(window.localStorage.getItem(billReminderCacheKey(userId)) ?? "[]") as BillReminder[];
+  } catch {
+    return [];
+  }
+}
+
+function cacheBillReminders(userId: string, reminders: BillReminder[]) {
+  window.localStorage.setItem(billReminderCacheKey(userId), JSON.stringify(reminders));
+}
 
 function createInitialFormState(baseDate = new Date(), defaultBank?: BankAccount | null): ExpenseForm {
   return {
@@ -550,6 +566,8 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     deleteWalletGroup,
     leaveWalletGroup,
     addWalletMember,
+    verifyWalletMemberEmail,
+    verifyRegisteredWalletMemberEmail,
     removeWalletMember,
     createWalletBudget,
     updateWalletBudget,
@@ -1978,6 +1996,25 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
   }, [budgetHistoryRange, dashboardBudgetSummaries]);
 
   const unreadNotificationCount = useMemo(() => notifications.filter((notification) => notification.status === "unread").length, [notifications]);
+  const notificationPermissionRequestedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isAndroidApp || !currentUser || deviceSetupState !== "ready") return;
+    if (notificationPermissionRequestedForRef.current === currentUser.uid) return;
+    notificationPermissionRequestedForRef.current = currentUser.uid;
+
+    void (async () => {
+      const currentPermission = await getSystemNotificationPermission();
+      const permission = currentPermission.granted
+        ? currentPermission
+        : await requestSystemNotificationPermission();
+      if (permission.granted && notifications.length > 0) {
+        await publishUnreadSystemNotifications(notifications);
+      }
+    })().catch((error) => {
+      console.warn("Could not enable Android notification delivery:", error);
+    });
+  }, [currentUser, deviceSetupState]);
+
   useEffect(() => {
     if (isAndroidApp && notifications.length > 0) {
       void publishUnreadSystemNotifications(notifications).catch((error) => {
@@ -2147,7 +2184,8 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
       }
     } catch (error) {
       if (seq === walletRequestSeqRef.current && walletId === selectedWalletIdRef.current) {
-        setWalletErrorMessage(error instanceof Error ? error.message : "Failed to load wallet.");
+        const offline = isAndroidApp && (!navigator.onLine || (error instanceof ApiError && error.retryable));
+        setWalletErrorMessage(offline ? "You are offline. Connect to the internet to open and use a shared wallet." : error instanceof Error ? error.message : "Failed to load wallet.");
       }
     } finally {
       if (seq === walletRequestSeqRef.current && walletId === selectedWalletIdRef.current) {
@@ -2223,7 +2261,13 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
         ? importDetectedDebitNotifications(user.uid, await getDetectedDebits().catch(() => []))
         : [];
       const remoteNotifications = await listNotifications(user);
-      setNotifications([...localNotifications, ...remoteNotifications].sort((left, right) => right.created_at.localeCompare(left.created_at)));
+      const nextNotifications = isAndroidApp
+        ? cacheRemoteSystemNotifications(user.uid, [...localNotifications, ...remoteNotifications])
+        : remoteNotifications;
+      setNotifications(nextNotifications);
+      if (isAndroidApp && nextNotifications.some((notification) => notification.status === "unread")) {
+        await publishUnreadSystemNotifications(nextNotifications).catch((error) => console.warn("Could not publish Android notifications:", error));
+      }
     } catch (error) {
       if (isAndroidApp) setNotifications(listLocalSystemNotifications(user.uid));
       console.warn("Could not load notifications:", error);
@@ -2253,7 +2297,10 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
 
   async function runChecksAndReloadNotifications(user: User) {
     try {
-      await runNotificationChecks(user);
+      const createdNotifications = await runNotificationChecks(user);
+      if (isAndroidApp && createdNotifications.length > 0) {
+        await publishUnreadSystemNotifications(createdNotifications).catch((error) => console.warn("Could not publish Android reminder notifications:", error));
+      }
     } catch {
       // silently ignore check errors; still reload existing notifications
     }
@@ -2289,9 +2336,14 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
   }
 
   async function loadBillReminders(user: User) {
+    if (isAndroidApp) {
+      const cached = readCachedBillReminders(user.uid);
+      if (cached.length > 0) setBillReminders(cached);
+    }
     try {
       const entries = await listBillReminders(user);
       setBillReminders(entries);
+      if (isAndroidApp) cacheBillReminders(user.uid, entries);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to load bill reminders.");
     }
@@ -2880,6 +2932,10 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
   }, [currentUser, hasLoadedWallets, wallets]);
 
   const handleSelectWallet = useCallback((walletId: string | null) => {
+    if (walletId && isAndroidApp && !navigator.onLine) {
+      setWalletErrorMessage("You are offline. Connect to the internet to open and use a shared wallet.");
+      return;
+    }
     setSelectedWalletId(walletId);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
@@ -2961,6 +3017,16 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     } finally {
       endWalletSubmit();
     }
+  }
+
+  async function handleVerifyWalletMember(inputWalletId: string, email: string) {
+    if (!currentUser) throw new Error("Sign in to verify a wallet member.");
+    return verifyWalletMemberEmail(inputWalletId, email, currentUser);
+  }
+
+  async function handleVerifyRegisteredWalletMember(email: string) {
+    if (!currentUser) throw new Error("Sign in to verify a wallet member.");
+    return verifyRegisteredWalletMemberEmail(email, currentUser);
   }
 
   async function handleRemoveWalletMember(inputWalletId: string, memberId: string) {
@@ -3739,7 +3805,10 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     setIsRunningNotificationChecks(true);
 
     try {
-      await runNotificationChecks(currentUser);
+      const createdNotifications = await runNotificationChecks(currentUser);
+      if (isAndroidApp && createdNotifications.length > 0) {
+        await publishUnreadSystemNotifications(createdNotifications).catch((error) => console.warn("Could not publish Android reminder notifications:", error));
+      }
       await loadNotifications(currentUser);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : "Failed to run reminder checks.");
@@ -4505,6 +4574,8 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
             onDeleteWallet={handleDeleteWallet}
             onLeaveWallet={handleLeaveWallet}
             onAddWalletMember={handleAddWalletMember}
+            onVerifyWalletMember={handleVerifyWalletMember}
+            onVerifyRegisteredWalletMember={handleVerifyRegisteredWalletMember}
             onRemoveWalletMember={handleRemoveWalletMember}
             onCreateWalletExpense={handleCreateWalletExpense}
             onUpdateWalletExpense={handleUpdateWalletExpense}

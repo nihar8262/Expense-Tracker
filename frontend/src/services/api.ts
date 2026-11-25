@@ -3,7 +3,9 @@ import type { User } from "firebase/auth";
 import type {
   BillReminder,
   BillReminderRecurrence,
+  Budget,
   BudgetForm,
+  Expense,
   ExpenseForm,
   ExpensesQuery,
   Notification,
@@ -25,6 +27,29 @@ import type {
 import { ApiError } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export type DeviceSyncChange = {
+  sequence?: string;
+  dataset: "expenses" | "budgets";
+  operation: "upsert" | "delete";
+  record_id: string;
+  changed_at?: string;
+  record: Expense | Budget | null;
+};
+
+export type DeviceSyncPage = {
+  mode: "bootstrap" | "incremental";
+  cursor: string;
+  has_more: boolean;
+  changes: DeviceSyncChange[];
+};
+
+export async function getDeviceSyncPage(user: User, cursor: string | null, limit = 200): Promise<DeviceSyncPage> {
+  const endpoint = API_BASE_URL ? new URL("/api/device-sync", API_BASE_URL) : new URL("/api/device-sync", window.location.origin);
+  if (cursor) endpoint.searchParams.set("cursor", cursor);
+  endpoint.searchParams.set("limit", String(limit));
+  return apiRequest<DeviceSyncPage>(user, { url: endpoint.toString(), method: "GET" }, "Failed to load device changes.");
+}
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL || undefined,
@@ -167,13 +192,14 @@ export async function createExpense(payload: ExpenseForm, idempotencyKey: string
   return result.expense;
 }
 
-export async function updateExpense(expenseId: string, payload: ExpenseForm, user: User): Promise<void> {
+export async function updateExpense(expenseId: string, payload: ExpenseForm, user: User): Promise<Expense> {
   const endpoint = API_BASE_URL ? new URL(`/api/expenses/${expenseId}`, API_BASE_URL).toString() : `/api/expenses/${expenseId}`;
-  await apiRequest<void>(user, {
+  const result = await apiRequest<{ expense: Expense }>(user, {
     url: endpoint,
     method: "PUT",
     data: payload
   }, "Failed to update expense.");
+  return result.expense;
 }
 
 export async function deleteExpense(expenseId: string, user: User): Promise<void> {
@@ -196,10 +222,11 @@ export async function getPersonalAggregation(user: User): Promise<PersonalAggreg
   return apiRequest<PersonalAggregation>(user, { url: endpoint, method: "GET" }, "Failed to load expenses summary.");
 }
 
-export async function createBudget(payload: BudgetForm, user: User): Promise<void> {
-  await apiRequest<void>(user, {
+export async function createBudget(payload: BudgetForm, user: User, idempotencyKey?: string): Promise<Budget> {
+  const result = await apiRequest<{ budget: Budget }>(user, {
     url: buildBudgetsUrl(),
     method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
     data: {
       amount: payload.amount,
       scope: payload.scope,
@@ -207,11 +234,12 @@ export async function createBudget(payload: BudgetForm, user: User): Promise<voi
       month: payload.month
     }
   }, "Failed to save budget.");
+  return result.budget;
 }
 
-export async function updateBudget(budgetId: string, payload: BudgetForm, user: User): Promise<void> {
+export async function updateBudget(budgetId: string, payload: BudgetForm, user: User): Promise<Budget> {
   const endpoint = API_BASE_URL ? new URL(`/api/budgets/${budgetId}`, API_BASE_URL).toString() : `/api/budgets/${budgetId}`;
-  await apiRequest<void>(user, {
+  const result = await apiRequest<{ budget: Budget }>(user, {
     url: endpoint,
     method: "PUT",
     data: {
@@ -221,6 +249,7 @@ export async function updateBudget(budgetId: string, payload: BudgetForm, user: 
       month: payload.month
     }
   }, "Failed to update budget.");
+  return result.budget;
 }
 
 export async function deleteBudget(budgetId: string, user: User): Promise<void> {
@@ -277,6 +306,17 @@ export async function addWalletMember(walletId: string, payload: { displayName: 
     data: payload
   }, "Failed to add wallet member.");
   return body.wallet;
+}
+
+export async function verifyWalletMemberEmail(walletId: string, email: string, user: User): Promise<{ available: boolean; email: string; displayName?: string | null }> {
+  void walletId;
+  const endpoint = API_BASE_URL ? new URL("/api/wallets/member-verification", API_BASE_URL).toString() : "/api/wallets/member-verification";
+  return apiRequest(user, { url: endpoint, method: "POST", data: { email } }, "Failed to verify this member.");
+}
+
+export async function verifyRegisteredWalletMemberEmail(email: string, user: User): Promise<{ available: boolean; email: string; displayName?: string | null }> {
+  const endpoint = API_BASE_URL ? new URL("/api/wallets/member-verification", API_BASE_URL).toString() : "/api/wallets/member-verification";
+  return apiRequest(user, { url: endpoint, method: "POST", data: { email } }, "Failed to verify this member.");
 }
 
 export async function removeWalletMember(walletId: string, memberId: string, user: User): Promise<WalletDetail> {

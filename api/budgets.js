@@ -22,7 +22,9 @@ module.exports = async function handler(request, response) {
 
     if (request.method === "POST") {
       try {
-        const result = await createBudget(request.body, user.id);
+        const headerValue = request.headers["idempotency-key"];
+        const idempotencyKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+        const result = await createBudget(request.body, user.id, idempotencyKey);
         return sendResult(response, result);
       } catch {
         return response.status(500).json({ error: "Failed to create budget." });

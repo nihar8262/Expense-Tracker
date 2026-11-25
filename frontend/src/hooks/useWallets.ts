@@ -12,6 +12,8 @@ export function useWallets() {
     deleteWalletGroup: useCallback((walletId: string, user: User) => api.deleteWalletGroup(walletId, user), []),
     leaveWalletGroup: useCallback((walletId: string, user: User) => api.leaveWalletGroup(walletId, user), []),
     addWalletMember: useCallback((walletId: string, input: { displayName: string; email?: string }, user: User) => api.addWalletMember(walletId, input, user), []),
+    verifyWalletMemberEmail: useCallback((walletId: string, email: string, user: User) => api.verifyWalletMemberEmail(walletId, email, user), []),
+    verifyRegisteredWalletMemberEmail: useCallback((email: string, user: User) => api.verifyRegisteredWalletMemberEmail(email, user), []),
     removeWalletMember: useCallback((walletId: string, memberId: string, user: User) => api.removeWalletMember(walletId, memberId, user), []),
     createWalletBudget: useCallback((walletId: string, input: BudgetForm, user: User) => api.createWalletBudget(walletId, input, user), []),
     updateWalletBudget: useCallback((walletId: string, budgetId: string, input: BudgetForm, user: User) => api.updateWalletBudget(walletId, budgetId, input, user), []),

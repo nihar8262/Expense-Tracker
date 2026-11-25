@@ -1520,10 +1520,6 @@ async function respondToWalletInvite(user, walletMemberId, rawBody) {
     return { status: 404, body: { error: "Wallet invite not found." } };
   }
 
-  if (!user.emailVerified) {
-    return { status: 403, body: { error: "A verified email address is required to accept wallet invitations." } };
-  }
-
   const sql = getSqlClient();
   await ensureSchema(sql);
 
@@ -1642,6 +1638,35 @@ async function createWalletMemberForUser(userId, walletId, rawBody) {
   });
 
   return { status: 201, body: { wallet } };
+}
+
+async function verifyRegisteredWalletMemberEmail(rawBody) {
+  const email = typeof rawBody?.email === "string" ? rawBody.email.trim().toLowerCase() : "";
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    return { status: 400, body: { error: "Enter a valid email address." } };
+  }
+
+  try {
+    const account = await getAuth(getFirebaseAdminApp()).getUserByEmail(email);
+    return { status: 200, body: { available: true, email: account.email || email, displayName: account.displayName || null } };
+  } catch (error) {
+    if (error && error.code === "auth/user-not-found") {
+      return { status: 200, body: { available: false, email } };
+    }
+    throw error;
+  }
+}
+
+async function verifyWalletMemberEmailForUser(userId, walletId, rawBody) {
+  const sql = getSqlClient();
+  await ensureSchema(sql);
+  const walletRows = await sql`SELECT owner_user_id FROM wallets WHERE id = ${walletId}`;
+  if (!walletRows[0]) return { status: 404, body: { error: "Wallet not found." } };
+  await ensureWalletAccess(sql, userId, walletId);
+  if (walletRows[0].owner_user_id !== userId) {
+    return { status: 403, body: { error: "Only the wallet owner can verify invited members." } };
+  }
+  return verifyRegisteredWalletMemberEmail(rawBody);
 }
 
 async function removeWalletMemberForUser(userId, walletId, memberId) {
@@ -3442,6 +3467,8 @@ module.exports = {
   updateWalletBudgetForUser,
   deleteWalletBudgetForUser,
   createWalletMemberForUser,
+  verifyWalletMemberEmailForUser,
+  verifyRegisteredWalletMemberEmail,
   removeWalletMemberForUser,
   respondToWalletInvite,
   createWalletExpenseForUser,

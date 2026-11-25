@@ -2,6 +2,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const { z } = require("zod");
 const { saveEmbedding, deleteEmbedding } = require("./embeddings-helper");
 const { getSqlClient } = require("./db");
+const { appendDeviceSyncChange, ensureDeviceSyncSchema } = require("./device-sync");
 
 function parseAmountToMinorUnits(value) {
   const raw = typeof value === "number" ? value.toString() : String(value ?? "");
@@ -110,6 +111,7 @@ function mapExpense(row) {
     description: row.description,
     date: asIsoDate(row.expense_date),
     created_at: asIsoTimestamp(row.created_at),
+    updated_at: asIsoTimestamp(row.updated_at || row.created_at),
     platform: row.platform ?? null,
     bank_account_id: row.bank_account_id ?? null,
     bank_name: row.bank_name ?? null
@@ -203,6 +205,7 @@ async function listExpenses(rawQuery, userId) {
 
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
   const { limit, offset, category, platform, search, sort } = result.data;
   let fromDate = result.data.from_date;
@@ -410,6 +413,7 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
 
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
   try {
     const created = await sql.begin(async (tx) => {
@@ -425,15 +429,16 @@ async function createExpense(rawBody, rawIdempotencyKey, userId) {
       const createdAt = new Date().toISOString();
 
       const insertedExpenses = await tx`
-        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name)
-        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt}, ${result.data.platform ?? null}, ${result.data.bankAccountId ?? null}, ${result.data.bankName ?? null})
-        RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
+        INSERT INTO expenses (id, user_id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name)
+        VALUES (${expenseId}, ${userId}, ${result.data.amount}, ${result.data.category.trim()}, ${result.data.description.trim()}, ${result.data.date}, ${createdAt}, ${createdAt}, ${result.data.platform ?? null}, ${result.data.bankAccountId ?? null}, ${result.data.bankName ?? null})
+        RETURNING id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name
       `;
 
       await tx`
         INSERT INTO idempotency_requests (idempotency_key, request_hash, expense_id, created_at)
         VALUES (${scopedIdempotencyKey}, ${requestHash}, ${expenseId}, ${createdAt})
       `;
+      await appendDeviceSyncChange(tx, userId, "expenses", expenseId, "upsert");
 
       return {
         expense: mapExpense(insertedExpenses[0]),
@@ -479,19 +484,25 @@ async function updateExpense(rawBody, expenseId, userId) {
 
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
-  const rows = await sql`
-    UPDATE expenses
-    SET amount_minor = ${result.data.amount},
+  const rows = await sql.begin(async (tx) => {
+    const updated = await tx`
+      UPDATE expenses
+      SET amount_minor = ${result.data.amount},
         category = ${result.data.category.trim()},
         description = ${result.data.description.trim()},
         expense_date = ${result.data.date},
         platform = ${result.data.platform ?? null},
         bank_account_id = COALESCE(${result.data.bankAccountId !== undefined ? result.data.bankAccountId : null}, bank_account_id),
-        bank_name = COALESCE(${result.data.bankName !== undefined ? result.data.bankName : null}, bank_name)
-    WHERE id = ${expenseId} AND user_id = ${userId}
-    RETURNING id, amount_minor, category, description, expense_date, created_at, platform, bank_account_id, bank_name
-  `;
+        bank_name = COALESCE(${result.data.bankName !== undefined ? result.data.bankName : null}, bank_name),
+        updated_at = NOW()
+      WHERE id = ${expenseId} AND user_id = ${userId}
+      RETURNING id, amount_minor, category, description, expense_date, created_at, updated_at, platform, bank_account_id, bank_name
+    `;
+    if (updated[0]) await appendDeviceSyncChange(tx, userId, "expenses", expenseId, "upsert");
+    return updated;
+  });
 
   if (!rows[0]) {
     return {
@@ -512,6 +523,7 @@ async function updateExpense(rawBody, expenseId, userId) {
 async function deleteExpense(expenseId, userId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
+  await ensureDeviceSyncSchema(sql);
 
   const deleted = await sql.begin(async (tx) => {
     const rows = await tx`
@@ -533,6 +545,7 @@ async function deleteExpense(expenseId, userId) {
       DELETE FROM expenses
       WHERE id = ${expenseId} AND user_id = ${userId}
     `;
+    await appendDeviceSyncChange(tx, userId, "expenses", expenseId, "delete");
 
     return true;
   });

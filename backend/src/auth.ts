@@ -75,6 +75,16 @@ export async function deleteAuthenticatedUser(userId: string): Promise<void> {
   }
 }
 
+export async function findAuthenticatedUserByEmail(email: string): Promise<{ email: string; displayName: string | null } | null> {
+  try {
+    const user = await getFirebaseAuth().getUserByEmail(email.trim().toLowerCase());
+    return user.email ? { email: user.email, displayName: user.displayName ?? null } : null;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "auth/user-not-found") return null;
+    throw error;
+  }
+}
+
 export async function authenticateBearerToken(headerValue: string | undefined): Promise<AuthenticatedUser> {
   const token = headerValue?.startsWith("Bearer ") ? headerValue.slice(7).trim() : "";
 

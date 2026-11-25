@@ -1452,15 +1452,6 @@ export async function handleRespondToWalletInvite(rawBody: unknown, walletMember
     };
   }
 
-  if (user.emailVerified === false) {
-    return {
-      status: 403,
-      body: {
-        error: "A verified email address is required to accept wallet invitations."
-      }
-    };
-  }
-
   try {
     await store.respondToWalletInvite(user.id, { email: user.email ?? null, name: user.name ?? null }, walletMemberId, result.data.action);
     return {
