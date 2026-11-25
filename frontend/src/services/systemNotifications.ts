@@ -92,7 +92,9 @@ function writeLocalSystemNotifications(userId: string, notifications: Notificati
 
 export function cacheRemoteSystemNotifications(userId: string, notifications: Notification[]): Notification[] {
   const dismissed = dismissedIds(userId);
-  const existing = listLocalSystemNotifications(userId);
+  // A successful server response is authoritative for remote notifications.
+  // Preserve only device-owned entries; otherwise deleted server alerts linger in the offline cache.
+  const existing = listLocalSystemNotifications(userId).filter((item) => item.id.startsWith("local-"));
   const merged = [...new Map(
     [...existing, ...notifications]
       .filter((item) => !dismissed.has(item.id))

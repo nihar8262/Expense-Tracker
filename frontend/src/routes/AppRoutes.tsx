@@ -2257,12 +2257,12 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
   async function loadNotifications(user: User) {
     if (!isAndroidApp) setIsNotificationsLoading(true);
     try {
-      const localNotifications = isAndroidApp
-        ? importDetectedDebitNotifications(user.uid, await getDetectedDebits().catch(() => []))
-        : [];
+      if (isAndroidApp) {
+        importDetectedDebitNotifications(user.uid, await getDetectedDebits().catch(() => []));
+      }
       const remoteNotifications = await listNotifications(user);
       const nextNotifications = isAndroidApp
-        ? cacheRemoteSystemNotifications(user.uid, [...localNotifications, ...remoteNotifications])
+        ? cacheRemoteSystemNotifications(user.uid, remoteNotifications)
         : remoteNotifications;
       setNotifications(nextNotifications);
       if (isAndroidApp && nextNotifications.some((notification) => notification.status === "unread")) {
@@ -2501,12 +2501,6 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
     void loadReminderPreferences(currentUser);
     void loadNotifications(currentUser);
 
-    // Defer heavy background checks by 12s to prioritize instant rendering of critical data
-    const checksTimer = setTimeout(() => {
-      void runChecksAndReloadNotifications(currentUser);
-    }, 12000);
-
-    return () => clearTimeout(checksTimer);
   }, [authLoading, currentUser, deviceSetupState]);
 
   useEffect(() => {
@@ -2535,11 +2529,6 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
       window.removeEventListener("detected-debits", handleDetectedDebits);
     };
   }, [currentUser, deviceSetupState]);
-
-  useEffect(() => {
-    if (!currentUser || !isAndroidApp || deviceSetupState !== "ready" || !reminderPreferences) return;
-    void runLocalBudgetChecks(currentUser).catch((error) => console.warn("Could not check local budgets:", error));
-  }, [currentUser, reminderPreferences, deviceSetupState]);
 
   useEffect(() => {
     if (!currentUser || !isAndroidApp) return;
@@ -3740,9 +3729,15 @@ export function AppRoutes({ onAuthReady, onSignedOut }: AppRoutesProps) {
 
     try {
       await deleteNotification(notificationId, currentUser);
+      if (isAndroidApp) deleteLocalSystemNotification(currentUser.uid, notificationId);
       setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
       return true;
     } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        if (isAndroidApp) deleteLocalSystemNotification(currentUser.uid, notificationId);
+        setNotifications((current) => current.filter((notification) => notification.id !== notificationId));
+        return true;
+      }
       setAuthMessage(error instanceof Error ? error.message : "Failed to delete notification.");
       return false;
     }

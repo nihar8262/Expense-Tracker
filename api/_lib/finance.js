@@ -668,6 +668,7 @@ async function ensureSchema(sql) {
       });
       await safeSchemaStep("create wallet_loan_repayments table", () => sql`CREATE TABLE IF NOT EXISTS wallet_loan_repayments (id UUID PRIMARY KEY, loan_id UUID NOT NULL REFERENCES wallet_loans(id) ON DELETE CASCADE, amount_minor BIGINT NOT NULL CHECK (amount_minor > 0), repayment_date DATE NOT NULL, notes VARCHAR(280), created_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("create notifications table", () => sql`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY, user_id TEXT NOT NULL, notification_type VARCHAR(32) NOT NULL CHECK (notification_type IN ('budget-threshold', 'budget-overspent', 'daily-log', 'bill-due', 'wallet-invite', 'invite-response', 'loan-issued', 'loan-overdue', 'loan-repayment')), title VARCHAR(120) NOT NULL, message VARCHAR(280) NOT NULL, notification_status VARCHAR(16) NOT NULL CHECK (notification_status IN ('unread', 'read')), scheduled_for TIMESTAMPTZ, metadata_json TEXT, dedupe_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, UNIQUE (user_id, dedupe_key))`);
+      await safeSchemaStep("create notification dismissals table", () => sql`CREATE TABLE IF NOT EXISTS notification_dismissals (user_id TEXT NOT NULL, dedupe_key TEXT NOT NULL, dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (user_id, dedupe_key))`);
       await safeSchemaStep("create device push tokens table", () => sql`CREATE TABLE IF NOT EXISTS device_push_tokens (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, platform VARCHAR(16) NOT NULL CHECK (platform IN ('android')), created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)`);
       await safeSchemaStep("device push tokens user index", () => sql`CREATE INDEX IF NOT EXISTS device_push_tokens_user_id_idx ON device_push_tokens (user_id)`);
       await safeSchemaStep("create reminder_preferences table", () => sql`CREATE TABLE IF NOT EXISTS reminder_preferences (user_id TEXT PRIMARY KEY, daily_logging_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_logging_hour INTEGER NOT NULL DEFAULT 20 CHECK (daily_logging_hour BETWEEN 0 AND 23), budget_alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE, budget_alert_threshold INTEGER NOT NULL DEFAULT 80 CHECK (budget_alert_threshold BETWEEN 1 AND 100), updated_at TIMESTAMPTZ NOT NULL)`);
@@ -3025,7 +3026,12 @@ async function markNotificationReadForUser(userId, notificationId) {
 async function deleteNotificationForUser(userId, notificationId) {
   const sql = getSqlClient();
   await ensureSchema(sql);
-  const rows = await sql`DELETE FROM notifications WHERE id = ${notificationId} AND user_id = ${userId} RETURNING id`;
+  const rows = await sql.begin(async (tx) => {
+    const found = await tx`SELECT id, dedupe_key FROM notifications WHERE id = ${notificationId} AND user_id = ${userId}`;
+    if (!found[0]) return [];
+    await tx`INSERT INTO notification_dismissals (user_id, dedupe_key, dismissed_at) VALUES (${userId}, ${found[0].dedupe_key}, NOW()) ON CONFLICT (user_id, dedupe_key) DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at`;
+    return tx`DELETE FROM notifications WHERE id = ${notificationId} AND user_id = ${userId} RETURNING id`;
+  });
   if (!rows[0]) {
     return { status: 404, body: { error: "Notification not found." } };
   }
@@ -3075,6 +3081,8 @@ async function updateReminderPreferencesForUser(userId, rawBody) {
 }
 
 async function upsertNotification(sql, input) {
+  const dismissed = await sql`SELECT 1 FROM notification_dismissals WHERE user_id = ${input.userId} AND dedupe_key = ${input.dedupeKey} LIMIT 1`;
+  if (dismissed[0]) return null;
   const rows = await sql`INSERT INTO notifications (id, user_id, notification_type, title, message, notification_status, scheduled_for, metadata_json, dedupe_key, created_at) VALUES (${randomUUID()}, ${input.userId}, ${input.type}, ${input.title}, ${input.message}, ${"unread"}, ${input.scheduledFor}, ${input.metadata ? JSON.stringify(input.metadata) : null}, ${input.dedupeKey}, ${new Date().toISOString()}) ON CONFLICT (user_id, dedupe_key) DO NOTHING RETURNING id, user_id, notification_type, title, message, notification_status, created_at, scheduled_for, metadata_json, dedupe_key`;
   if (!rows[0]) return null;
   const notification = mapNotification(rows[0]);
@@ -3379,6 +3387,9 @@ async function deleteUserData(userId) {
 
     if (hasTable("notifications")) {
       await tx`DELETE FROM notifications WHERE user_id = ${userId}`;
+    }
+    if (hasTable("notification_dismissals")) {
+      await tx`DELETE FROM notification_dismissals WHERE user_id = ${userId}`;
     }
     if (hasTable("reminder_preferences")) {
       await tx`DELETE FROM reminder_preferences WHERE user_id = ${userId}`;
