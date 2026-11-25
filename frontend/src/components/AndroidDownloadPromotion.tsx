@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { ArrowRight, Download, Smartphone, X } from "lucide-react";
 import { isAndroidApp } from "../utils/platform";
 
-const APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.1";
+const APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.1.1";
 const RELEASE_KEY = `expense-tracker.android-release.${APP_VERSION}`;
 
 type AndroidDownloadPromotionProps = {

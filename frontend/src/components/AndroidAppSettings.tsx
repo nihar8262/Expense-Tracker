@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User } from "firebase/auth";
-import { BellRing, Database, History, LoaderCircle, RefreshCw, ShieldCheck, Smartphone, X } from "lucide-react";
+import { BellRing, Database, Download, History, LoaderCircle, RefreshCw, ShieldCheck, Smartphone, X } from "lucide-react";
 import { ModalFrame, SurfaceCard } from "./ui";
 import { FilterDropdown } from "./FilterDropdown";
 import {
@@ -21,6 +21,7 @@ import {
   getSystemNotificationPermission,
   requestSystemNotificationPermission
 } from "../services/systemNotifications";
+import { checkForAppUpdate, openAppUpdate, type AppUpdateInfo } from "../services/appUpdates";
 
 type SettingRowProps = {
   icon: typeof Smartphone;
@@ -77,8 +78,9 @@ export function AndroidAppSettings({ currentUser }: { currentUser: User }) {
   const [storageStatus, setStorageStatus] = useState(initialStatus);
   const [notificationStatus, setNotificationStatus] = useState<NotificationReaderStatus>({ enabled: false, detectedCount: 0 });
   const [systemNotificationsEnabled, setSystemNotificationsEnabled] = useState(false);
-  const [busyAction, setBusyAction] = useState<"notifications" | "storage" | "sync" | null>(null);
+  const [busyAction, setBusyAction] = useState<"notifications" | "storage" | "sync" | "updates" | null>(null);
   const [message, setMessage] = useState("");
+  const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
   const [syncStage, setSyncStage] = useState<DeviceSyncStage | null>(null);
   const [syncHistory, setSyncHistory] = useState<DeviceSyncHistoryEntry[]>([]);
   const [isSyncHistoryOpen, setIsSyncHistoryOpen] = useState(false);
@@ -203,6 +205,28 @@ export function AndroidAppSettings({ currentUser }: { currentUser: User }) {
     setIsSyncHistoryOpen(true);
   }
 
+  async function handleAppUpdate() {
+    if (appUpdate?.updateAvailable) {
+      await openAppUpdate(appUpdate.downloadUrl).catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Could not open the app update.");
+      });
+      return;
+    }
+    setBusyAction("updates");
+    setMessage("");
+    try {
+      const update = await checkForAppUpdate();
+      setAppUpdate(update);
+      setMessage(update.updateAvailable
+        ? `Android v${update.latestVersion} is available. Download it to update this installation without clearing local data.`
+        : `Expense Tracker v${update.installedVersion} is the latest available version.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not check for app updates.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   const lastSyncLabel = (() => {
     if (!storageStatus.lastSyncedAt) return "Never";
     const syncedAt = new Date(storageStatus.lastSyncedAt);
@@ -262,6 +286,19 @@ export function AndroidAppSettings({ currentUser }: { currentUser: User }) {
       </div>
 
       <div className="space-y-2.5">
+        <SettingRow
+          icon={Download}
+          title="App updates"
+          description={appUpdate?.updateAvailable
+            ? `Android v${appUpdate.latestVersion} is ready to download. Android will verify the signature before updating this app.`
+            : appUpdate
+              ? `Installed version ${appUpdate.installedVersion}. No newer GitHub release was found.`
+              : "Check your installed version against the latest signed APK published on GitHub Releases."}
+          status={appUpdate?.updateAvailable ? "Available" : appUpdate ? "Up to date" : "Manual"}
+          action={appUpdate?.updateAvailable ? `Download v${appUpdate.latestVersion}` : "Check now"}
+          busy={busyAction === "updates"}
+          onClick={() => void handleAppUpdate()}
+        />
         <SettingRow
           icon={BellRing}
           title="Android app notifications"
