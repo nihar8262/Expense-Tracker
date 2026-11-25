@@ -1,8 +1,21 @@
 const crypto = require("node:crypto");
 const { runReminderChecks, runReminderChecksForUser } = require("./_lib/finance");
+const { getDeviceSyncPage } = require("./_lib/device-sync");
 const { authenticateUser, getRoutedSegments, methodNotAllowed, notFound, sendResult } = require("./_lib/route-utils");
 
 module.exports = async function handler(request, response) {
+  if (request.query.deviceSync === "true") {
+    const user = await authenticateUser(request, response);
+    if (!user) return undefined;
+    if (request.method !== "GET") return methodNotAllowed(response, "GET");
+    try {
+      return sendResult(response, await getDeviceSyncPage(user.id, request.query.cursor, request.query.limit));
+    } catch (error) {
+      console.error("Device sync feed failed.", error);
+      return response.status(500).json({ error: "Failed to load device changes." });
+    }
+  }
+
   if (request.query.health === "true" || (request.query.route && request.query.route === "health")) {
     return response.status(200).json({ ok: true });
   }

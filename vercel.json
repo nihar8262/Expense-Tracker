@@ -87,6 +87,10 @@
       "destination": "/api/internal?health=true"
     },
     {
+      "source": "/api/device-sync",
+      "destination": "/api/internal?deviceSync=true"
+    },
+    {
       "source": "/api/reminder-preferences",
       "destination": "/api/bill-reminders?preferences=true"
     },
