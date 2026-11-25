@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { ArrowRight, Download, Smartphone, X } from "lucide-react";
 import { isAndroidApp } from "../utils/platform";
 
-const APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.0";
+const APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.1";
 const RELEASE_KEY = `expense-tracker.android-release.${APP_VERSION}`;
 
 type AndroidDownloadPromotionProps = {
@@ -51,7 +51,7 @@ export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPro
               <Smartphone className="h-5 w-5" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-100 sm:text-[11px] sm:tracking-[0.12em]">Now available for Android</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-100 sm:text-[11px] sm:tracking-[0.12em]">Android v{APP_VERSION} available</p>
               <p className="mt-0.5 text-[11px] leading-4 text-white/85 sm:text-sm sm:leading-5">Faster access, offline storage, manual sync, and debit notification detection.</p>
             </div>
             <NavLink
@@ -82,7 +82,7 @@ export function AndroidDownloadPromotion({ isAuthenticated }: AndroidDownloadPro
                   <img src="/Glossy-logo.png" alt="Expense Tracker Android app" className="h-full w-full object-contain" />
                 </div>
                 <div className="text-center sm:text-left">
-                  <p className="section-eyebrow text-primary">A faster way to track</p>
+                  <p className="section-eyebrow text-primary">Android v{APP_VERSION} · A faster way to track</p>
                   <h2 id="android-release-title" className="mt-1.5 font-display text-2xl font-bold leading-[1.05] tracking-[-0.035em] text-ink min-[390px]:text-3xl sm:mt-2 sm:text-4xl">Expense Tracker is now on Android</h2>
                   <p className="mt-2 text-xs leading-5 text-secondary min-[390px]:text-sm min-[390px]:leading-6 sm:mt-3">Keep your day-to-day finance data on your device, detect debit alerts, and decide exactly when to sync.</p>
                   <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] font-semibold text-emerald-900 sm:justify-start">

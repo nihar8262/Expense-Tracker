@@ -9,6 +9,7 @@ backend/data
 .idea/
 *.jks
 *.keystore
+*.apk
 frontend/android/app/google-services.json
 frontend/android/keystore.properties
 frontend/android/app/release/

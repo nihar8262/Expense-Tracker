@@ -25,8 +25,8 @@ import { readProfilePreload, writeProfilePreload } from "../services/profilePrel
 import { BellRing, Download, HardDrive, ShieldCheck, Smartphone } from "lucide-react";
 
 const ANDROID_APK_URL = (import.meta.env.VITE_ANDROID_APK_URL as string | undefined)?.trim()
-  || "https://github.com/nihar8262/Expense-Tracker/releases/download/v1.0/expense-tracker-v1.0.apk";
-const ANDROID_APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.0";
+  || "https://github.com/nihar8262/Expense-Tracker/releases/download/v1.1/expense-tracker-v1.1.apk";
+const ANDROID_APP_VERSION = (import.meta.env.VITE_ANDROID_APP_VERSION as string | undefined)?.trim() || "1.1";
 
 function compressImage(file: File, maxWidth = 160, maxHeight = 160): Promise<string> {
   return new Promise((resolve, reject) => {
